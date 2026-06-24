@@ -21,6 +21,7 @@ Common commands:
 ```sh
 clojure -M:todo --db /tmp/todo-agent.sqlite init
 clojure -M:todo --db /tmp/todo-agent.sqlite --format edn list
+clojure -M:test
 clojure -M:repl
 clojure -M:run
 ```
@@ -61,10 +62,11 @@ For the full CLI and REPL contracts, read the root specs linked above instead of
 Primary validation:
 
 ```sh
+PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test
 PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 ```
 
-The smoke demo recreates `smoke.sqlite`, exercises the CLI subprocess path, exercises REPL helpers, and prints JSON1/graph query examples.
+The unit test suite covers parser and database behavior. The smoke demo recreates `smoke.sqlite`, exercises the CLI subprocess path, exercises REPL helpers, and prints JSON1/graph query examples.
 
 After validation, `git status --short` should not show generated SQLite or cache artifacts.
 

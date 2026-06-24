@@ -26,9 +26,10 @@ PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 
 ## Quickstart
 
-Run the smoke demo:
+Run the unit tests and smoke demo:
 
 ```sh
+clojure -M:test
 clojure -M:smoke
 ```
 
