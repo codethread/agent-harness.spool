@@ -14,7 +14,7 @@ Root specs are canonical for shipped behavior:
 
 ## Active features
 
-None.
+- `batch-task-refs` — planned stdin EDN batch task creation with batch-local refs.
 
 ## Archived features
 
