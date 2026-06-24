@@ -19,7 +19,7 @@ Deliver stdin-driven batch task creation for agents: one EDN vector creates mult
 - **PLAN-001.A1:** Add shared batch validation and creation logic in the database layer so transactionality and ref resolution are tested independently from the CLI.
 - **PLAN-001.A2:** Validate the entire batch shape before writing: exactly one EDN value, vector container, non-empty tasks, required non-blank string titles, JSON-object-encodable attributes, no unknown task or edge keys, unique symbolic refs, edge vector shape, non-blank string edge types, and symbol-or-string targets.
 - **PLAN-001.A3:** Execute one transaction for the whole batch. Create all tasks first, build an in-memory `ref -> generated-id` map, resolve all edge targets, verify string durable targets exist, then insert edges.
-- **PLAN-001.A4:** Preserve existing single-task APIs. The existing `add`, `link`, and creation-time `--link` behavior should not change.
+- **PLAN-001.A4:** Preserve existing single-task command shapes. While implementing generic batch edges, align shared edge validation with the root task model by accepting any non-blank edge type through `link`, `add --link`, and the database helper.
 - **PLAN-001.A5:** Add a `batch` CLI command that accepts no args/options, reads EDN from `*in*`, calls the shared batch operation, and formats output through existing normalization/output modes.
 - **PLAN-001.A6:** Return a result containing created task rows in input order and a ref mapping. Use string ref names in both EDN and JSON output, for example `{:refs {"design" "abc12"}}`, so agents can consume one stable shape across machine-readable formats.
 
@@ -38,7 +38,7 @@ Deliver stdin-driven batch task creation for agents: one EDN vector creates mult
 - **PLAN-001.CM1:** CLI contract changes are staged in `specs/cli.delta.md`; root `cli.md` should be updated only when the feature ships.
 - **PLAN-001.CM2:** Task-model clarification is staged in `specs/task-model.delta.md`; no SQLite schema migration is required.
 - **PLAN-001.CM3:** Existing databases remain compatible because the feature only adds a new write path using current `tasks` and `task_edges` tables.
-- **PLAN-001.CM4:** Existing CLI commands remain unchanged; no backwards compatibility shim is needed for this alpha feature.
+- **PLAN-001.CM4:** Existing CLI command shapes remain unchanged. Edge-type validation is broadened to match the root task model's open-ended edge-type contract; no backwards compatibility shim is needed for this alpha feature.
 
 ## PLAN-001.P5 Implementation phases
 
@@ -72,7 +72,7 @@ Outcome: README/agent examples and smoke coverage demonstrate the batch command,
 - **PLAN-001.TC1:** RFC-001 is accepted and council-approved; do not reopen the file-vs-stdin or generic-edge decisions without new user direction.
 - **PLAN-001.TC2:** Keep refs ephemeral. Do not write `:ref` into task attributes or any database column.
 - **PLAN-001.TC3:** The key invariant is all-or-nothing batch creation. Prefer failing before writes when possible, but any write-time failure must roll back the entire batch.
-- **PLAN-001.TC4:** Preserve current generated id behavior and current `add --link` behavior.
+- **PLAN-001.TC4:** Preserve current generated id behavior and current `add --link` command shape; edge-type validation should be generic across all write paths.
 
 ## PLAN-001.P9 Developer Notes
 

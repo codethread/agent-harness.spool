@@ -73,3 +73,80 @@
         (is (= [design] (mapv :id (db/task-dependencies ds schema))))
         (is (= [schema] (mapv :id (db/blocking-tasks ds design))))
         (is (= #{design schema} (set (mapv :id (db/transitive-dependencies ds docs)))))))))
+
+(deftest edge-schema-validation
+  (with-db
+    (fn [ds]
+      (let [a (:id (db/add-task! ds {:title "A" :attributes {}}))
+            b (:id (db/add-task! ds {:title "B" :attributes {}}))
+            c (:id (db/add-task! ds {:title "C" :attributes {}}))]
+        (testing "generic non-blank edge types are accepted"
+          (is (some? (db/add-edge! ds {:from a :to b :type "related-to" :attributes {}})))
+          (is (some? (db/add-edge! ds {:from a :to c :type "parent-of" :attributes {}})))
+          (is (some? (db/add-edge! ds {:from b :to c :type "supersedes" :attributes {}})))
+          (is (some? (db/add-edge! ds {:from a :to b :type "mentions" :attributes {}})))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Invalid edge"
+                                (db/add-edge! ds {:from a :to b :type "" :attributes {}}))))))))
+
+(deftest batch-creation-resolves-refs-and-existing-ids
+  (with-db
+    (fn [ds]
+      (let [existing (:id (db/add-task! ds {:title "Existing" :attributes {}}))
+            result (db/add-task-batch!
+                    ds
+                    [{:ref 'design
+                      :title "Design"
+                      :attributes {:status "done"}}
+                     {:ref 'docs
+                      :title "Docs"
+                      :edges [{:type "depends-on" :to 'design}
+                              {:type "related-to" :to existing :attributes {:kind "prior"}}]}])
+            refs (:refs result)
+            docs-id (get refs "docs")]
+        (is (= #{"design" "docs"} (set (keys refs))))
+        (is (= 2 (count (:created result))))
+        (is (= [(get refs "design")] (mapv :id (db/task-dependencies ds docs-id))))
+        (is (= #{"depends-on" "related-to"}
+               (set (map :edge_type (db/related-tasks ds docs-id)))))))))
+
+(deftest batch-creation-preserves-namespaced-ref-identity
+  (with-db
+    (fn [ds]
+      (let [result (db/add-task-batch!
+                    ds
+                    [{:ref 'foo/design :title "Foo design"}
+                     {:ref 'bar/design :title "Bar design"}
+                     {:ref 'docs
+                      :title "Docs"
+                      :edges [{:type "depends-on" :to 'foo/design}]}])
+            refs (:refs result)]
+        (is (= #{"foo/design" "bar/design" "docs"} (set (keys refs))))
+        (is (= [(get refs "foo/design")]
+               (mapv :id (db/task-dependencies ds (get refs "docs")))))))))
+
+(deftest batch-creation-rolls-back-on-invalid-edge-target
+  (with-db
+    (fn [ds]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"symbolic targets only resolve to batch refs"
+                            (db/add-task-batch!
+                             ds
+                             [{:ref 'docs
+                               :title "Docs"
+                               :edges [{:type "depends-on" :to 'missing}]}])))
+      (is (empty? (db/all-tasks ds))))))
+
+(deftest batch-creation-validates-input-shape
+  (with-db
+    (fn [ds]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate batch ref"
+                            (db/add-task-batch! ds [{:ref 'x :title "A"}
+                                                    {:ref 'x :title "B"}])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown keys"
+                            (db/add-task-batch! ds [{:title "A" :edge []}])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Attributes must be nil or an EDN map"
+                            (db/add-task-batch! ds [{:title "A" :attributes {:status 'todo}}]))))))

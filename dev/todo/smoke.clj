@@ -20,7 +20,7 @@
    {:from :docs :to :tui :type "depends-on" :attributes {:reason "document real commands"}}
    {:from :release :to :docs :type "depends-on" :attributes {:reason "ship docs"}}
    {:from :release :to :tui :type "depends-on" :attributes {:reason "ship UI"}}
-   {:from :docs :to :design :type "mentions" :attributes {:section "architecture"}}])
+   {:from :docs :to :design :type "related-to" :attributes {:section "architecture"}}])
 
 (defn section [title rows]
   (println "\n--" title "--")
@@ -36,16 +36,21 @@
   (doseq [suffix ["" "-journal" "-wal" "-shm"]]
     (.delete (java.io.File. (str db-file suffix)))))
 
-(defn run-cli! [db-file & args]
+(defn run-cli-with-input! [db-file input & args]
   (let [command (into ["clojure" "-M:todo" "--db" db-file] args)
         process (-> (ProcessBuilder. command)
                     (.redirectErrorStream true)
-                    (.start))
-        output (slurp (.getInputStream process))
-        exit-code (.waitFor process)]
-    (assert (= 0 exit-code)
-            (str "CLI command succeeds: " (pr-str command) "\n" output))
-    output))
+                    (.start))]
+    (with-open [writer (java.io.OutputStreamWriter. (.getOutputStream process))]
+      (.write writer (or input "")))
+    (let [output (slurp (.getInputStream process))
+          exit-code (.waitFor process)]
+      (assert (= 0 exit-code)
+              (str "CLI command succeeds: " (pr-str command) "\n" output))
+      output)))
+
+(defn run-cli! [db-file & args]
+  (apply run-cli-with-input! db-file nil args))
 
 (defn cli-add! [db-file title & args]
   (str/trim (apply run-cli! db-file "add" title args)))
@@ -67,7 +72,15 @@
       (assert= ["Sketch task graph model"] (titles (read-string (run-cli! cli-db "--format" "edn" "deps" schema))) "CLI process deps queries graph relationships")
       (assert= #{"Sketch task graph model" "Create SQLite schema"} (set (titles (read-string (run-cli! cli-db "--format" "edn" "transitive-deps" docs)))) "CLI process transitive-deps traverses graph relationships")
       (run-cli! cli-db "done" schema)
-      (assert= ["Write usage notes"] (titles (read-string (run-cli! cli-db "--format" "edn" "ready"))) "CLI process done updates status used by ready"))
+      (assert= ["Write usage notes"] (titles (read-string (run-cli! cli-db "--format" "edn" "ready"))) "CLI process done updates status used by ready")
+      (let [batch-result (read-string (run-cli-with-input!
+                                       cli-db
+                                       "[{:ref batch-design :title \"Batch design\" :attributes {:status \"done\"}} {:ref batch-docs :title \"Batch docs\" :edges [{:type \"depends-on\" :to batch-design}]}]"
+                                       "--format" "edn" "batch"))
+            batch-refs (:refs batch-result)]
+        (assert= ["Batch design"]
+                 (titles (read-string (run-cli! cli-db "--format" "edn" "deps" (get batch-refs "batch-docs"))))
+                 "CLI process batch resolves symbolic refs")))
     (section "agent CLI process ready" (read-string (run-cli! cli-db "--format" "edn" "ready")))
     (section "agent CLI process by-attr owner=agent" (json/read-str (run-cli! cli-db "--format" "json" "by-attr" "owner" "agent") :key-fn keyword))
     (db/reset-db! ds)

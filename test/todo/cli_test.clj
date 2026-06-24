@@ -44,8 +44,8 @@
   (testing "repeatable CLI links parse edge type and target id"
     (is (= {:attrs {}
             :links [{:type "depends-on" :to "ue72w"}
-                    {:type "mentions:external" :to "ab123"}]}
-           (cli/parse-command-options ["--link" "depends-on:ue72w" "--link" "mentions:external:ab123"] "summary")))))
+                    {:type "related-to" :to "ab123"}]}
+           (cli/parse-command-options ["--link" "depends-on:ue72w" "--link" "related-to:ab123"] "summary")))))
 
 (deftest add-command-generates-id-and-creates-links
   (with-db
@@ -62,3 +62,22 @@
       (is (thrown? Exception
                    (cli/run-command! ds "add" ["Review" "--link" "depends-on:missing"] "summary")))
       (is (empty? (db/all-tasks ds))))))
+
+(deftest batch-command-reads-edn-from-stdin
+  (with-db
+    (fn [ds]
+      (let [result (binding [*in* (java.io.StringReader.
+                                   "[{:ref design :title \"Design\"} {:ref docs :title \"Docs\" :edges [{:type \"depends-on\" :to design}]}]")]
+                     (cli/run-command! ds "batch" [] "summary"))
+            refs (:refs result)]
+        (is (= #{"design" "docs"} (set (keys refs))))
+        (is (= [(get refs "design")]
+               (mapv :id (db/task-dependencies ds (get refs "docs")))))))))
+
+(deftest batch-command-rejects-trailing-edn
+  (with-db
+    (fn [ds]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exactly one EDN value"
+                            (binding [*in* (java.io.StringReader. "[{:title \"A\"}] [{:title \"B\"}]")]
+                              (cli/run-command! ds "batch" [] "summary")))))))

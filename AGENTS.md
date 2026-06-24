@@ -38,6 +38,8 @@ docs=$(clojure -M:todo --db "$DB" add "Write docs" --attr status=todo --attr own
 clojure -M:todo --db "$DB" --format edn ready
 clojure -M:todo --db "$DB" --format json by-attr owner agent
 clojure -M:todo --db "$DB" done "$docs"
+printf '[{:ref design :title "Design" :attributes {:status "done"}} {:ref docs :title "Docs" :edges [{:type "depends-on" :to design}]}]' \
+  | clojure -M:todo --db "$DB" --format edn batch
 ```
 
 Use `todo.repl` for interactive exploration when a REPL is already available:

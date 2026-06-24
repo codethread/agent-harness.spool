@@ -74,6 +74,73 @@
 
 (declare get-task add-edge!)
 
+(def ^:private batch-task-keys #{:title :attributes :ref :edges})
+(def ^:private batch-edge-keys #{:type :to :attributes})
+
+(defn- json-compatible? [value]
+  (cond
+    (nil? value) true
+    (string? value) true
+    (number? value) true
+    (true? value) true
+    (false? value) true
+    (map? value) (and (every? #(or (keyword? %) (string? %)) (keys value))
+                      (every? json-compatible? (vals value)))
+    (vector? value) (every? json-compatible? value)
+    (sequential? value) (every? json-compatible? value)
+    :else false))
+
+(defn- require-json-object-encodable! [attributes context]
+  (when-not (or (nil? attributes)
+                (and (map? attributes) (json-compatible? attributes)))
+    (throw (ex-info "Attributes must be nil or an EDN map that encodes to a JSON object"
+                    {:context context :attributes attributes})))
+  attributes)
+
+(defn- require-no-unknown-keys! [m allowed context]
+  (let [unknown (seq (remove allowed (keys m)))]
+    (when unknown
+      (throw (ex-info "Unknown keys in batch input" {:context context :keys (vec unknown)})))))
+
+(defn- validate-batch-edge! [edge]
+  (when-not (map? edge)
+    (throw (ex-info "Batch edge must be a map" {:edge edge})))
+  (require-no-unknown-keys! edge batch-edge-keys :edge)
+  (when-not (and (string? (:type edge)) (not (str/blank? (:type edge))))
+    (throw (ex-info "Batch edge :type must be a non-blank string" {:edge edge})))
+  (when-not (or (symbol? (:to edge)) (string? (:to edge)))
+    (throw (ex-info "Batch edge :to must be a symbol batch ref or string durable id" {:edge edge})))
+  (require-json-object-encodable! (:attributes edge) :edge)
+  edge)
+
+(defn- validate-batch-task! [task]
+  (when-not (map? task)
+    (throw (ex-info "Batch task must be a map" {:task task})))
+  (require-no-unknown-keys! task batch-task-keys :task)
+  (when-not (and (string? (:title task)) (not (str/blank? (:title task))))
+    (throw (ex-info "Batch task :title must be a non-blank string" {:task task})))
+  (when (and (contains? task :ref) (not (symbol? (:ref task))))
+    (throw (ex-info "Batch task :ref must be a symbol" {:task task})))
+  (require-json-object-encodable! (:attributes task) :task)
+  (when-not (or (nil? (:edges task)) (vector? (:edges task)))
+    (throw (ex-info "Batch task :edges must be a vector" {:task task})))
+  (doseq [edge (:edges task)]
+    (validate-batch-edge! edge))
+  task)
+
+(defn- validate-batch! [tasks]
+  (when-not (vector? tasks)
+    (throw (ex-info "Batch input must be a vector of task maps" {:value tasks})))
+  (when (empty? tasks)
+    (throw (ex-info "Batch input must contain at least one task" {})))
+  (doseq [task tasks]
+    (validate-batch-task! task))
+  (let [refs (keep :ref tasks)
+        duplicate-ref (->> refs frequencies (filter (fn [[_ n]] (> n 1))) ffirst)]
+    (when duplicate-ref
+      (throw (ex-info "Duplicate batch ref" {:ref duplicate-ref}))))
+  tasks)
+
 (defn- insert-task! [ds id title attributes]
   (execute-one! ds
                 ["INSERT INTO tasks (id, title, attributes)
@@ -111,6 +178,34 @@
                        :type type
                        :attributes attributes}))
       created-task)))
+
+(defn add-task-batch! [ds tasks]
+  (validate-batch! tasks)
+  (jdbc/with-transaction [tx ds]
+    (let [created (mapv (fn [{:keys [title attributes]}]
+                          (add-task! tx {:title title :attributes attributes}))
+                        tasks)
+          refs (into {}
+                     (keep (fn [[task created-task]]
+                             (when-let [ref (:ref task)]
+                               [(str ref) (:id created-task)])))
+                     (map vector tasks created))]
+      (doseq [[task created-task] (map vector tasks created)
+              {:keys [to type attributes]} (:edges task)]
+        (let [resolved-to (cond
+                            (symbol? to) (or (get refs (str to))
+                                             (throw (ex-info "Batch edge target ref not found; symbolic targets only resolve to batch refs, use a string for durable ids"
+                                                             {:to to :type type})))
+                            (string? to) (do
+                                           (when-not (get-task tx to)
+                                             (throw (ex-info "Batch edge target task not found" {:to to :type type})))
+                                           to))]
+          (add-edge! tx {:from (:id created-task)
+                         :to resolved-to
+                         :type type
+                         :attributes attributes})))
+      {:created created
+       :refs refs})))
 
 (defn add-edge! [ds {:keys [from to type attributes] :as edge}]
   (require-valid! ::specs/edge-input edge "Invalid edge")

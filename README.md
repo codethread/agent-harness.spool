@@ -6,7 +6,7 @@ It exists to give coding agents and humans a lightweight local task graph:
 
 - tasks are stored in SQLite;
 - open-ended task attributes are JSON stored as `TEXT` and queried with SQLite JSON1;
-- `task_edges` stores graph relationships such as `depends-on` and `mentions`;
+- `task_edges` stores acyclic graph relationships using `depends-on`, `related-to`, `parent-of`, or `supersedes`;
 - agents can use a scriptable CLI or a compact REPL API;
 - humans can still use the basic TUI.
 
@@ -41,6 +41,9 @@ clojure -M:todo --db "$DB" init
 design=$(clojure -M:todo --db "$DB" add "Sketch model" --attr status=done --attr priority=high)
 docs=$(clojure -M:todo --db "$DB" add "Write docs" --attr status=todo --attr owner=agent --link depends-on:$design)
 clojure -M:todo --db "$DB" --format edn ready
+
+printf '[{:ref design :title "Design" :attributes {:status "done"}} {:ref docs :title "Docs" :edges [{:type "depends-on" :to design}]}]' \
+  | clojure -M:todo --db "$DB" --format edn batch
 ```
 
 Use the REPL helpers:
@@ -68,7 +71,8 @@ clojure -M:run my-todos.sqlite
 The durable data contract is specified in [Task Model](./devflow/specs/task-model.md). At a high level:
 
 - tasks have a generated unique text id, a title, and open-ended JSON object attributes;
-- task edges connect two tasks with an edge type and open-ended JSON object attributes;
+- task edges connect two tasks with a canonical edge type and open-ended JSON object attributes;
+- edge writes reject unsupported types and directed cycles;
 - `depends-on` edges define readiness semantics;
 - task completion is represented by the conventional `status` attribute value `done`.
 

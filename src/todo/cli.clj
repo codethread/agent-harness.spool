@@ -1,6 +1,7 @@
 (ns todo.cli
   (:gen-class)
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
@@ -8,7 +9,7 @@
             [todo.specs :as specs]))
 
 (def query-commands #{"show" "list" "deps" "transitive-deps" "blocking" "ready" "by-attr"})
-(def commands (conj query-commands "init" "add" "link" "done"))
+(def commands (conj query-commands "init" "add" "batch" "link" "done"))
 
 (def global-options
   [[nil "--db PATH" "SQLite database path"
@@ -52,6 +53,7 @@
        "Commands:\n"
        "  init\n"
        "  add <title> [--attr key=value ...] [--link edge-type:to-id ...]\n"
+       "  batch < EDN\n"
        "  link <from-id> <to-id> <edge-type> [--attr key=value ...]\n"
        "  show <id>\n"
        "  list\n"
@@ -106,18 +108,22 @@
 
 (def json-columns #{:attributes :edge_attributes})
 
+(declare normalize)
+
 (defn normalize-row [row]
   (reduce-kv (fn [m k v]
-               (assoc m k (if (and (json-columns k) (string? v))
-                             (db/<-json v)
-                             v)))
+               (assoc m k (cond
+                            (and (json-columns k) (string? v)) (db/<-json v)
+                            (map? v) (normalize v)
+                            (sequential? v) (mapv normalize v)
+                            :else v)))
              {}
              row))
 
 (defn normalize [result]
   (cond
     (map? result) (normalize-row result)
-    (sequential? result) (mapv normalize-row result)
+    (sequential? result) (mapv normalize result)
     :else result))
 
 (defn print-result [format result]
@@ -130,6 +136,17 @@
       "edn" (prn result)
       "json" (println (json/write-str result)))))
 
+(defn read-single-edn-from-stdin! []
+  (let [eof (Object.)
+        reader (java.io.PushbackReader. *in*)
+        value (edn/read {:eof eof} reader)]
+    (when (identical? eof value)
+      (throw (ex-info "Batch command requires one EDN value on stdin" {})))
+    (let [trailing (edn/read {:eof eof} reader)]
+      (when-not (identical? eof trailing)
+        (throw (ex-info "Batch command accepts exactly one EDN value on stdin" {:trailing trailing}))))
+    value))
+
 (defn run-command! [ds command args summary]
   (case command
     "init" (do
@@ -140,6 +157,9 @@
                  {:keys [attrs links]} (parse-command-options opts summary)
                  edges (mapv #(assoc % :attributes {}) links)]
              (db/add-task-with-edges! ds {:title title :attributes attrs} edges))
+    "batch" (do
+              (require-conform ::specs/empty-command args command summary)
+              (db/add-task-batch! ds (read-single-edn-from-stdin!)))
     "link" (let [{:keys [from to type attrs]} (require-conform ::specs/link-command args command summary)]
              (db/add-edge! ds {:from from :to to :type type :attributes (parse-attrs attrs summary)}))
     "show" (do (require-conform ::specs/one-id-command args command summary) (db/get-task ds (first args)))
@@ -162,6 +182,7 @@
       (let [result (run-command! (db/datasource (:db opts)) command command-args summary)]
         (cond
           (and (= command "add") (= "human" (:format opts))) (println (:id result))
+          (and (= command "batch") (= "human" (:format opts))) (doseq [task (:created result)] (println (:id task)))
           (or (query-commands command) (not= "human" (:format opts))) (print-result (:format opts) result)))
       (catch clojure.lang.ExceptionInfo e
         (fail! (.getMessage e) summary))
