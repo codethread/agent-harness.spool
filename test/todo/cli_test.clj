@@ -52,7 +52,20 @@
                                      "--attr" "priority=high"
                                      "--attr" "owner=agent"
                                      "--edge" "depends-on:ue72w"]
-                                    "summary"))))
+                                    "summary")))
+  (is (= {:config "daemon.edn"}
+         (cli/parse-daemon-start-options ["--config" "daemon.edn"] "summary"))))
+
+(deftest task-commands-reject-daemon-config-option
+  (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))
+                client/add (fn [_db-file _request] :unexpected)
+                client/update (fn [_db-file _id _request] :unexpected)]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown option: \"--config\""
+                          (cli/run-command! "todo.sqlite" "add" ["Task" "--config" "daemon.edn"] "summary")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown option: \"--config\""
+                          (cli/run-command! "todo.sqlite" "update" ["abc12" "--config" "daemon.edn"] "summary")))))
 
 (deftest add-and-update-command-route-through-daemon
   (with-runtime

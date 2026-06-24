@@ -1,5 +1,6 @@
 (ns todo.daemon-test
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [todo.daemon.api :as api]
             [todo.daemon.metadata :as metadata]
@@ -7,14 +8,16 @@
             [todo.db :as db]
             [todo.db-test :as db-test]))
 
-(defn with-runtime [f]
-  (let [db-file (db-test/temp-db-file)
-        rt (runtime/start! db-file)]
-    (try
-      (f rt db-file)
-      (finally
-        (runtime/stop! rt)
-        (db-test/delete-sqlite-family! db-file)))))
+(defn with-runtime
+  ([f] (with-runtime nil f))
+  ([start-options f]
+   (let [db-file (db-test/temp-db-file)
+         rt (runtime/start! db-file (or start-options {}))]
+     (try
+       (f rt db-file)
+       (finally
+         (runtime/stop! rt)
+         (db-test/delete-sqlite-family! db-file))))))
 
 (deftest daemon-api-delegates-to-db-and-normalizes-results
   (with-runtime
@@ -95,4 +98,58 @@
                             (runtime/start! db-file)))
       (finally
         (runtime/stop! rt)
+        (db-test/delete-sqlite-family! db-file)))))
+
+(deftest runtime-starts-with-minimal-trusted-config
+  (let [dir (java.nio.file.Files/createTempDirectory "todo-daemon-config" (make-array java.nio.file.attribute.FileAttribute 0))
+        loaded (io/file (.toFile dir) "loaded.clj")
+        config (io/file (.toFile dir) "config.edn")]
+    (spit loaded "(ns todo.daemon-test-loaded) (def loaded? true)")
+    (spit config "{:load-files [\"loaded.clj\"]}")
+    (with-runtime {:config-file (.getPath config)}
+      (fn [_rt _]
+        (is (true? @(requiring-resolve 'todo.daemon-test-loaded/loaded?)))))))
+
+(deftest runtime-config-failures-do-not-publish-metadata
+  (let [db-file (db-test/temp-db-file)
+        canonical (metadata/canonical-db-path db-file)
+        dir (java.nio.file.Files/createTempDirectory "todo-daemon-bad-config" (make-array java.nio.file.attribute.FileAttribute 0))
+        malformed (io/file (.toFile dir) "malformed.edn")
+        trailing (io/file (.toFile dir) "trailing.edn")
+        unsupported (io/file (.toFile dir) "unsupported.edn")
+        missing-load (io/file (.toFile dir) "missing-load.edn")
+        bad-code (io/file (.toFile dir) "bad.clj")
+        bad-code-config (io/file (.toFile dir) "bad-code.edn")]
+    (try
+      (spit malformed "{:load-files [")
+      (is (thrown? Exception (runtime/start! db-file {:config-file (.getPath malformed)})))
+      (is (nil? @runtime/current-runtime))
+      (is (nil? (metadata/read-metadata canonical)))
+      (spit trailing "{:load-files []} {:reload true}")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exactly one EDN map"
+                            (runtime/start! db-file {:config-file (.getPath trailing)})))
+      (is (nil? @runtime/current-runtime))
+      (is (nil? (metadata/read-metadata canonical)))
+      (spit unsupported "{:reload true}")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unsupported daemon config keys"
+                            (runtime/start! db-file {:config-file (.getPath unsupported)})))
+      (is (nil? @runtime/current-runtime))
+      (is (nil? (metadata/read-metadata canonical)))
+      (spit missing-load "{:load-files [\"missing.clj\"]}")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Daemon trusted load file not found"
+                            (runtime/start! db-file {:config-file (.getPath missing-load)})))
+      (is (nil? @runtime/current-runtime))
+      (is (nil? (metadata/read-metadata canonical)))
+      (spit bad-code "(throw (ex-info \"trusted code failed\" {}))")
+      (spit bad-code-config "{:load-files [\"bad.clj\"]}")
+      (is (thrown? Exception
+                   (runtime/start! db-file {:config-file (.getPath bad-code-config)})))
+      (is (nil? @runtime/current-runtime))
+      (is (nil? (metadata/read-metadata canonical)))
+      (finally
+        (runtime/stop! @runtime/current-runtime)
+        (metadata/delete! canonical)
         (db-test/delete-sqlite-family! db-file)))))

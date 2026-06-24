@@ -32,5 +32,5 @@ tasks:
   - id: 7
     description: add trusted startup config
     task_file: tasks/007-add-trusted-startup-config.md
-    status: pending
+    status: complete
     blocked_by: [3]

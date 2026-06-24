@@ -40,3 +40,4 @@ ready
 - **SPEC-002-D001.C8:** `daemon status` reports structured daemon identity and health in EDN/JSON formats using the existing global `--format` option.
 - **SPEC-002-D001.C9:** Output contracts for `add`, `show`, `list`, and `ready` remain machine-readable via existing `--format` behavior after daemon result normalization.
 - **SPEC-002-D001.C10:** Transport port selection is not part of the public CLI contract. Tests and dev workflows may use internal config or environment wiring when deterministic endpoint selection is required.
+- **SPEC-002-D001.C11:** `daemon start --config <path>` reads a trusted startup EDN map. The initial config shape supports only `{:load-files ["path/to/trusted.clj"]}`; relative load paths resolve from the config file directory. Missing config files, malformed EDN, unsupported keys, missing load files, and load-time read/compile/runtime failures fail startup loudly before runtime metadata is published.

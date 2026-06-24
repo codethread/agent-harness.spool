@@ -125,3 +125,8 @@ Outcome: Dev helpers, smoke scripts, README, and AGENTS guidance demonstrate the
 - Routed `todo.repl` helpers through `todo.client`; `open!` verifies an existing daemon for the requested database and helpers fail loudly before open or after daemon loss.
 - Updated `dev/user.clj` with explicit demo daemon start/stop helpers and no direct SQLite fallback in the blessed REPL path.
 - Added daemon-backed REPL tests and adjusted the smoke REPL subsection to start a real daemon before exercising helpers.
+
+### PLAN-001.DN7 TASK-007 implementation — 2026-06-24
+
+- Added startup-only trusted daemon config via `daemon start --config <path>` with the intentionally small EDN shape `{:load-files ["trusted.clj"]}`; relative trusted-code paths resolve from the config file directory.
+- Config parsing and trusted Clojure loading fail startup loudly before runtime metadata is published; no runtime reload, saved query, Aero, SCI, or sandbox behavior was introduced.

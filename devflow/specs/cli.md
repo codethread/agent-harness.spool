@@ -27,7 +27,7 @@ update <id> [--title title] [--status todo|done|failed|cancelled] [--attr key=va
 show <id>
 list
 ready
-daemon start
+daemon start [--config <path>]
 daemon stop
 daemon status
 ```
@@ -42,7 +42,7 @@ daemon status
 - **SPEC-002.C6:** `show`, `list`, and `ready` return task rows with normalized `attributes` in EDN/JSON output.
 - **SPEC-002.C7:** `ready` returns non-final tasks whose direct `depends-on` dependencies are all final.
 - **SPEC-002.C8:** Malformed options, invalid statuses, invalid edge targets, unknown commands, daemon transport/identity failures, and database/domain errors fail non-zero.
-- **SPEC-002.C9:** `daemon start`, `daemon stop`, and `daemon status` manage the local daemon lifecycle for the selected database; `daemon status` respects `--format` and reports health, canonical database path, pid, endpoint, and daemon identity.
+- **SPEC-002.C9:** `daemon start`, `daemon stop`, and `daemon status` manage the local daemon lifecycle for the selected database; `daemon status` respects `--format` and reports health, canonical database path, pid, endpoint, and daemon identity. `daemon start --config <path>` loads a trusted startup EDN config supporting only `{:load-files ["trusted.clj"]}` and fails before publishing runtime metadata if config or trusted code loading fails.
 
 ## SPEC-002.P4 Deferred
 

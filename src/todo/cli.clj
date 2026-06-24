@@ -50,6 +50,10 @@
                   {:type type :to to}))
     :update-fn conj]])
 
+(def daemon-start-options
+  [[nil "--config PATH" "Daemon startup EDN config; supports {:load-files [\"trusted.clj\"]}"
+    :id :config]])
+
 (defn usage [summary]
   (str "Todo CLI\n\n"
        "Usage:\n"
@@ -61,7 +65,7 @@
        "  show <id>\n"
        "  list\n"
        "  ready\n"
-       "  daemon start\n"
+       "  daemon start [--config path]\n"
        "  daemon stop\n"
        "  daemon status\n\n"
        "Options:\n"
@@ -91,13 +95,20 @@
       (fail! (str "Invalid options:\n" (explain ::specs/opts options)) summary))
     [options (first arguments) (vec (rest arguments)) summary]))
 
-(defn parse-command-options [args summary]
-  (let [{:keys [options arguments errors]} (parse-opts args command-options)]
+(defn parse-options [args option-spec summary]
+  (let [{:keys [options arguments errors]} (parse-opts args option-spec)]
     (when (seq errors) (fail! (str/join "\n" errors) summary))
     (when (seq arguments) (fail! (str "Unknown or misplaced argument: " (first arguments)) summary))
-    (when-not (s/valid? ::specs/cli-attributes (:attr options))
-      (fail! (str "Invalid attributes:\n" (explain ::specs/cli-attributes (:attr options))) summary))
+    (when (contains? options :attr)
+      (when-not (s/valid? ::specs/cli-attributes (:attr options))
+        (fail! (str "Invalid attributes:\n" (explain ::specs/cli-attributes (:attr options))) summary)))
     options))
+
+(defn parse-command-options [args summary]
+  (parse-options args command-options summary))
+
+(defn parse-daemon-start-options [args summary]
+  (parse-options args daemon-start-options summary))
 
 (defn print-result [format result]
   (case format
@@ -138,11 +149,11 @@
   (let [subcommand (first args)
         subargs (vec (rest args))]
     (case subcommand
-      "start" (do (require-conform ::specs/empty-command subargs "daemon start" summary)
-                   (runtime/start! db-file)
-                   (println "daemon started")
-                   (while @runtime/current-runtime
-                     (Thread/sleep 100)))
+      "start" (let [options (parse-daemon-start-options subargs summary)]
+                 (runtime/start! db-file {:config-file (:config options)})
+                 (println "daemon started")
+                 (while @runtime/current-runtime
+                   (Thread/sleep 100)))
       "stop" (do (require-conform ::specs/empty-command subargs "daemon stop" summary)
                   (client/stop db-file))
       "status" (do (require-conform ::specs/empty-command subargs "daemon status" summary)

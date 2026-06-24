@@ -35,9 +35,10 @@ The daemon runtime is the long-lived local Clojure process that owns task storag
 
 - **SPEC-004.C13:** Core daemon startup works without a user config file.
 - **SPEC-004.C14:** Trusted Clojure config/user-code loading is an explicit daemon startup operation for this feature and fails daemon startup loudly on read, compile, or runtime errors.
-- **SPEC-004.C15:** Sandboxing, SCI execution, runtime reload commands, and untrusted plugin isolation are outside the initial daemon runtime contract.
+- **SPEC-004.C15:** The minimal trusted startup config is an EDN map with only `:load-files`, a vector of trusted Clojure file paths. Relative load paths resolve from the config file directory.
+- **SPEC-004.C16:** Sandboxing, SCI execution, runtime reload commands, and untrusted plugin isolation are outside the initial daemon runtime contract.
 
 ## SPEC-004.P6 Saved query relationship
 
-- **SPEC-004.C16:** Saved query execution is deferred until the task query DSL is specified.
-- **SPEC-004.C17:** Future saved queries should be data-first DSL definitions, with user-loaded functions as an extension layer rather than the primary query persistence format.
+- **SPEC-004.C17:** Saved query execution is deferred until the task query DSL is specified.
+- **SPEC-004.C18:** Future saved queries should be data-first DSL definitions, with user-loaded functions as an extension layer rather than the primary query persistence format.

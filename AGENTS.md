@@ -20,6 +20,8 @@ Common commands:
 
 ```sh
 clojure -M:todo --db /tmp/todo-agent.sqlite daemon start
+# Optional trusted startup config:
+# clojure -M:todo --db /tmp/todo-agent.sqlite daemon start --config /path/to/daemon.edn
 clojure -M:todo --db /tmp/todo-agent.sqlite init
 clojure -M:todo --db /tmp/todo-agent.sqlite --format edn list
 clojure -M:todo --db /tmp/todo-agent.sqlite daemon stop
@@ -35,6 +37,7 @@ Agents should prefer the CLI for scripted work. Pass `--db <path>` on every comm
 ```sh
 DB=/tmp/todo-agent.sqlite
 clojure -M:todo --db "$DB" daemon start
+# Optional: daemon.edn may contain {:load-files ["trusted.clj"]}
 clojure -M:todo --db "$DB" init
 design=$(clojure -M:todo --db "$DB" add "Sketch model" --status done --attr priority=high)
 docs=$(clojure -M:todo --db "$DB" add "Write docs" --attr owner=agent)
