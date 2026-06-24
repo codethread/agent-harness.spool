@@ -17,7 +17,7 @@ tasks:
   - id: 4
     description: route repl and dev helpers
     task_file: tasks/004-route-repl-and-dev-helpers.md
-    status: pending
+    status: complete
     blocked_by: [2]
   - id: 5
     description: update smoke docs and validation

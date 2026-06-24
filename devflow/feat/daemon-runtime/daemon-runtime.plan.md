@@ -119,3 +119,9 @@ Outcome: Dev helpers, smoke scripts, README, and AGENTS guidance demonstrate the
 - Added `daemon start|status|stop` to `todo.cli` without exposing public port selection; status EDN/JSON includes health, canonical database path, pid, endpoint, and nonce identity.
 - Updated the smoke CLI subsection, root CLI spec, and quickstart docs to start and stop a real daemon before exercising task commands; REPL helper migration remains in TASK-004.
 - Tightened metadata staleness so dead daemon PIDs are treated as stale and a subsequent `daemon start` can replace stale metadata.
+
+### PLAN-001.DN6 TASK-004 implementation — 2026-06-24
+
+- Routed `todo.repl` helpers through `todo.client`; `open!` verifies an existing daemon for the requested database and helpers fail loudly before open or after daemon loss.
+- Updated `dev/user.clj` with explicit demo daemon start/stop helpers and no direct SQLite fallback in the blessed REPL path.
+- Added daemon-backed REPL tests and adjusted the smoke REPL subsection to start a real daemon before exercising helpers.

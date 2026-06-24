@@ -25,7 +25,7 @@ ready
 
 ## SPEC-003.P3 Contracts
 
-- **SPEC-003.C1:** `open!` selects one active SQLite datasource. Helpers that need a datasource fail before `open!`.
+- **SPEC-003.C1:** `open!` selects one active daemon-backed database connection by database path. Helpers that need a daemon fail before `open!`, and daemon/transport failures surface loudly as Clojure exceptions.
 - **SPEC-003.C2:** `init!` initializes the active database schema.
 - **SPEC-003.C3:** `task!` creates a task and returns the created row. Supported arities are `(task! title)`, `(task! title attributes)`, and `(task! title status attributes)`.
 - **SPEC-003.C4:** `update!` accepts a task id and patch map with optional `:title`, `:status`, `:attributes`, and `:edges`.

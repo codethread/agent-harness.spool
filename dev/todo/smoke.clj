@@ -1,6 +1,7 @@
 (ns todo.smoke
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
+            [todo.daemon.runtime :as runtime]
             [todo.db :as db]
             [todo.repl :as repl]))
 
@@ -101,14 +102,18 @@
         (repl/ready)
         (throw (ex-info "Expected todo.repl helpers to fail before open!" {}))
         (catch clojure.lang.ExceptionInfo e
-          (assert (re-find #"No todo database is open" (.getMessage e)))))
+          (assert (re-find #"No todo daemon is open" (.getMessage e)))))
       (delete-sqlite-family! repl-db)
-      (repl/open! repl-db)
-      (repl/init!)
-      (let [a (:id (repl/task! "First task" "done" {}))
-            b (:id (repl/task! "Second task" {:owner "agent"}))]
-        (repl/update! b {:edges [{:type "depends-on" :to a}]})
-        (assert= ["Second task"] (titles (repl/ready)) "todo.repl ready returns tasks with final dependencies")
-        (repl/update! b {:status "done"})
-        (assert= "done" (:status (repl/task b)) "todo.repl update! updates status")))
+      (let [repl-runtime (runtime/start! repl-db)]
+        (try
+          (repl/open! repl-db)
+          (repl/init!)
+          (let [a (:id (repl/task! "First task" "done" {}))
+                b (:id (repl/task! "Second task" {:owner "agent"}))]
+            (repl/update! b {:edges [{:type "depends-on" :to a}]})
+            (assert= ["Second task"] (titles (repl/ready)) "todo.repl ready returns tasks with final dependencies")
+            (repl/update! b {:status "done"})
+            (assert= "done" (:status (repl/task b)) "todo.repl update! updates status"))
+          (finally
+            (runtime/stop! repl-runtime)))))
     (println "\nSmoke database:" (or db-file smoke-db))))
