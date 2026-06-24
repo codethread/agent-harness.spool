@@ -8,5 +8,7 @@
  {:repl {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
   :run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]
         :main-opts ["-m" "todo.app"]}
+  :todo {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "todo.cli"]}
   :smoke {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]
           :main-opts ["-m" "todo.smoke"]}}}

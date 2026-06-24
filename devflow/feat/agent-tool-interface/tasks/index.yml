@@ -7,7 +7,7 @@ tasks:
   - id: 2
     description: Add scriptable agent CLI
     task_file: tasks/002-scriptable-agent-cli.md
-    status: pending
+    status: complete
     blocked_by: [1]
   - id: 3
     description: Add agent REPL helpers

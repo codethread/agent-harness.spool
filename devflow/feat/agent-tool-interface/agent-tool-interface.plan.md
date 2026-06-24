@@ -90,3 +90,8 @@ Append notes here. Do not rewrite earlier notes.
 
 - Added shared `todo.db` operations for status/attribute updates, arbitrary top-level JSON attribute lookup, reverse dependency lookup, ready-task selection, and transitive `depends-on` traversal while keeping status in `tasks.attributes`.
 - Smoke coverage now asserts single-task lookup, JSON attribute patching, readiness changes after marking a dependency done, arbitrary attribute queries, reverse blockers, and transitive dependencies.
+
+### PLAN-001.DN4 Task 2 implementation — 2026-06-24
+
+- Added `todo.cli` with the small command vocabulary from Task 2, global `--db` and `--format` options, repeatable string `--attr key=value` parsing, and EDN/JSON/human query output.
+- Simplified the MVP CLI after review: attributes are plain strings at the shell boundary, while query output still expands stored JSON attribute columns for readable EDN/JSON results.
