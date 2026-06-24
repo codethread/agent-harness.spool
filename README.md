@@ -14,6 +14,20 @@ clojure -M:smoke
 
 This recreates `smoke.sqlite`, inserts tasks and dependency edges, then prints example JSON1 and graph queries.
 
+## Agent REPL helpers
+
+```clojure
+(require '[todo.repl :refer :all])
+(open! "agent.sqlite")
+(init!)
+(task! "design" "Sketch model" {:status "done"})
+(task! "docs" "Write docs" {:status "todo"})
+(depends! "docs" "design")
+(ready)
+```
+
+Helpers use the datasource opened with `open!`; calling database helpers first fails with a clear error.
+
 ## Run the TUI
 
 ```sh

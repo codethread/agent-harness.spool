@@ -12,7 +12,7 @@ tasks:
   - id: 3
     description: Add agent REPL helpers
     task_file: tasks/003-agent-repl-helpers.md
-    status: pending
+    status: complete
     blocked_by: [1]
   - id: 4
     description: Document and smoke agent workflows

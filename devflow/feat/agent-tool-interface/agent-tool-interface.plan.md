@@ -95,3 +95,10 @@ Append notes here. Do not rewrite earlier notes.
 
 - Added `todo.cli` with the small command vocabulary from Task 2, global `--db` and `--format` options, repeatable string `--attr key=value` parsing, and EDN/JSON/human query output.
 - Simplified the MVP CLI after review: attributes are plain strings at the shell boundary, while query output still expands stored JSON attribute columns for readable EDN/JSON results.
+
+### PLAN-001.DN5 Task 3 implementation — 2026-06-24
+
+- Added `todo.repl` as the compact interactive namespace with one active datasource opened by `open!`; database helpers fail loudly with a clear `ExceptionInfo` if called before opening a database.
+- REPL helper results normalize JSON-bearing columns to Clojure data so interactive callers do not need to know the storage encoding.
+- Smoke validation covers the exact public helper vocabulary, the concise open/init/task/dependency/status/ready flow, and the pre-open failure path.
+- Follow-up YAGNI pass simplified `todo.repl` to exact JSON columns and removed broad wrapper smoke assertions that duplicated the DB smoke coverage.

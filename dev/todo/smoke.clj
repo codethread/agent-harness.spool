@@ -1,5 +1,6 @@
 (ns todo.smoke
-  (:require [todo.db :as db]))
+  (:require [todo.db :as db]
+            [todo.repl :as repl]))
 
 (def smoke-db "smoke.sqlite")
 
@@ -56,4 +57,21 @@
     (section "tasks blocked by docs" (db/blocking-tasks ds "docs"))
     (section "estimate-hours=2 via arbitrary JSON attribute" (db/tasks-by-attribute ds :estimate-hours 2))
     (section "docs graph edges" (db/related-tasks ds "docs"))
+    (let [repl-db (str (or db-file smoke-db) ".repl")
+          expected-repl-helpers '#{open! init! task! depends! edge! done! tasks task deps transitive-deps blocking ready by-attr graph}]
+      (assert= expected-repl-helpers (set (keys (select-keys (ns-publics 'todo.repl) expected-repl-helpers))) "todo.repl exposes the MVP helper vocabulary")
+      (try
+        (repl/ready)
+        (throw (ex-info "Expected todo.repl helpers to fail before open!" {}))
+        (catch clojure.lang.ExceptionInfo e
+          (assert (re-find #"No todo database is open" (.getMessage e)))))
+      (.delete (java.io.File. repl-db))
+      (repl/open! repl-db)
+      (repl/init!)
+      (repl/task! "a" "First task" {:status "done"})
+      (repl/task! "b" "Second task" {:status "todo"})
+      (repl/depends! "b" "a")
+      (assert= ["b"] (ids (repl/ready)) "todo.repl ready returns tasks with done dependencies")
+      (repl/done! "b")
+      (assert= "done" (:status (:attributes (repl/task "b"))) "todo.repl done! updates status"))
     (println "\nSmoke database:" (or db-file smoke-db))))
