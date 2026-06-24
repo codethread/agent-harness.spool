@@ -28,7 +28,7 @@ The task model defines the durable local data contract for the todo graph: task 
 
 ## SPEC-001.P4 Domain concepts
 
-- **SPEC-001.DC1:** A task is identified by a unique text `id`, has a required `title`, and has an `attributes` JSON object for runtime/userland metadata.
+- **SPEC-001.DC1:** A task is identified by a unique database/application-owned text `id`, has a required `title`, and has an `attributes` JSON object for runtime/userland metadata.
 - **SPEC-001.DC2:** Task attributes are stored as SQLite `TEXT`, must be valid JSON according to JSON1, and are an open-ended object. Write paths reject non-object JSON roots; omitted or nil attributes are normalized to `{}`.
 - **SPEC-001.DC3:** Conventional task attributes include `status`, `priority`, `due-date`, and `owner`; callers may add other keys.
 - **SPEC-001.DC4:** A task is complete when its `status` attribute is the string `done`; any missing or non-`done` status is considered incomplete for readiness checks.
@@ -42,7 +42,7 @@ The task model defines the durable local data contract for the todo graph: task 
 - **SPEC-001.IC1:** The `tasks` table has columns `id TEXT PRIMARY KEY`, `title TEXT NOT NULL`, and `attributes TEXT NOT NULL DEFAULT '{}'` with `CHECK (json_valid(attributes))`.
 - **SPEC-001.IC2:** The `task_edges` table has `from_task_id`, `to_task_id`, `edge_type`, and `attributes`, with a primary key of `(from_task_id, to_task_id, edge_type)` and JSON validity on `attributes`.
 - **SPEC-001.IC3:** The schema declares foreign-key relationships from edge endpoints to tasks with `ON DELETE CASCADE`; reliable enforcement depends on SQLite foreign-key enforcement being enabled for the connection executing the write.
-- **SPEC-001.IC4:** Creating a task with an existing id updates its title and attributes rather than creating a duplicate row.
+- **SPEC-001.IC4:** Creating a task generates a short, stable, colon-free, shell-safe text id and inserts a new row. Generated-id collisions are retried internally and collision exhaustion fails loudly.
 - **SPEC-001.IC5:** Creating an existing edge updates its attributes rather than creating a duplicate row.
 - **SPEC-001.IC6:** Attribute lookup operates on top-level task attributes and compares the JSON value exposed by SQLite JSON1 with the caller-provided value; JSON `null` matching is outside the current contract, and interface-specific specs may further narrow accepted value types.
 - **SPEC-001.IC7:** Direct dependencies list the `to_task_id` tasks reachable through `depends-on` edges from the queried task.
@@ -64,7 +64,13 @@ The task model defines the durable local data contract for the todo graph: task 
 - **Rationale:** Status is useful immediately, but keeping it in attributes avoids schema churn before the task model stabilizes.
 - **Rejected:** A dedicated status column is deferred until a future migration justifies stricter status behavior.
 
-### SPEC-001.D3 Dependency direction follows the blocked task
+### SPEC-001.D3 Application-owned task ids
+
+- **Decision:** Task creation generates short colon-free ids instead of accepting caller-owned ids.
+- **Rationale:** Agents and humans should not coordinate durable identifiers before creation, and accidental id reuse must not overwrite unrelated work. Colon-free ids also keep CLI edge shorthand parseable.
+- **Rejected:** Caller-supplied creation ids and create-by-id upsert semantics are rejected for the alpha contract because they create silent conflict risks.
+
+### SPEC-001.D4 Dependency direction follows the blocked task
 
 - **Decision:** A `depends-on` edge points from the blocked task to the task it needs.
 - **Rationale:** Queries for a task's dependencies and transitive dependencies can follow outgoing `depends-on` edges naturally.

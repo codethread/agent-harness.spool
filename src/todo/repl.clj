@@ -31,10 +31,10 @@
   (db/init! (ds)))
 
 (defn task!
-  ([id title]
-   (task! id title {}))
-  ([id title attributes]
-   (unpack (db/add-task! (ds) {:id id :title title :attributes attributes}))))
+  ([title]
+   (task! title {}))
+  ([title attributes]
+   (unpack (db/add-task! (ds) {:title title :attributes attributes}))))
 
 (defn edge!
   ([from to type]

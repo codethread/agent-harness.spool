@@ -33,12 +33,11 @@ Agents should prefer the CLI for scripted work. Pass `--db <path>` on every comm
 ```sh
 DB=/tmp/todo-agent.sqlite
 clojure -M:todo --db "$DB" init
-clojure -M:todo --db "$DB" add design "Sketch model" --attr status=done --attr priority=high
-clojure -M:todo --db "$DB" add docs "Write docs" --attr status=todo --attr owner=agent
-clojure -M:todo --db "$DB" link docs design depends-on --attr reason="docs follow design"
+design=$(clojure -M:todo --db "$DB" add "Sketch model" --attr status=done --attr priority=high)
+docs=$(clojure -M:todo --db "$DB" add "Write docs" --attr status=todo --attr owner=agent --link depends-on:$design)
 clojure -M:todo --db "$DB" --format edn ready
 clojure -M:todo --db "$DB" --format json by-attr owner agent
-clojure -M:todo --db "$DB" done docs
+clojure -M:todo --db "$DB" done "$docs"
 ```
 
 Use `todo.repl` for interactive exploration when a REPL is already available:
@@ -47,12 +46,12 @@ Use `todo.repl` for interactive exploration when a REPL is already available:
 (require '[todo.repl :refer :all])
 (open! "agent.sqlite")
 (init!)
-(task! "design" "Sketch model" {:status "done" :priority "high"})
-(task! "docs" "Write docs" {:status "todo" :owner "agent"})
-(depends! "docs" "design")
+(def design (:id (task! "Sketch model" {:status "done" :priority "high"})))
+(def docs (:id (task! "Write docs" {:status "todo" :owner "agent"})))
+(depends! docs design)
 (ready)
 (by-attr :owner "agent")
-(done! "docs")
+(done! docs)
 ```
 
 For the full CLI and REPL contracts, read the root specs linked above instead of duplicating details here.

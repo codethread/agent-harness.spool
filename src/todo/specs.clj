@@ -5,7 +5,13 @@
 (defn non-blank-string? [x]
   (and (string? x) (not (str/blank? x))))
 
+(def generated-id-pattern #"[a-z0-9]+")
+
+(defn generated-id? [x]
+  (and (string? x) (boolean (re-matches generated-id-pattern x))))
+
 (s/def ::id non-blank-string?)
+(s/def ::generated-id generated-id?)
 (s/def ::from ::id)
 (s/def ::to ::id)
 (s/def ::type non-blank-string?)
@@ -19,11 +25,11 @@
 (s/def ::db non-blank-string?)
 (s/def ::opts (s/keys :req-un [::db ::format]))
 
-(s/def ::add-command (s/cat :id ::id :title ::title :attrs (s/* string?)))
+(s/def ::add-command (s/cat :title ::title :opts (s/* string?)))
 (s/def ::link-command (s/cat :from ::id :to ::id :type ::edge-type :attrs (s/* string?)))
 (s/def ::one-id-command (s/cat :id ::id))
 (s/def ::empty-command (s/cat))
 (s/def ::by-attr-command (s/cat :key non-blank-string? :value string?))
 
-(s/def ::task-input (s/keys :req-un [::id ::title] :opt-un [::attributes]))
+(s/def ::task-input (s/keys :req-un [::title] :opt-un [::attributes]))
 (s/def ::edge-input (s/keys :req-un [::from ::to ::type] :opt-un [::attributes]))

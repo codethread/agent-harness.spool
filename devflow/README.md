@@ -2,6 +2,8 @@
 
 Active feature work lives under `devflow/feat/`. Root specs in `devflow/specs/` become canonical only when feature work ships.
 
+Always study [TENETS](./TENETS.md). No code, spec or idea can violate these unless explicitly stated and cited in an agreed RFC first.
+
 ## Root specs
 
 Root specs are canonical for shipped behavior:
@@ -19,3 +21,4 @@ None.
 Archived feature folders preserve historical planning context. Current shipped contracts are the root specs above, even if older archive notes describe pre-spec documentation locations.
 
 - `26-06-24__agent-tool-interface` — shipped agent-operable CLI/REPL interface for the todo graph MVP.
+- `26-06-24__db-owned-task-ids` — shipped generated task ids and creation-time `--link` edges.

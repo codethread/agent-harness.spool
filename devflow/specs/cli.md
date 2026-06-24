@@ -29,7 +29,7 @@ The CLI surface is the primary scripted interface for coding agents. It exposes 
 
 - **SPEC-002.DC1:** CLI commands operate on the task model defined in [task-model.md](./task-model.md).
 - **SPEC-002.DC2:** A query command is a command whose result should be printed in the requested output format.
-- **SPEC-002.DC3:** A mutation command changes the database and prints output only when machine-readable formatting is explicitly requested.
+- **SPEC-002.DC3:** A mutation command changes the database. Most mutation commands print output only when machine-readable formatting is explicitly requested; `add` prints the generated id in human mode so scripts and users can capture it.
 - **SPEC-002.DC4:** CLI attributes are supplied as repeated `--attr key=value` pairs after the command's positional arguments.
 
 ## SPEC-002.P5 Interfaces and contracts
@@ -39,8 +39,10 @@ The CLI surface is the primary scripted interface for coding agents. It exposes 
 - **SPEC-002.IC3:** `--format <mode>` accepts `human`, `edn`, or `json`; invalid formats fail before command execution.
 - **SPEC-002.IC4:** Global options must appear before the command name.
 - **SPEC-002.IC5:** `--attr key=value` is repeatable for `add` and `link`; malformed attributes or misplaced attributes fail the command.
+- **SPEC-002.IC5A:** `--link edge-type:to-id` is repeatable for `add`; the last colon separates edge type from target id, generated target ids are colon-free, and malformed link values or nonexistent target ids fail the command. Use the full `link` command when linking to any legacy id that contains a colon.
 - **SPEC-002.IC6:** `init` takes no arguments and creates the schema in the selected database.
-- **SPEC-002.IC7:** `add <id> <title> [--attr key=value ...]` creates or updates a task with string-valued CLI attributes.
+- **SPEC-002.IC7:** `add <title> [--attr key=value ...] [--link edge-type:to-id ...]` creates a task with a generated id and string-valued CLI attributes. Human output prints the generated id; EDN/JSON output returns the created row.
+- **SPEC-002.IC7A:** Each creation-time `--link` creates an edge from the newly created task to the existing target task, with the supplied edge type and empty edge attributes. For example, `add "Review" --link depends-on:ue72w` is equivalent to creating `Review`, capturing its generated id, then calling `link <new-id> ue72w depends-on`.
 - **SPEC-002.IC8:** `link <from-id> <to-id> <edge-type> [--attr key=value ...]` creates or updates an edge with string-valued CLI attributes.
 - **SPEC-002.IC9:** `show <id>` returns one task row when the task exists; for a missing task it succeeds with `nil` in EDN/human output and `null` in JSON output.
 - **SPEC-002.IC10:** `list` returns all tasks ordered by id.
@@ -70,7 +72,13 @@ The CLI surface is the primary scripted interface for coding agents. It exposes 
 - **Rationale:** Shell syntax stays simple and predictable; richer typed attributes can still be produced through the REPL or lower-level Clojure API.
 - **Rejected:** Parsing shell values as EDN or JSON is rejected for the MVP because it increases quoting complexity for agents.
 
-### SPEC-002.D3 Machine-readable query output
+### SPEC-002.D3 Database-owned ids at creation
+
+- **Decision:** `add` no longer accepts caller-supplied ids. It returns the generated id and supports generic creation-time `--link` edges.
+- **Rationale:** Agent workflows can capture a stable id without risking caller-chosen id conflicts, while `--link` keeps common sequential graph creation compact without adding dependency-specific flags.
+- **Rejected:** Backwards-compatible `add <id> <title>` and dependency-specific creation flags are rejected for the alpha contract.
+
+### SPEC-002.D4 Machine-readable query output
 
 - **Decision:** Support EDN and JSON output modes for query commands.
 - **Rationale:** Coding agents can consume structured output directly instead of scraping human text.

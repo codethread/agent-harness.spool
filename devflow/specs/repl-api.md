@@ -38,7 +38,7 @@ The REPL API gives coding agents and human developers a compact interactive Cloj
 - **SPEC-003.IC2:** `open!` accepts a database file path, creates a datasource for it, stores it as the active datasource, and returns that datasource.
 - **SPEC-003.IC3:** Any helper that requires a datasource must throw a clear exception if called before `open!`.
 - **SPEC-003.IC4:** `init!` initializes the schema in the active database.
-- **SPEC-003.IC5:** `task!` creates or updates a task; it supports `(task! id title)` and `(task! id title attributes)`, where supported `attributes` values are nil or Clojure maps that encode to JSON objects. Nil attributes are stored as `{}`.
+- **SPEC-003.IC5:** `task!` creates a task with a generated id; it supports `(task! title)` and `(task! title attributes)`, where supported `attributes` values are nil or Clojure maps that encode to JSON objects. Nil attributes are stored as `{}`. The returned task row includes the generated `:id`.
 - **SPEC-003.IC6:** `edge!` creates or updates an edge; it supports `(edge! from to type)` and `(edge! from to type attributes)`, where supported `attributes` values are nil or Clojure maps that encode to JSON objects. Nil attributes are stored as `{}`.
 - **SPEC-003.IC7:** `depends!` creates or updates a `depends-on` edge; it supports `(depends! from to)` and `(depends! from to attributes)`, where supported `attributes` values are nil or Clojure maps that encode to JSON objects. Nil attributes are stored as `{}`.
 - **SPEC-003.IC8:** `done!` sets the conventional task `status` attribute to `done`.
@@ -68,7 +68,13 @@ The REPL API gives coding agents and human developers a compact interactive Cloj
 - **Rationale:** A clear failure is safer than quietly creating or selecting an unintended database.
 - **Rejected:** Silent default initialization is rejected because it obscures state.
 
-### SPEC-003.D3 Normalize JSON-bearing results
+### SPEC-003.D3 Generated ids at task creation
+
+- **Decision:** `task!` accepts task content and returns the generated durable id in the created row instead of accepting caller-owned ids.
+- **Rationale:** The REPL helper mirrors the DB-owned task identity model while keeping interactive graph operations concise after creation.
+- **Rejected:** Compatibility overloads for caller-owned creation ids are rejected for the alpha contract.
+
+### SPEC-003.D4 Normalize JSON-bearing results
 
 - **Decision:** REPL helpers convert known JSON string columns to Clojure data before returning results.
 - **Rationale:** Interactive callers should work with maps and vectors rather than knowing which SQL columns are JSON-encoded strings.

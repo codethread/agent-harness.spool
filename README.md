@@ -38,9 +38,8 @@ Use the agent CLI:
 ```sh
 DB=/tmp/todo-agent.sqlite
 clojure -M:todo --db "$DB" init
-clojure -M:todo --db "$DB" add design "Sketch model" --attr status=done --attr priority=high
-clojure -M:todo --db "$DB" add docs "Write docs" --attr status=todo --attr owner=agent
-clojure -M:todo --db "$DB" link docs design depends-on --attr reason="docs follow design"
+design=$(clojure -M:todo --db "$DB" add "Sketch model" --attr status=done --attr priority=high)
+docs=$(clojure -M:todo --db "$DB" add "Write docs" --attr status=todo --attr owner=agent --link depends-on:$design)
 clojure -M:todo --db "$DB" --format edn ready
 ```
 
@@ -50,9 +49,9 @@ Use the REPL helpers:
 (require '[todo.repl :refer :all])
 (open! "agent.sqlite")
 (init!)
-(task! "design" "Sketch model" {:status "done" :priority "high"})
-(task! "docs" "Write docs" {:status "todo" :owner "agent"})
-(depends! "docs" "design")
+(def design (:id (task! "Sketch model" {:status "done" :priority "high"})))
+(def docs (:id (task! "Write docs" {:status "todo" :owner "agent"})))
+(depends! docs design)
 (ready)
 ```
 
@@ -68,7 +67,7 @@ clojure -M:run my-todos.sqlite
 
 The durable data contract is specified in [Task Model](./devflow/specs/task-model.md). At a high level:
 
-- tasks have a unique text id, a title, and open-ended JSON object attributes;
+- tasks have a generated unique text id, a title, and open-ended JSON object attributes;
 - task edges connect two tasks with an edge type and open-ended JSON object attributes;
 - `depends-on` edges define readiness semantics;
 - task completion is represented by the conventional `status` attribute value `done`.

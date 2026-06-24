@@ -1,11 +1,23 @@
 (ns todo.db
+  (:import [java.security SecureRandom])
   (:require [clojure.data.json :as json]
             [clojure.spec.alpha :as s]
+            [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
             [todo.specs :as specs]))
 
 (def default-db-file "todo.sqlite")
+
+(def ^:private id-alphabet "abcdefghijklmnopqrstuvwxyz0123456789")
+(def ^:private id-length 5)
+(def ^:private max-id-attempts 32)
+(def ^:private secure-random (SecureRandom.))
+
+(defn generate-id []
+  (apply str
+         (repeatedly id-length
+                     #(nth id-alphabet (.nextInt secure-random (count id-alphabet))))))
 
 (defn datasource
   ([] (datasource default-db-file))
@@ -60,13 +72,45 @@
   (execute! ds ["DROP TABLE IF EXISTS tasks"])
   (init! ds))
 
-(defn add-task! [ds {:keys [id title attributes] :as task}]
-  (require-valid! ::specs/task-input task "Invalid task")
+(declare get-task add-edge!)
+
+(defn- insert-task! [ds id title attributes]
   (execute-one! ds
-                ["INSERT INTO tasks (id, title, attributes) VALUES (?, ?, json(?))
-                  ON CONFLICT(id) DO UPDATE SET title = excluded.title, attributes = excluded.attributes
+                ["INSERT INTO tasks (id, title, attributes)
+                  VALUES (?, ?, json(?))
                   RETURNING id, title, attributes"
                  id title (->json attributes)]))
+
+(defn- unique-task-id-error? [^Exception e]
+  (str/includes? (.getMessage e) "UNIQUE constraint failed: tasks.id"))
+
+(defn add-task! [ds {:keys [title attributes] :as task}]
+  (require-valid! ::specs/task-input task "Invalid task")
+  (loop [attempt 1]
+    (when (> attempt max-id-attempts)
+      (throw (ex-info "Unable to generate unique task id" {:attempts max-id-attempts})))
+    (let [id (generate-id)
+          result (try
+                   [:created (insert-task! ds id title attributes)]
+                   (catch org.sqlite.SQLiteException e
+                     (if (unique-task-id-error? e)
+                       [:retry nil]
+                       (throw e))))]
+      (case (first result)
+        :created (second result)
+        :retry (recur (inc attempt))))))
+
+(defn add-task-with-edges! [ds task edges]
+  (jdbc/with-transaction [tx ds]
+    (let [created-task (add-task! tx task)]
+      (doseq [{:keys [to type attributes]} edges]
+        (when-not (get-task tx to)
+          (throw (ex-info "Link target task not found" {:to to :type type})))
+        (add-edge! tx {:from (:id created-task)
+                       :to to
+                       :type type
+                       :attributes attributes}))
+      created-task)))
 
 (defn add-edge! [ds {:keys [from to type attributes] :as edge}]
   (require-valid! ::specs/edge-input edge "Invalid edge")

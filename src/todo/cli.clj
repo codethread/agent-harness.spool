@@ -19,7 +19,7 @@
     :default "human"
     :validate [#(s/valid? ::specs/format %) "must be one of: human, edn, json"]]])
 
-(def attr-options
+(def command-options
   [[nil "--attr ATTR" "Repeatable string task or edge attribute: key=value"
     :id :attr
     :multi true
@@ -29,7 +29,19 @@
                   (when (or (str/blank? k) (nil? v))
                     (throw (ex-info (str "Malformed attribute: " s) {:attr s})))
                   [(keyword k) v]))
-    :update-fn (fn [attrs [k v]] (assoc attrs k v))]])
+    :update-fn (fn [attrs [k v]] (assoc attrs k v))]
+   [nil "--link LINK" "Repeatable creation-time edge: edge-type:to-id"
+    :id :link
+    :multi true
+    :default []
+    :parse-fn (fn [s]
+                (let [separator (.lastIndexOf s ":")
+                      type (when (not= -1 separator) (subs s 0 separator))
+                      to (when (not= -1 separator) (subs s (inc separator)))]
+                  (when (or (str/blank? type) (str/blank? to))
+                    (throw (ex-info (str "Malformed link: " s) {:link s})))
+                  {:type type :to to}))
+    :update-fn conj]])
 
 (defn usage [summary]
   (str "Todo agent CLI\n"
@@ -39,7 +51,7 @@
        "\n"
        "Commands:\n"
        "  init\n"
-       "  add <id> <title> [--attr key=value ...]\n"
+       "  add <title> [--attr key=value ...] [--link edge-type:to-id ...]\n"
        "  link <from-id> <to-id> <edge-type> [--attr key=value ...]\n"
        "  show <id>\n"
        "  list\n"
@@ -79,15 +91,18 @@
       (fail! (str "Invalid options:\n" (explain ::specs/opts options)) summary))
     [options (first arguments) (vec (rest arguments)) summary]))
 
-(defn parse-attrs [args summary]
-  (let [{:keys [options arguments errors]} (parse-opts args attr-options)]
+(defn parse-command-options [args summary]
+  (let [{:keys [options arguments errors]} (parse-opts args command-options)]
     (when (seq errors)
       (fail! (str/join "\n" errors) summary))
     (when (seq arguments)
       (fail! (str "Unknown or misplaced argument: " (first arguments)) summary))
     (when-not (s/valid? ::specs/cli-attributes (:attr options))
       (fail! (str "Invalid attributes:\n" (explain ::specs/cli-attributes (:attr options))) summary))
-    (:attr options)))
+    {:attrs (:attr options) :links (:link options)}))
+
+(defn parse-attrs [args summary]
+  (:attrs (parse-command-options args summary)))
 
 (def json-columns #{:attributes :edge_attributes})
 
@@ -121,8 +136,10 @@
              (require-conform ::specs/empty-command args command summary)
              (db/init! ds)
              {:database "initialized"})
-    "add" (let [{:keys [id title attrs]} (require-conform ::specs/add-command args command summary)]
-            (db/add-task! ds {:id id :title title :attributes (parse-attrs attrs summary)}))
+    "add" (let [{:keys [title opts]} (require-conform ::specs/add-command args command summary)
+                 {:keys [attrs links]} (parse-command-options opts summary)
+                 edges (mapv #(assoc % :attributes {}) links)]
+             (db/add-task-with-edges! ds {:title title :attributes attrs} edges))
     "link" (let [{:keys [from to type attrs]} (require-conform ::specs/link-command args command summary)]
              (db/add-edge! ds {:from from :to to :type type :attributes (parse-attrs attrs summary)}))
     "show" (do (require-conform ::specs/one-id-command args command summary) (db/get-task ds (first args)))
@@ -143,8 +160,9 @@
       (fail! (str "Unknown command: " command) summary))
     (try
       (let [result (run-command! (db/datasource (:db opts)) command command-args summary)]
-        (when (or (query-commands command) (not= "human" (:format opts)))
-          (print-result (:format opts) result)))
+        (cond
+          (and (= command "add") (= "human" (:format opts))) (println (:id result))
+          (or (query-commands command) (not= "human" (:format opts))) (print-result (:format opts) result)))
       (catch clojure.lang.ExceptionInfo e
         (fail! (.getMessage e) summary))
       (catch Exception e
