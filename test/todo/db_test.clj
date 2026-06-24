@@ -80,14 +80,20 @@
       (let [a (:id (db/add-task! ds {:title "A" :attributes {}}))
             b (:id (db/add-task! ds {:title "B" :attributes {}}))
             c (:id (db/add-task! ds {:title "C" :attributes {}}))]
-        (testing "generic non-blank edge types are accepted"
+        (testing "only canonical edge types are accepted"
           (is (some? (db/add-edge! ds {:from a :to b :type "related-to" :attributes {}})))
           (is (some? (db/add-edge! ds {:from a :to c :type "parent-of" :attributes {}})))
           (is (some? (db/add-edge! ds {:from b :to c :type "supersedes" :attributes {}})))
-          (is (some? (db/add-edge! ds {:from a :to b :type "mentions" :attributes {}})))
           (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                 #"Invalid edge"
-                                (db/add-edge! ds {:from a :to b :type "" :attributes {}}))))))))
+                                (db/add-edge! ds {:from a :to b :type "mentions" :attributes {}}))))
+        (testing "edges must keep the task graph acyclic"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"same task"
+                                (db/add-edge! ds {:from a :to a :type "related-to" :attributes {}})))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"create a cycle"
+                                (db/add-edge! ds {:from c :to a :type "related-to" :attributes {}}))))))))
 
 (deftest batch-creation-resolves-refs-and-existing-ids
   (with-db

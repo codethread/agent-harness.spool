@@ -11,3 +11,5 @@
   - we have a deliberately loose api contract via attributes, this provides flexibility, and we can build this tolerance into the system. However when we get something we do not expect, we do not try to work around it or choose 'sensible defaults'. We FAIL LOUDLY. If this provides api friction or poor ergonomics, we solve that in other ways like persisted config or better api design.
 - **TEN-004**: Less is More.
   - We expose the minimum possible surface area over api, and what we expose, we make extremely robust. Everything else we delegate to userland via our attributes and query language
+- **TEN-005**: Task graphs are DAGs.
+  - The graph should remain reconstructable and traversable by agents without cycle-specific reasoning. Cycles in task relationships make planning, dependency traversal, hierarchy, and supersession flows ambiguous, so edge writes must fail loudly rather than persist a cycle.

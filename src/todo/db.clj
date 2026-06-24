@@ -56,6 +56,7 @@
        edge_type TEXT NOT NULL,
        attributes TEXT NOT NULL DEFAULT '{}',
        PRIMARY KEY (from_task_id, to_task_id, edge_type),
+       CHECK (edge_type IN ('depends-on', 'related-to', 'parent-of', 'supersedes')),
        CHECK (json_valid(attributes))
      )"]
    ["CREATE INDEX IF NOT EXISTS idx_task_edges_to ON task_edges(to_task_id, edge_type)"]
@@ -106,8 +107,9 @@
   (when-not (map? edge)
     (throw (ex-info "Batch edge must be a map" {:edge edge})))
   (require-no-unknown-keys! edge batch-edge-keys :edge)
-  (when-not (and (string? (:type edge)) (not (str/blank? (:type edge))))
-    (throw (ex-info "Batch edge :type must be a non-blank string" {:edge edge})))
+  (when-not (s/valid? ::specs/edge-type (:type edge))
+    (throw (ex-info "Batch edge :type must be one of the allowed edge types"
+                    {:edge edge :allowed specs/allowed-edge-types})))
   (when-not (or (symbol? (:to edge)) (string? (:to edge)))
     (throw (ex-info "Batch edge :to must be a symbol batch ref or string durable id" {:edge edge})))
   (require-json-object-encodable! (:attributes edge) :edge)
@@ -207,8 +209,33 @@
       {:created created
        :refs refs})))
 
+(defn- path-exists? [ds from to]
+  (boolean
+   (execute-one! ds
+                 ["WITH RECURSIVE reachable(id) AS (
+                     SELECT to_task_id
+                     FROM task_edges
+                     WHERE from_task_id = ?
+                   UNION
+                     SELECT e.to_task_id
+                     FROM reachable r
+                     JOIN task_edges e ON e.from_task_id = r.id
+                   )
+                   SELECT 1 AS found
+                   FROM reachable
+                   WHERE id = ?
+                   LIMIT 1"
+                  from to])))
+
+(defn- require-acyclic-edge! [ds from to type]
+  (when (= from to)
+    (throw (ex-info "Task edges must not point to the same task" {:from from :to to :type type})))
+  (when (path-exists? ds to from)
+    (throw (ex-info "Task edge would create a cycle" {:from from :to to :type type}))))
+
 (defn add-edge! [ds {:keys [from to type attributes] :as edge}]
   (require-valid! ::specs/edge-input edge "Invalid edge")
+  (require-acyclic-edge! ds from to type)
   (execute-one! ds
                 ["INSERT INTO task_edges (from_task_id, to_task_id, edge_type, attributes)
                   VALUES (?, ?, ?, json(?))

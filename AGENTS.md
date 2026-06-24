@@ -83,6 +83,7 @@ sqlite3 smoke.sqlite 'select from_task_id, to_task_id, edge_type, attributes fro
 
 ## Implementation boundaries
 
+- Keep the CLI thin: parse command-line input, normalize output, and delegate domain behavior to `todo.db`. Prefer testing core logic at the parser/database boundaries instead of duplicating full CLI surface tests for every behavior; use CLI tests for parsing, wiring, and subprocess smoke coverage.
 - Keep task attributes as JSON `TEXT`; do not introduce JSONB assumptions.
 - Store task status in `attributes` for now; do not add a status column without a planned migration.
 - Do not add schemas for userland attributes yet.

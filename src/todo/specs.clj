@@ -10,11 +10,13 @@
 (defn generated-id? [x]
   (and (string? x) (boolean (re-matches generated-id-pattern x))))
 
+(def allowed-edge-types #{"depends-on" "related-to" "parent-of" "supersedes"})
+
 (s/def ::id non-blank-string?)
 (s/def ::generated-id generated-id?)
 (s/def ::from ::id)
 (s/def ::to ::id)
-(s/def ::edge-type non-blank-string?)
+(s/def ::edge-type allowed-edge-types)
 (s/def ::type ::edge-type)
 (s/def ::title non-blank-string?)
 (s/def ::attr-key keyword?)
