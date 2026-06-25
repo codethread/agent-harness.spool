@@ -1,8 +1,10 @@
 (ns todo.repl
   (:require [next.jdbc :as jdbc]
-            [todo.db :as db]))
+            [todo.db :as db]
+            [todo.query :as query]))
 
 (defonce ^:private active-datasource (atom nil))
+(defonce ^:private query-registry (atom {}))
 
 (defn- ds []
   (or @active-datasource
@@ -50,8 +52,48 @@
 (defn task [id]
   (unpack (db/get-task (ds) id)))
 
-(defn tasks []
-  (unpack (db/all-tasks (ds))))
+(defn defquery! [query-name query-def]
+  (query/validate-query-def! query-def)
+  (swap! query-registry assoc query-name query-def)
+  query-name)
 
-(defn ready []
-  (unpack (db/ready-tasks (ds))))
+(defn load-queries! [path]
+  (let [registry (query/read-edn-file path)]
+    (when-not (map? registry)
+      (throw (ex-info "Query file must contain one EDN map of query names to query definitions" {:path path})))
+    (doseq [[query-name query-def] registry]
+      (when-not (or (symbol? query-name) (keyword? query-name))
+        (throw (ex-info "Query names must be symbols or keywords" {:query query-name})))
+      (query/validate-query-def! query-def))
+    (swap! query-registry merge registry)
+    (keys registry)))
+
+(defn queries []
+  @query-registry)
+
+(defn- resolve-query [query-or-def]
+  (if (or (symbol? query-or-def) (keyword? query-or-def))
+    (query/query-def @query-registry query-or-def)
+    query-or-def))
+
+(defn query
+  ([query-or-def]
+   (query query-or-def {}))
+  ([query-or-def params]
+   (unpack (db/query-tasks (ds) (resolve-query query-or-def) params))))
+
+(defn tasks
+  ([]
+   (unpack (db/all-tasks (ds))))
+  ([query-or-def]
+   (query query-or-def))
+  ([query-or-def params]
+   (query query-or-def params)))
+
+(defn ready
+  ([]
+   (unpack (db/ready-tasks (ds))))
+  ([query-or-def]
+   (ready query-or-def {}))
+  ([query-or-def params]
+   (unpack (db/ready-tasks (ds) (resolve-query query-or-def) params))))

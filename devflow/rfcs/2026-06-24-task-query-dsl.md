@@ -1,7 +1,7 @@
 # Task Query DSL
 
 **Document ID:** `RFC-002`
-**Status:** Open
+**Status:** Accepted
 **Created:** 2026-06-24
 **Related specs:** [CLI Surface](../specs/cli.md), [REPL API](../specs/repl-api.md), [Task Model](../specs/task-model.md)
 
@@ -48,4 +48,14 @@ todo list --where 'final_at >= 2026-06-24'
 
 ## RFC-002.P7 Outcome
 
-Open. Record the final DSL shape in this RFC or a follow-up spec delta before implementation.
+Accepted. The first pass query DSL is an EDN vector language accepted by `list` and `ready` and by REPL helpers. Query files are EDN maps of query names to either direct query expressions or parameterized query maps:
+
+```clojure
+{owned-open
+ {:params [:owner]
+  :where [:and
+          [:= :status "todo"]
+          [:= [:attr :owner] [:param :owner]]]}}
+```
+
+Supported fields are first-class task fields `:id`, `:title`, `:status`, `:created_at`, `:updated_at`, `:final_at`, plus JSON attributes via `[:attr :key]` or nested `[:attr :path :key]`. Supported operators are `:=`, `:!=`, `:<`, `:<=`, `:>`, `:>=`, `:in`, `:exists`, `:missing`, `:and`, `:or`, and `:not`. Runtime values are referenced with `[:param :name]`.

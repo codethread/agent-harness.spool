@@ -43,6 +43,20 @@
                                      "--edge" "depends-on:ue72w"]
                                     "summary"))))
 
+(deftest list-and-ready-accept-query-options
+  (with-db
+    (fn [ds]
+      (let [design (:id (cli/run-command! ds "add" ["Design" "--status" "done" "--attr" "owner=agent"] "summary"))
+            docs (:id (cli/run-command! ds "add" ["Docs" "--attr" "owner=agent"] "summary"))
+            misc (:id (cli/run-command! ds "add" ["Misc" "--attr" "owner=human"] "summary"))]
+        (cli/run-command! ds "update" [docs "--edge" (str "depends-on:" design)] "summary")
+        (is (= #{design docs}
+               (set (map :id (cli/run-command! ds "list" ["--where" "[:= [:attr :owner] \"agent\"]"] "summary")))))
+        (is (= [docs]
+               (mapv :id (cli/run-command! ds "ready" ["--where" "[:= [:attr :owner] \"agent\"]"] "summary"))))
+        (is (= [misc]
+               (mapv :id (cli/run-command! ds "list" ["--where" "[:= [:attr :owner] [:param :owner]]" "--param" "owner=human"] "summary"))))))))
+
 (deftest add-and-update-command-cover-core-mutations
   (with-db
     (fn [ds]

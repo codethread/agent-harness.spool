@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
+            [todo.query :as query]
             [todo.specs :as specs]))
 
 (def default-db-file "todo.sqlite")
@@ -309,8 +310,21 @@
 (defn update-task-status! [ds task-id status]
   (update-task! ds task-id {:status status}))
 
-(defn all-tasks [ds]
-  (execute! ds [(str "SELECT " task-columns " FROM tasks ORDER BY id")]))
+(defn query-tasks
+  ([ds query-def]
+   (query-tasks ds query-def {}))
+  ([ds query-def params]
+   (let [{:keys [sql params]} (query/compile-query query-def params)]
+     (execute! ds (into [(str "SELECT " task-columns " FROM tasks t WHERE " sql " ORDER BY t.id")]
+                       params)))))
+
+(defn all-tasks
+  ([ds]
+   (execute! ds [(str "SELECT " task-columns " FROM tasks ORDER BY id")]))
+  ([ds query-def]
+   (query-tasks ds query-def {}))
+  ([ds query-def params]
+   (query-tasks ds query-def params)))
 
 (defn tasks-by-attribute [ds attr-key attr-value]
   (execute! ds
@@ -353,20 +367,40 @@
               GROUP BY t.id, t.title
               ORDER BY t.id"]))
 
-(defn ready-tasks [ds]
-  (execute! ds
-            [(str "SELECT " task-columns "
-              FROM tasks t
-              WHERE t.status NOT IN ('done', 'failed', 'cancelled')
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM task_edges e
-                  JOIN tasks dep ON dep.id = e.to_task_id
-                  WHERE e.from_task_id = t.id
-                    AND e.edge_type = 'depends-on'
-                    AND dep.status NOT IN ('done', 'failed', 'cancelled')
-                )
-              ORDER BY t.id")]))
+(defn ready-tasks
+  ([ds]
+   (execute! ds
+             [(str "SELECT " task-columns "
+               FROM tasks t
+               WHERE t.status NOT IN ('done', 'failed', 'cancelled')
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM task_edges e
+                   JOIN tasks dep ON dep.id = e.to_task_id
+                   WHERE e.from_task_id = t.id
+                     AND e.edge_type = 'depends-on'
+                     AND dep.status NOT IN ('done', 'failed', 'cancelled')
+                 )
+               ORDER BY t.id")]))
+  ([ds query-def]
+   (ready-tasks ds query-def {}))
+  ([ds query-def params]
+   (let [{query-sql :sql query-params :params} (query/compile-query query-def params)]
+     (execute! ds
+               (into [(str "SELECT " task-columns "
+                 FROM tasks t
+                 WHERE t.status NOT IN ('done', 'failed', 'cancelled')
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM task_edges e
+                     JOIN tasks dep ON dep.id = e.to_task_id
+                     WHERE e.from_task_id = t.id
+                       AND e.edge_type = 'depends-on'
+                       AND dep.status NOT IN ('done', 'failed', 'cancelled')
+                   )
+                   AND " query-sql "
+                 ORDER BY t.id")]
+                     query-params)))))
 
 (defn transitive-dependencies [ds task-id]
   (execute! ds

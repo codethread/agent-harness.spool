@@ -63,6 +63,26 @@
           (db/update-task-status! ds schema "done")
           (is (= [docs] (mapv :id (db/ready-tasks ds)))))))))
 
+(deftest task-query-dsl-filters-fields-attributes-and-params
+  (with-db
+    (fn [ds]
+      (let [agent (:id (db/add-task! ds {:title "Agent docs" :attributes {:owner "agent" :priority "high"}}))
+            human (:id (db/add-task! ds {:title "Human docs" :attributes {:owner "human" :priority "low"}}))
+            dotted (:id (db/add-task! ds {:title "Dotted" :attributes {"team.owner" "agent"}}))]
+        (testing "ad hoc queries filter task fields and attributes"
+          (is (= [agent]
+                 (mapv :id (db/all-tasks ds [:and
+                                              [:= :status "todo"]
+                                              [:= [:attr :owner] "agent"]])))))
+        (testing "named function queries accept runtime parameters"
+          (is (= [human]
+                 (mapv :id (db/all-tasks ds {:params [:owner]
+                                              :where [:= [:attr :owner] [:param :owner]]}
+                                         {:owner "human"})))))
+        (testing "attribute paths can query legal keys that need JSON path quoting"
+          (is (= [dotted]
+                 (mapv :id (db/all-tasks ds [:= [:attr "team.owner"] "agent"])))))))))
+
 (deftest graph-queries-follow-depends-on-direction
   (with-db
     (fn [ds]

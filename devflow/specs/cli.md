@@ -25,8 +25,8 @@ init
 add <title> [--status todo|done|failed|cancelled] [--attr key=value ...]
 update <id> [--title title] [--status todo|done|failed|cancelled] [--attr key=value ...] [--edge edge-type:to-id ...]
 show <id>
-list
-ready
+list [--where EDN | --query name --query-file path] [--param key=value ...]
+ready [--where EDN | --query name --query-file path] [--param key=value ...]
 ```
 
 ## SPEC-002.P3 Contracts
@@ -38,8 +38,11 @@ ready
 - **SPEC-002.C5:** `--edge edge-type:to-id` creates or updates an outgoing edge from the updated task to the target task.
 - **SPEC-002.C6:** `show`, `list`, and `ready` return task rows with normalized `attributes` in EDN/JSON output.
 - **SPEC-002.C7:** `ready` returns non-final tasks whose direct `depends-on` dependencies are all final.
-- **SPEC-002.C8:** Malformed options, invalid statuses, invalid edge targets, unknown commands, and database/domain errors fail non-zero.
+- **SPEC-002.C8:** `list` and `ready` accept an optional EDN query expression with `--where`.
+- **SPEC-002.C9:** `list` and `ready` accept an optional named query from an EDN query file with `--query-file`, `--query`, and repeated string-valued `--param key=value` runtime parameters.
+- **SPEC-002.C10:** `--where` and `--query` are mutually exclusive; `--query` requires `--query-file`; malformed query expressions or missing parameters fail non-zero.
+- **SPEC-002.C11:** Malformed options, invalid statuses, invalid edge targets, unknown commands, and database/domain errors fail non-zero.
 
 ## SPEC-002.P4 Deferred
 
-`by-attr`, bespoke dependency inspection commands, `link`, `done`, and `batch` are not part of the stripped public CLI. Future filtering for `list` and `ready` is tracked by RFC-002.
+`by-attr`, bespoke dependency inspection commands, `link`, `done`, and `batch` are not part of the stripped public CLI.

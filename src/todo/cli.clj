@@ -1,11 +1,13 @@
 (ns todo.cli
   (:gen-class)
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
             [next.jdbc :as jdbc]
             [todo.db :as db]
+            [todo.query :as query]
             [todo.specs :as specs]))
 
 (def query-commands #{"show" "list" "ready"})
@@ -49,6 +51,26 @@
                   {:type type :to to}))
     :update-fn conj]])
 
+(def query-options
+  [[nil "--where EDN" "EDN query expression"
+    :id :where
+    :parse-fn edn/read-string]
+   [nil "--query NAME" "Named query from --query-file"
+    :id :query
+    :parse-fn symbol]
+   [nil "--query-file PATH" "EDN map of query names to query definitions"
+    :id :query-file]
+   [nil "--param KEY=VALUE" "Repeatable string query parameter"
+    :id :param
+    :multi true
+    :default {}
+    :parse-fn (fn [s]
+                (let [[k v] (str/split s #"=" 2)]
+                  (when (or (str/blank? k) (nil? v))
+                    (throw (ex-info (str "Malformed query parameter: " s) {:param s})))
+                  [(keyword k) v]))
+    :update-fn (fn [params [k v]] (assoc params k v))]])
+
 (defn usage [summary]
   (str "Todo CLI\n\n"
        "Usage:\n"
@@ -58,8 +80,8 @@
        "  add <title> [--status status] [--attr key=value ...]\n"
        "  update <id> [--title title] [--status status] [--attr key=value ...] [--edge edge-type:to-id ...]\n"
        "  show <id>\n"
-       "  list\n"
-       "  ready\n\n"
+       "  list [--where EDN | --query name --query-file path] [--param key=value ...]\n"
+       "  ready [--where EDN | --query name --query-file path] [--param key=value ...]\n\n"
        "Options:\n"
        summary
        "\n"))
@@ -94,6 +116,24 @@
     (when-not (s/valid? ::specs/cli-attributes (:attr options))
       (fail! (str "Invalid attributes:\n" (explain ::specs/cli-attributes (:attr options))) summary))
     options))
+
+(defn parse-query-options [args summary]
+  (let [{:keys [options arguments errors]} (parse-opts args query-options)]
+    (when (seq errors) (fail! (str/join "\n" errors) summary))
+    (when (seq arguments) (fail! (str "Unknown or misplaced argument: " (first arguments)) summary))
+    (when (and (:where options) (:query options))
+      (fail! "Use either --where or --query, not both" summary))
+    (when (and (:query options) (not (:query-file options)))
+      (fail! "--query requires --query-file" summary))
+    (when (and (seq (:param options)) (not (or (:where options) (:query options))))
+      (fail! "--param requires --where or --query" summary))
+    options))
+
+(defn query-from-options [options]
+  (cond
+    (:where options) (:where options)
+    (:query options) (query/query-def (query/read-edn-file (:query-file options)) (:query options))
+    :else nil))
 
 (def json-columns #{:attributes :edge_attributes})
 
@@ -147,8 +187,16 @@
                                           :status (:status options)
                                           :attributes (when (seq (:attr options)) (:attr options))})))
     "show" (do (require-conform ::specs/one-id-command args command summary) (db/get-task ds (first args)))
-    "list" (do (require-conform ::specs/empty-command args command summary) (db/all-tasks ds))
-    "ready" (do (require-conform ::specs/empty-command args command summary) (db/ready-tasks ds))))
+    "list" (let [options (parse-query-options args summary)
+                 query-def (query-from-options options)]
+             (if query-def
+               (db/all-tasks ds query-def (:param options))
+               (db/all-tasks ds)))
+    "ready" (let [options (parse-query-options args summary)
+                  query-def (query-from-options options)]
+              (if query-def
+                (db/ready-tasks ds query-def (:param options))
+                (db/ready-tasks ds)))))
 
 (defn -main [& args]
   (let [[opts command command-args summary] (parse-global-options args)]
