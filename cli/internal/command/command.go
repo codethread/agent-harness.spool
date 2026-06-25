@@ -17,7 +17,7 @@ import (
 type App struct{ Stdout, Stderr io.Writer }
 type Options struct {
 	Format, ConfigDir, StateDir, Source string
-	ConfigDirExplicit                  bool
+	ConfigDirExplicit                   bool
 }
 type ExitError struct {
 	Code int

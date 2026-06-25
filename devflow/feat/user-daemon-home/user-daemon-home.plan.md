@@ -123,3 +123,7 @@ Moved daemon runtime discovery to fixed selected-world artifacts (`daemon.sock`,
 ### UDH-PLAN-001.DN8 Task 3 implementation notes — 2026-06-25
 
 Daemon startup now uses the selected world default database at `data/tasks.sqlite`, creates selected state/data directories before binding local transports, and auto-loads selected config-dir `init.clj` when present. `init.clj` runs after runtime state exists but before ready metadata is published, so trusted code can register daemon runtime state and failures leave no ready metadata. The Go launcher validates configured `source`, launches Clojure from that checkout, and passes `--config-dir` only for explicit alternate worlds so default XDG state/data resolution stays consistent. The public `daemon start --config` path and legacy EDN trusted startup loader were removed in favor of the MVP `init.clj` path.
+
+### UDH-PLAN-001.DN9 Task 4 implementation notes — 2026-06-25
+
+Normal Go task/query/status/stop commands now resolve only the selected daemon world and output format; `source` is parsed only for Clojure-spawning lifecycle commands. Integration coverage builds the Go binary, starts a disposable config-dir daemon, then runs task/query/status/stop commands from a separate cwd. The test removes `source` from `config.json` after daemon startup and still verifies `show`, `update`, `list --query/--param`, and `ready --query/--param` against daemon-registered query state.

@@ -17,7 +17,7 @@ tasks:
   - id: 4
     description: Task commands use daemon world
     task_file: tasks/004-task-commands-use-daemon-world.md
-    status: pending
+    status: complete
     blocked_by: [2, 3]
   - id: 5
     description: Connected daemon repl

@@ -144,7 +144,7 @@ func TestConfigDirPrecedenceAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := run("--config-dir", wrongTypeDir, "list"); err == nil || !strings.Contains(err.Error(), "client config source must be a string") {
-		t.Fatalf("expected wrong type config error, got %v", err)
+		t.Fatalf("expected source type error, got %v", err)
 	}
 }
 

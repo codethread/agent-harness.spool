@@ -6,18 +6,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestGoDaemonLifecycleCommands(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "td-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	dir := shortTempDir(t)
 	writeClientConfig(t, dir)
-	daemon := exec.Command("go", "run", "./cmd/todo", "--config-dir", dir, "daemon", "start")
+	bin := buildTodo(t)
+	runDir := shortTempDir(t)
+	daemon := exec.Command(bin, "--config-dir", dir, "daemon", "start")
+	daemon.Dir = runDir
 	var daemonOut bytes.Buffer
 	daemon.Stdout = &daemonOut
 	daemon.Stderr = &daemonOut
@@ -25,8 +25,8 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 	t.Cleanup(func() { _ = daemon.Process.Kill(); _, _ = daemon.Process.Wait() })
-	waitForStatus(t, dir, &daemonOut)
-	out, err := outputTodo(dir, "--format", "json", "daemon", "status")
+	waitForStatus(t, bin, dir, runDir, &daemonOut)
+	out, err := outputTodo(bin, dir, runDir, "--format", "json", "daemon", "status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,15 +41,104 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 	if status["healthy"] != true || status["database_path"] == "" || status["config_dir"] != realDir || status["data_dir"] == "" || status["daemon_id"] == "" || status["socket_path"] != filepath.Join(realDir, "state", "daemon.sock") || status["pid"].(float64) <= 0 {
 		t.Fatalf("unexpected status payload: %#v", status)
 	}
-	if err := runTodo(dir, "daemon", "stop"); err != nil {
+	if err := runTodo(bin, dir, runDir, "daemon", "stop"); err != nil {
 		t.Fatal(err)
 	}
 	if err := daemon.Wait(); err != nil {
 		t.Fatalf("daemon did not exit cleanly: %v\n%s", err, daemonOut.String())
 	}
-	if _, err := outputTodo(dir, "daemon", "status"); err == nil {
+	if _, err := outputTodo(bin, dir, runDir, "daemon", "status"); err == nil {
 		t.Fatal("expected status to fail after stop cleanup")
 	}
+}
+
+func TestTaskAndQueryCommandsRunOutsideCheckoutWithoutSource(t *testing.T) {
+	dir := shortTempDir(t)
+	writeClientConfig(t, dir)
+	initPath := filepath.Join(dir, "init.clj")
+	init := `(require '[todo.daemon.api :as api] '[todo.daemon.runtime :as runtime])
+(api/register-query @runtime/current-runtime 'by-owner {:params [:owner] :where [:= [:attr :owner] [:param :owner]]})`
+	if err := os.WriteFile(initPath, []byte(init), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bin := buildTodo(t)
+	runDir := shortTempDir(t)
+	daemon := exec.Command(bin, "--config-dir", dir, "daemon", "start")
+	daemon.Dir = runDir
+	var daemonOut bytes.Buffer
+	daemon.Stdout = &daemonOut
+	daemon.Stderr = &daemonOut
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+	t.Cleanup(func() { _ = daemon.Process.Kill(); _, _ = daemon.Process.Wait() })
+	waitForDaemonAndInit(t, bin, dir, runDir, &daemonOut)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"format":"json"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := outputTodo(bin, dir, runDir, "--format", "json", "daemon", "status"); err != nil || !strings.Contains(out, `"healthy":true`) {
+		t.Fatalf("status after source removal output/error = %q/%v", out, err)
+	}
+	design := addJSON(t, bin, dir, runDir, "Design", "todo", "owner=agent")
+	docs := addJSON(t, bin, dir, runDir, "Docs", "todo", "owner=agent")
+	if out, err := outputTodo(bin, dir, runDir, "--format", "json", "show", docs); err != nil || !strings.Contains(out, `"title":"Docs"`) {
+		t.Fatalf("show output/error = %q/%v", out, err)
+	}
+	if err := runTodo(bin, dir, runDir, "update", docs, "--edge", "depends-on:"+design, "--attr", "phase=write"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := outputTodo(bin, dir, runDir, "--format", "json", "list", "--query", "by-owner", "--param", "owner=agent"); err != nil || !strings.Contains(out, docs) || !strings.Contains(out, design) {
+		t.Fatalf("list query output/error = %q/%v", out, err)
+	}
+	if out, err := outputTodo(bin, dir, runDir, "--format", "json", "ready", "--query", "by-owner", "--param", "owner=agent"); err != nil || strings.Contains(out, docs) || !strings.Contains(out, design) {
+		t.Fatalf("ready query output/error = %q/%v", out, err)
+	}
+	if err := runTodo(bin, dir, runDir, "daemon", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.Wait(); err != nil {
+		t.Fatalf("daemon did not exit cleanly: %v\n%s", err, daemonOut.String())
+	}
+}
+
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "td-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+func buildTodo(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(shortTempDir(t), "todo")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/todo")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("build todo: %v\n%s", err, out.String())
+	}
+	return bin
+}
+
+func addJSON(t *testing.T, bin, configDir, cwd, title, status, attr string) string {
+	t.Helper()
+	out, err := outputTodo(bin, configDir, cwd, "--format", "json", "add", title, "--status", status, "--attr", attr)
+	if err != nil {
+		t.Fatalf("add %s: %v\n%s", title, err, out)
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(out), &row); err != nil {
+		t.Fatalf("add output is not json: %v\n%s", err, out)
+	}
+	id, ok := row["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("add output missing id: %#v", row)
+	}
+	return id
 }
 
 func writeClientConfig(t *testing.T, dir string) {
@@ -63,12 +152,12 @@ func writeClientConfig(t *testing.T, dir string) {
 	}
 }
 func quote(s string) string { b, _ := json.Marshal(s); return string(b) }
-func waitForStatus(t *testing.T, configDir string, daemonErr *bytes.Buffer) {
+func waitForStatus(t *testing.T, bin, configDir, cwd string, daemonErr *bytes.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if _, err := outputTodo(configDir, "daemon", "status"); err == nil {
+		if _, err := outputTodo(bin, configDir, cwd, "daemon", "status"); err == nil {
 			return
 		} else {
 			lastErr = err
@@ -77,12 +166,12 @@ func waitForStatus(t *testing.T, configDir string, daemonErr *bytes.Buffer) {
 	}
 	t.Fatalf("daemon did not become ready: %v\n%s", lastErr, daemonErr.String())
 }
-func waitForDaemonAndInit(t *testing.T, configDir string, daemonErr *bytes.Buffer) {
+func waitForDaemonAndInit(t *testing.T, bin, configDir, cwd string, daemonErr *bytes.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if err := runTodo(configDir, "init"); err == nil {
+		if err := runTodo(bin, configDir, cwd, "init"); err == nil {
 			return
 		} else {
 			lastErr = err
@@ -91,13 +180,14 @@ func waitForDaemonAndInit(t *testing.T, configDir string, daemonErr *bytes.Buffe
 	}
 	t.Fatalf("daemon did not become ready: %v\n%s", lastErr, daemonErr.String())
 }
-func runTodo(configDir string, args ...string) error {
-	_, err := outputTodo(configDir, args...)
+func runTodo(bin, configDir, cwd string, args ...string) error {
+	_, err := outputTodo(bin, configDir, cwd, args...)
 	return err
 }
-func outputTodo(configDir string, args ...string) (string, error) {
-	full := append([]string{"run", "./cmd/todo", "--config-dir", configDir}, args...)
-	cmd := exec.Command("go", full...)
+func outputTodo(bin, configDir, cwd string, args ...string) (string, error) {
+	full := append([]string{"--config-dir", configDir}, args...)
+	cmd := exec.Command(bin, full...)
+	cmd.Dir = cwd
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

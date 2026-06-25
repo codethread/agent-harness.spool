@@ -62,6 +62,18 @@ func New(cfg Config) *SocketClient {
 	return &SocketClient{Config: cfg, DialTimeout: time.Second, RequestDeadline: 10 * time.Second}
 }
 
+func (c *SocketClient) startCommand() string {
+	if c.Config.ConfigDir == "" {
+		return "todo daemon start"
+	}
+	return fmt.Sprintf("todo --config-dir %s daemon start", c.Config.ConfigDir)
+}
+
+func (c *SocketClient) daemonStateError(format string, args ...any) error {
+	message := fmt.Sprintf(format, args...)
+	return fmt.Errorf("%s for selected config-dir %s; start one with: %s", message, c.Config.ConfigDir, c.startCommand())
+}
+
 func (e *ResponseError) Error() string {
 	if e == nil {
 		return "daemon error"
@@ -154,26 +166,26 @@ func (c *SocketClient) metadata() (Metadata, string, error) {
 	file := filepath.Join(c.Config.StateDir, "daemon.json")
 	b, err := os.ReadFile(file)
 	if os.IsNotExist(err) {
-		return Metadata{}, "", fmt.Errorf("no running daemon for state dir %s (start one with: todo daemon start)", c.Config.StateDir)
+		return Metadata{}, "", c.daemonStateError("no running daemon (state dir %s)", c.Config.StateDir)
 	}
 	if err != nil {
 		return Metadata{}, "", err
 	}
 	var m Metadata
 	if err := json.Unmarshal(b, &m); err != nil {
-		return Metadata{}, "", fmt.Errorf("malformed daemon metadata: %w", err)
+		return Metadata{}, "", fmt.Errorf("%w: %v", c.daemonStateError("malformed daemon metadata"), err)
 	}
 	if m.ProtocolVersion != protocolVersion || m.PID == 0 || m.DatabasePath == "" || m.DaemonID == "" || m.ConfigDir == "" || m.DataDir == "" || m.SocketPath == "" || m.StartedAt == "" || m.NREPL.Host == "" || m.NREPL.Port == 0 {
-		return Metadata{}, "", errors.New("malformed daemon metadata: missing required fields")
+		return Metadata{}, "", c.daemonStateError("malformed daemon metadata: missing required fields")
 	}
 	if c.Config.ConfigDir != "" && filepath.Clean(m.ConfigDir) != filepath.Clean(c.Config.ConfigDir) {
-		return Metadata{}, "", fmt.Errorf("daemon metadata config dir mismatch: %s", m.ConfigDir)
+		return Metadata{}, "", c.daemonStateError("daemon metadata config dir mismatch: %s", m.ConfigDir)
 	}
 	if filepath.Clean(m.SocketPath) != filepath.Join(c.Config.StateDir, "daemon.sock") {
-		return Metadata{}, "", fmt.Errorf("daemon metadata socket mismatch: %s", m.SocketPath)
+		return Metadata{}, "", c.daemonStateError("daemon metadata socket mismatch: %s", m.SocketPath)
 	}
 	if !pidAlive(m.PID) {
-		return Metadata{}, "", fmt.Errorf("stale daemon metadata: pid %d is not alive", m.PID)
+		return Metadata{}, "", c.daemonStateError("stale daemon metadata: pid %d is not alive", m.PID)
 	}
 	return m, file, nil
 }
