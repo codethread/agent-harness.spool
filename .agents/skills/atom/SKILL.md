@@ -15,20 +15,10 @@ Ad hoc query:
 clojure -M:todo --db todo.sqlite --format edn list --where '[:= [:attr :owner] "agent"]'
 ```
 
-Named parameterized query:
-
-```clojure
-;; queries.edn
-{owned-open
- {:params [:owner]
-  :where [:and
-          [:= :status "todo"]
-          [:= [:attr :owner] [:param :owner]]]}}
-```
+Named parameterized query already loaded into daemon memory:
 
 ```sh
 clojure -M:todo --db todo.sqlite --format edn ready \
-  --query-file queries.edn \
   --query owned-open \
   --param owner=agent
 ```

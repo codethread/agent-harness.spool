@@ -7,7 +7,7 @@ tasks:
   - id: 2
     description: cli named query consumption
     task_file: tasks/002-cli-query-registry-workflow.md
-    status: pending
+    status: complete
     blocked_by: [1]
   - id: 3
     description: repl daemon query registry

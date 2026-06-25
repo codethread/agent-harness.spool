@@ -56,11 +56,12 @@
   [[nil "--where EDN" "EDN query expression"
     :id :where
     :parse-fn edn/read-string]
-   [nil "--query NAME" "Named query from --query-file"
+   [nil "--query NAME" "Named query from daemon memory"
     :id :query
-    :parse-fn symbol]
-   [nil "--query-file PATH" "EDN map of query names to query definitions"
-    :id :query-file]
+    :parse-fn (fn [s]
+                (let [query-name (edn/read-string s)]
+                  (query/canonical-query-name query-name)
+                  query-name))]
    [nil "--param KEY=VALUE" "Repeatable string query parameter"
     :id :param
     :multi true
@@ -85,8 +86,8 @@
        "  add <title> [--status status] [--attr key=value ...]\n"
        "  update <id> [--title title] [--status status] [--attr key=value ...] [--edge edge-type:to-id ...]\n"
        "  show <id>\n"
-       "  list [--where EDN | --query name --query-file path] [--param key=value ...]\n"
-       "  ready [--where EDN | --query name --query-file path] [--param key=value ...]\n"
+       "  list [--where EDN | --query name] [--param key=value ...]\n"
+       "  ready [--where EDN | --query name] [--param key=value ...]\n"
        "  daemon start [--config path]\n"
        "  daemon stop\n"
        "  daemon status\n\n"
@@ -135,20 +136,27 @@
     (when (seq arguments) (fail! (str "Unknown or misplaced argument: " (first arguments)) summary))
     (when (and (:where options) (:query options))
       (fail! "Use either --where or --query, not both" summary))
-    (when (and (:query options) (not (:query-file options)))
-      (fail! "--query requires --query-file" summary))
     (when (and (seq (:param options)) (not (or (:where options) (:query options))))
       (fail! "--param requires --where or --query" summary))
     options))
 
-(defn query-from-options [options]
-  (cond
-    (:where options) (:where options)
-    (:query options) (query/query-def (query/read-edn-file (:query-file options)) (:query options))
-    :else nil))
-
 (defn parse-daemon-start-options [args summary]
   (parse-options args daemon-start-options summary))
+
+(defn cli-error-message [e]
+  (let [{:keys [daemon-message daemon-data]} (ex-data e)]
+    (if-let [query-name (and (= "Query not found" daemon-message)
+                             (:canonical-query daemon-data))]
+      (str "Query not found: " query-name
+           (when-let [available (seq (:available daemon-data))]
+             (str " (available: " (str/join ", " available) ")")))
+      (or daemon-message (.getMessage e)))))
+
+(defn run-query-command [db-file options ad-hoc named plain]
+  (cond
+    (:where options) (ad-hoc db-file (:where options) (:param options))
+    (:query options) (named db-file (:query options) (:param options))
+    :else (plain db-file)))
 
 (defn print-result [format result]
   (case format
@@ -174,16 +182,10 @@
                                            :attributes (when (seq (:attr options)) (:attr options))
                                            :edges (:edge options)}))
     "show" (do (require-conform ::specs/one-id-command args command summary) (client/show db-file (first args)))
-    "list" (let [options (parse-query-options args summary)
-                 query-def (query-from-options options)]
-             (if query-def
-               (client/list db-file query-def (:param options))
-               (client/list db-file)))
-    "ready" (let [options (parse-query-options args summary)
-                  query-def (query-from-options options)]
-              (if query-def
-                (client/ready db-file query-def (:param options))
-                (client/ready db-file)))))
+    "list" (run-query-command db-file (parse-query-options args summary)
+                              client/list client/list-query client/list)
+    "ready" (run-query-command db-file (parse-query-options args summary)
+                               client/ready client/ready-query client/ready)))
 
 (defn daemon-status [db-file]
   (let [meta (client/status db-file)]
@@ -220,5 +222,5 @@
           (and (= command "add") (= "human" (:format opts))) (println (:id result))
           (and (= command "daemon") (= "start" (first command-args))) nil
           (or (query-commands command) (= command "daemon") (not= "human" (:format opts))) (print-result (:format opts) result)))
-      (catch clojure.lang.ExceptionInfo e (fail! (.getMessage e) summary))
+      (catch clojure.lang.ExceptionInfo e (fail! (cli-error-message e) summary))
       (catch Exception e (fail! (.getMessage e) summary)))))

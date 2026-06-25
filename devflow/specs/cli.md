@@ -25,8 +25,8 @@ init
 add <title> [--status todo|done|failed|cancelled] [--attr key=value ...]
 update <id> [--title title] [--status todo|done|failed|cancelled] [--attr key=value ...] [--edge edge-type:to-id ...]
 show <id>
-list [--where EDN | --query name --query-file path] [--param key=value ...]
-ready [--where EDN | --query name --query-file path] [--param key=value ...]
+list [--where EDN | --query name] [--param key=value ...]
+ready [--where EDN | --query name] [--param key=value ...]
 daemon start [--config <path>]
 daemon stop
 daemon status
@@ -42,8 +42,8 @@ daemon status
 - **SPEC-002.C6:** `show`, `list`, and `ready` return task rows with normalized `attributes` in EDN/JSON output.
 - **SPEC-002.C7:** `ready` returns non-final tasks whose direct `depends-on` dependencies are all final.
 - **SPEC-002.C8:** `list` and `ready` accept an optional EDN query expression with `--where`.
-- **SPEC-002.C9:** `list` and `ready` accept an optional named query from an EDN query file with `--query-file`, `--query`, and repeated string-valued `--param key=value` runtime parameters.
-- **SPEC-002.C10:** `--where` and `--query` are mutually exclusive; `--query` requires `--query-file`; malformed query expressions or missing parameters fail non-zero.
+- **SPEC-002.C9:** `list` and `ready` accept an optional named query from daemon memory with `--query` and repeated string-valued `--param key=value` runtime parameters.
+- **SPEC-002.C10:** `--where` and `--query` are mutually exclusive; malformed query expressions, missing named queries, or missing parameters fail non-zero.
 - **SPEC-002.C11:** Malformed options, invalid statuses, invalid edge targets, unknown commands, daemon transport/identity failures, and database/domain errors fail non-zero.
 - **SPEC-002.C12:** `daemon start`, `daemon stop`, and `daemon status` manage the local daemon lifecycle for the selected database; `daemon status` respects `--format` and reports health, canonical database path, pid, endpoint, and daemon identity. `daemon start --config <path>` loads a trusted startup EDN config supporting only `{:load-files ["trusted.clj"]}` and fails before publishing runtime metadata if config or trusted code loading fails.
 

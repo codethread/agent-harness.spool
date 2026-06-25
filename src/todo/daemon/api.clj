@@ -72,8 +72,14 @@
   ([runtime query-def params]
    (normalize (db/all-tasks (ds runtime) query-def params))))
 
+(defn list-query [runtime query-name params]
+  (list runtime (resolve-query runtime query-name) params))
+
 (defn ready
   ([runtime]
    (normalize (db/ready-tasks (ds runtime))))
   ([runtime query-def params]
    (normalize (db/ready-tasks (ds runtime) query-def params))))
+
+(defn ready-query [runtime query-name params]
+  (ready runtime (resolve-query runtime query-name) params))

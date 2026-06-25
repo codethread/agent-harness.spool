@@ -63,12 +63,35 @@
             docs (:id (cli/run-command! db-file "add" ["Docs" "--attr" "owner=agent"] "summary"))
             misc (:id (cli/run-command! db-file "add" ["Misc" "--attr" "owner=human"] "summary"))]
         (cli/run-command! db-file "update" [docs "--edge" (str "depends-on:" design)] "summary")
+        (client/register-query db-file 'agent-owner '[:= [:attr :owner] "agent"])
+        (client/register-query db-file :by-owner '{:params [:owner]
+                                                   :where [:= [:attr :owner] [:param :owner]]})
         (is (= #{design docs}
                (set (map :id (cli/run-command! db-file "list" ["--where" "[:= [:attr :owner] \"agent\"]"] "summary")))))
+        (is (= #{design docs}
+               (set (map :id (cli/run-command! db-file "list" ["--query" "agent-owner"] "summary")))))
+        (is (= #{design docs}
+               (set (map :id (cli/run-command! db-file "list" ["--query" ":agent-owner"] "summary")))))
         (is (= [docs]
-               (mapv :id (cli/run-command! db-file "ready" ["--where" "[:= [:attr :owner] \"agent\"]"] "summary"))))
+               (mapv :id (cli/run-command! db-file "ready" ["--query" "agent-owner"] "summary"))))
         (is (= [misc]
-               (mapv :id (cli/run-command! db-file "list" ["--where" "[:= [:attr :owner] [:param :owner]]" "--param" "owner=human"] "summary"))))))))
+               (mapv :id (cli/run-command! db-file "list" ["--query" "by-owner" "--param" "owner=human"] "summary"))))))))
+
+(deftest query-options-reject-query-file-and-missing-names
+  (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown option: \"--query-file\""
+                          (cli/parse-query-options ["--query" "agent" "--query-file" "queries.edn"] "summary")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Use either --where or --query, not both"
+                          (cli/parse-query-options ["--where" "[:= :status \"todo\"]" "--query" "known"] "summary"))))
+  (with-runtime
+    (fn [db-file]
+      (client/register-query db-file 'known '[:= :status "todo"])
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Query not found: missing .*available: known"
+                            (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))]
+                              (cli/-main "--db" db-file "list" "--query" "missing")))))))
 
 (deftest task-commands-reject-daemon-config-option
   (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))
