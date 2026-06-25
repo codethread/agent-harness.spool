@@ -136,3 +136,7 @@ Implemented `atom.plugin.alpha/load-plugin!` via the trusted daemon API path so 
 ### RPS-PLAN-001.DN10 Bootstrap prelude namespaces — 2026-06-25
 
 Added `atom.bootstrap.alpha/use-defaults!` to register intentionally small built-in alpha library metadata for loaded plugin and bootstrap namespaces. The helper is reload-friendly because duplicate metadata registration replaces by canonical name, returns both the just-registered metadata and current registry state, and does not require, load, or mark the optional prelude as loaded. Added `atom.prelude.alpha` as an opt-in convenience namespace exposing bootstrap and plugin helper vars.
+
+### RPS-PLAN-001.DN11 Init and REPL examples — 2026-06-25
+
+Updated README examples to show selected config-dir `init.clj` bootstrapping defaults, manually managed local plugin directories loaded with `atom.plugin.alpha/load-plugin!`, metadata introspection through `todo daemon repl --stdin`, and the blessed/lower-level/internal/raw-schema coupling tiers. Smoke coverage now writes a disposable config-dir `init.clj`, creates a local plugin directory with `atom-plugin.edn`, verifies daemon startup loads it, and inspects loaded plugin metadata through connected REPL stdin.

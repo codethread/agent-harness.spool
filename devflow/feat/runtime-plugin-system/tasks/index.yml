@@ -27,7 +27,7 @@ tasks:
   - id: 6
     description: Init and REPL examples
     task_file: tasks/006-init-repl-examples.md
-    status: pending
+    status: complete
     blocked_by: [4, 5]
   - id: 7
     description: Validation docs prep
