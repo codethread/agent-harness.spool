@@ -1,5 +1,6 @@
 (ns todo.plugin-test
   (:require [clojure.test :refer [deftest is testing]]
+            [atom.bootstrap.alpha :as bootstrap]
             [atom.plugin.alpha :as plugin]
             [todo.daemon.config :as daemon-config]
             [todo.daemon.runtime :as runtime]
@@ -157,3 +158,37 @@
         (is (not (.exists (java.io.File. invalid-marker))))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"load failed" (plugin/load-plugin! throwing)))
         (is (nil? (plugin/plugin :demo/throwing)))))))
+
+(deftest bootstrap-and-prelude-namespaces-load
+  (with-runtime
+    (fn [_]
+      (is (find-ns 'atom.bootstrap.alpha))
+      (let [prelude-before (find-ns 'atom.prelude.alpha)
+            state (bootstrap/use-defaults!)
+            reloaded (bootstrap/use-defaults!)]
+        (is (= ['atom.bootstrap.alpha 'atom.plugin.alpha]
+               (mapv :name (:plugins state))))
+        (is (= (:plugins state) (:plugins reloaded)))
+        (is (= (set (map :name (:plugins state)))
+               (set (map :name (:registered reloaded)))))
+        (is (some #(= 'atom/plugin-helpers %) (:provides (plugin/plugin 'atom.plugin.alpha))))
+        (is (identical? prelude-before (find-ns 'atom.prelude.alpha)))))))
+
+(deftest prelude-is-opt-in-and-exposes-plugin-helper-conveniences
+  (with-runtime
+    (fn [_]
+      (require 'atom.prelude.alpha)
+      (let [prelude-register! (requiring-resolve 'atom.prelude.alpha/register!)
+            prelude-plugin (requiring-resolve 'atom.prelude.alpha/plugin)
+            prelude-plugins (requiring-resolve 'atom.prelude.alpha/plugins)
+            prelude-load-plugin! (requiring-resolve 'atom.prelude.alpha/load-plugin!)]
+        (is (ifn? prelude-register!))
+        (is (ifn? prelude-plugin))
+        (is (ifn? prelude-plugins))
+        (is (ifn? prelude-load-plugin!))
+        (is (= {:format-version 1 :name 'demo/prelude}
+               (prelude-register! {:format-version 1 :name :demo/prelude})))
+        (is (= {:format-version 1 :name 'demo/prelude}
+               (prelude-plugin :demo/prelude)))
+        (is (= [{:format-version 1 :name 'demo/prelude}]
+               (prelude-plugins)))))))

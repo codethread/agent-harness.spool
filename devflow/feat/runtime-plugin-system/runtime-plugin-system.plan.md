@@ -132,3 +132,7 @@ Implemented daemon-lifetime plugin metadata state as an in-memory runtime regist
 ### RPS-PLAN-001.DN9 Local plugin loader implementation — 2026-06-25
 
 Implemented `atom.plugin.alpha/load-plugin!` via the trusted daemon API path so plugin `init.clj` executes in the daemon JVM. Relative plugin paths resolve against the daemon metadata config-dir, metadata is read and validated before entry execution, loader-owned source facts are added after successful `load-file`, and thrown entry errors do not register plugin metadata. Tests cover absolute and config-dir-relative paths plus loud failure modes for missing files, malformed metadata, unknown keys, unsupported format versions, and thrown plugin code.
+
+### RPS-PLAN-001.DN10 Bootstrap prelude namespaces — 2026-06-25
+
+Added `atom.bootstrap.alpha/use-defaults!` to register intentionally small built-in alpha library metadata for loaded plugin and bootstrap namespaces. The helper is reload-friendly because duplicate metadata registration replaces by canonical name, returns both the just-registered metadata and current registry state, and does not require, load, or mark the optional prelude as loaded. Added `atom.prelude.alpha` as an opt-in convenience namespace exposing bootstrap and plugin helper vars.

@@ -22,7 +22,7 @@ tasks:
   - id: 5
     description: Bootstrap prelude namespaces
     task_file: tasks/005-bootstrap-prelude-namespaces.md
-    status: pending
+    status: complete
     blocked_by: [2, 3]
   - id: 6
     description: Init and REPL examples
