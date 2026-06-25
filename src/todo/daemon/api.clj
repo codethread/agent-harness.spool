@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [list update])
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [next.jdbc :as jdbc]
             [todo.daemon.runtime :as runtime]
             [todo.db :as db]
@@ -26,6 +27,60 @@
 
 (defn- plugin-registry [runtime]
   (:plugin-registry runtime))
+
+(defn- config-dir [runtime]
+  (get-in runtime [:metadata :config-dir]))
+
+(defn- libs-file [runtime]
+  (io/file (config-dir runtime) "libs.edn"))
+
+(defn- canonical-root [runtime path]
+  (let [file (io/file path)
+        resolved (if (.isAbsolute file)
+                   file
+                   (io/file (config-dir runtime) path))]
+    (.getCanonicalPath resolved)))
+
+(defn- validate-approved-lib-entry! [lib entry]
+  (when-not (symbol? lib)
+    (throw (ex-info "Library coordinate must be a symbol" {:lib lib})))
+  (when-not (map? entry)
+    (throw (ex-info "Library entry must be a map" {:lib lib :entry entry})))
+  (when-let [unknown (seq (remove #{:local/root} (keys entry)))]
+    (throw (ex-info "Library entry contains unknown keys" {:lib lib :keys (vec unknown)})))
+  (when-not (and (string? (:local/root entry)) (not (str/blank? (:local/root entry))))
+    (throw (ex-info "Library entry requires non-blank string :local/root" {:lib lib :local/root (:local/root entry)}))))
+
+(defn normalize-approved-libs [runtime config]
+  (when-not (map? config)
+    (throw (ex-info "libs.edn must contain a map" {:config config})))
+  (when-let [unknown (seq (remove #{:libs} (keys config)))]
+    (throw (ex-info "libs.edn contains unknown top-level keys" {:keys (vec unknown)})))
+  (when-not (map? (:libs config))
+    (throw (ex-info "libs.edn requires :libs map" {:libs (:libs config)})))
+  {:libs (into {}
+               (map (fn [[lib entry]]
+                      (validate-approved-lib-entry! lib entry)
+                      [lib {:local/root (:local/root entry)
+                            :root (canonical-root runtime (:local/root entry))}]))
+               (:libs config))})
+
+(defn approved-libs [runtime]
+  (let [file (libs-file runtime)]
+    (cond
+      (not (.exists file))
+      {:libs {}}
+
+      (not (.isFile file))
+      (throw (ex-info "libs.edn is malformed or unreadable" {:file (.getPath file)}))
+
+      :else
+      (normalize-approved-libs
+       runtime
+       (try
+         (edn/read-string (slurp file))
+         (catch Throwable t
+           (throw (ex-info "libs.edn is malformed or unreadable" {:file (.getPath file)} t))))))))
 
 (def supported-plugin-format-version 1)
 (def plugin-authored-keys #{:format-version :name :version :requires-atom :provides})

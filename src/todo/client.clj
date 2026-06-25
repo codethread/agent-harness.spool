@@ -24,7 +24,8 @@
    :register-plugin 'todo.daemon.api/register-plugin
    :plugins 'todo.daemon.api/plugins
    :plugin 'todo.daemon.api/plugin
-   :load-plugin 'todo.daemon.api/load-plugin})
+   :load-plugin 'todo.daemon.api/load-plugin
+   :approved-libs 'todo.daemon.api/approved-libs})
 
 (defn fail [message data]
   (throw (ex-info message data)))
