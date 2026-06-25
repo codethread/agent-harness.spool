@@ -81,6 +81,15 @@ func TestCallSuccessAndDaemonError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "task/not-found") {
 		t.Fatalf("expected daemon error, got %v", err)
 	}
+
+	sock = serve(t, func(req map[string]any) map[string]any {
+		return map[string]any{"protocol_version": 1, "request_id": req["request_id"], "ok": false, "result": nil, "error": map[string]any{"type": "domain", "code": "domain/error", "message": "Query not found", "details": map[string]any{"canonical-query": "missing", "available": []any{"mine", "ready"}}}}
+	})
+	writeMeta(t, db, sock, os.Getpid())
+	_, err = New(Config{DB: db, Format: "json"}).Call("list-query", map[string]any{"query": "missing", "params": map[string]string{}})
+	if err == nil || !strings.Contains(err.Error(), "missing") || !strings.Contains(err.Error(), "mine, ready") {
+		t.Fatalf("expected query details, got %v", err)
+	}
 }
 
 func TestMetadataAndTransportFailures(t *testing.T) {

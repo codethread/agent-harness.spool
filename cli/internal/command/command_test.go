@@ -34,6 +34,7 @@ func TestRejectsRemovedAndMalformedInputs(t *testing.T) {
 		{"list", "--where", ""},
 		{"list", "extra"},
 		{"ready", "--query", "q", "extra"},
+		{"ready", "--query", ""},
 		{"add", "x", "extra"},
 		{"add", "x", "--status", "bogus"},
 		{"add", "x", "--attr", "novalue"},
@@ -100,12 +101,15 @@ func TestXDGConfigLoading(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := run("list")
-	if err == nil || !strings.Contains(err.Error(), "list is not wired") {
-		t.Fatalf("expected xdg config to parse and reach stub, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "missing daemon metadata") {
+		t.Fatalf("expected xdg config to parse and reach daemon metadata lookup, got %v", err)
 	}
 }
 
-type fakeClient struct{ calls []fakeCall }
+type fakeClient struct {
+	calls  []fakeCall
+	result any
+}
 type fakeCall struct {
 	op   string
 	args map[string]any
@@ -113,7 +117,46 @@ type fakeCall struct {
 
 func (f *fakeClient) Call(op string, args map[string]any) (any, error) {
 	f.calls = append(f.calls, fakeCall{op, args})
+	if f.result != nil {
+		return f.result, nil
+	}
 	return map[string]any{"id": "task-1", "title": "Write docs", "status": "todo", "attributes": map[string]any{}}, nil
+}
+
+func TestQueryCommandsUseSocketClientPayloads(t *testing.T) {
+	orig := newClient
+	fc := &fakeClient{result: []any{map[string]any{"id": "task-1"}}}
+	newClient = func(o Options) Caller { return fc }
+	t.Cleanup(func() { newClient = orig })
+	out, err := run("list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != `{"id":"task-1"}` {
+		t.Fatalf("unexpected human list output: %q", out)
+	}
+	out, err = run("ready", "--query", "by-owner", "--param", "owner=agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.calls) != 2 {
+		t.Fatalf("calls = %#v", fc.calls)
+	}
+	if fc.calls[0].op != "list" || !reflect.DeepEqual(fc.calls[0].args, map[string]any{}) {
+		t.Fatalf("bad list call: %#v", fc.calls[0])
+	}
+	expected := map[string]any{"query": "by-owner", "params": map[string]any{"owner": "agent"}}
+	if fc.calls[1].op != "ready-query" || !reflect.DeepEqual(fc.calls[1].args, expected) {
+		t.Fatalf("bad ready-query call: %#v", fc.calls[1])
+	}
+	fc.result = []any{}
+	out, err = run("list", "--query", "empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "(no rows)" {
+		t.Fatalf("empty row output = %q", out)
+	}
 }
 
 func TestTaskCommandsUseSocketClientPayloads(t *testing.T) {

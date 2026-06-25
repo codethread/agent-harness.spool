@@ -125,9 +125,9 @@ func (a *App) runCommand(o Options, args []string) error {
 		}
 		return a.call(o, "show", map[string]any{"id": args[1]})
 	case "list":
-		return parseQueryish("list", args[1:])
+		return a.parseQueryish(o, "list", args[1:])
 	case "ready":
-		return parseQueryish("ready", args[1:])
+		return a.parseQueryish(o, "ready", args[1:])
 	case "daemon":
 		return parseDaemon(args[1:])
 	default:
@@ -252,20 +252,82 @@ func (a *App) call(o Options, op string, args map[string]any) error {
 			}
 		}
 	case "show":
-		if result != nil {
-			b, err := json.Marshal(result)
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprintln(a.Stdout, string(b))
+		return a.writeHumanJSON(result)
+	case "list", "ready", "list-query", "ready-query":
+		return a.writeHumanRows(result)
+	}
+	return nil
+}
+
+func (a *App) writeHumanJSON(result any) error {
+	if result == nil {
+		return nil
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(a.Stdout, string(b))
+	return err
+}
+
+func (a *App) writeHumanRows(result any) error {
+	rows, ok := result.([]any)
+	if !ok {
+		return a.writeHumanJSON(result)
+	}
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(a.Stdout, "(no rows)")
+		return err
+	}
+	for _, row := range rows {
+		if err := a.writeHumanJSON(row); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func parseQueryish(op string, args []string) error {
-	return fmt.Errorf("%s is not wired to the daemon socket yet", op)
+func (a *App) parseQueryish(o Options, op string, args []string) error {
+	fs := flag.NewFlagSet(op, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	query := fs.String("query", "", "")
+	params := multiFlag{}
+	fs.Var(&params, "param", "")
+	fs.String("where", "", "")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	whereSet := false
+	querySet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "where" {
+			whereSet = true
+		}
+		if f.Name == "query" {
+			querySet = true
+		}
+	})
+	if whereSet {
+		return errors.New("--where is not supported by the Go CLI; use --query")
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("%s received unexpected arguments", op)
+	}
+	pm, err := parseKV(params, "--param")
+	if err != nil {
+		return err
+	}
+	if *query == "" {
+		if querySet {
+			return errors.New("--query requires a non-empty name")
+		}
+		if len(params) > 0 {
+			return errors.New("--param requires --query")
+		}
+		return a.call(o, op, map[string]any{})
+	}
+	return a.call(o, op+"-query", map[string]any{"query": *query, "params": pm})
 }
 func parseDaemon(args []string) error {
 	if len(args) == 0 {

@@ -1,6 +1,7 @@
 (ns todo.daemon.socket
   (:require [clojure.data.json :as json]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import [java.io BufferedReader BufferedWriter InputStreamReader OutputStreamWriter]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels ClosedChannelException ServerSocketChannel]))
@@ -19,8 +20,13 @@
   {"protocol_version" 1 "request_id" request-id "ok" true "result" result "error" nil})
 
 (defn- domain-error [request-id e]
-  {"protocol_version" 1 "request_id" request-id "ok" false "result" nil
-   "error" {"type" "domain" "code" "domain/error" "message" (ex-message e) "details" (or (ex-data e) {})}})
+  (let [message (ex-message e)
+        details (or (ex-data e) {})]
+    {"protocol_version" 1 "request_id" request-id "ok" false "result" nil
+     "error" {"type" "domain"
+              "code" (if (and (:canonical-query details) (contains? details :available)) "query/not-found" "domain/error")
+              "message" message
+              "details" details}}))
 
 (defn- string-map? [m] (and (map? m) (every? string? (vals m))))
 (defn- valid-edge? [edge]
@@ -93,6 +99,30 @@
 (defn- api [sym]
   (requiring-resolve (symbol "todo.daemon.api" (name sym))))
 
+(defn- query-name [name]
+  (let [trimmed (str/trim name)
+        canonical (if (str/starts-with? trimmed ":") (subs trimmed 1) trimmed)]
+    (when (str/blank? canonical)
+      (throw (ex-info "Query names must not be blank" {:query name})))
+    (symbol canonical)))
+
+(defn- query-params [query-def params]
+  (let [declared (set (:params query-def))
+        declared-names (set (map name declared))
+        provided (set (keys params))]
+    (when-let [unknown (seq (remove declared-names provided))]
+      (throw (ex-info "Unknown query parameters" {:params (vec unknown)
+                                                   :declared (vec declared)})))
+    (into {} (keep (fn [k]
+                     (when (contains? params (name k))
+                       [k (get params (name k))]))
+                   declared))))
+
+(defn- dispatch-query [runtime op args]
+  (let [qdef ((api 'resolve-query) runtime (query-name (get args "query")))
+        params (query-params qdef (get args "params"))]
+    ((api op) runtime qdef params)))
+
 (defn- dispatch [runtime op args]
   (case op
     "init" ((api 'init) runtime)
@@ -107,8 +137,8 @@
     "show" ((api 'show) runtime (get args "id"))
     "list" ((api 'list) runtime)
     "ready" ((api 'ready) runtime)
-    "list-query" ((api 'list-query) runtime (get args "query") (get args "params"))
-    "ready-query" ((api 'ready-query) runtime (get args "query") (get args "params"))
+    "list-query" (dispatch-query runtime 'list args)
+    "ready-query" (dispatch-query runtime 'ready args)
     "status" (status-result runtime)
     "stop" {"stopping" true "pid" (get-in runtime [:metadata :pid]) "database_path" (get-in runtime [:metadata :canonical-db-path]) "daemon_id" (get-in runtime [:metadata :nonce])}))
 

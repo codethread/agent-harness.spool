@@ -122,3 +122,9 @@ Outcome: User/agent docs, smoke flows, and root specs reflect `todo` as the publ
 - Wired Go `init`, `add`, `update`, and `show` through JSON runtime metadata and one-request-per-connection Unix socket calls; task paths no longer use the Clojure CLI or SQLite.
 - Go canonical database path handling resolves symlinked parent directories so `/tmp/...` paths match the Clojure daemon's canonical `/private/tmp/...` metadata on macOS.
 - Query and daemon lifecycle commands remain intentionally unwired for later slices.
+
+### GOCLI-PLAN-001.DN7 Task 5 Go query commands — 2026-06-25
+
+- Wired Go `list`, `ready`, `list-query`, and `ready-query` over the JSON socket with string-valued `--param` maps and loud `--where` rejection.
+- The JSON socket now converts wire query names/params into the daemon's existing symbol/keyword query API, keeping registry mutation APIs unchanged and unexposed.
+- Added a Go integration test that starts a real Clojure daemon with a trusted config-loaded query and consumes it via `go run ./cmd/todo list --query ...`.

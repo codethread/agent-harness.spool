@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -59,10 +60,25 @@ func (e *ResponseError) Error() string {
 	if e == nil {
 		return "daemon error"
 	}
-	if e.Code != "" {
-		return fmt.Sprintf("daemon %s error (%s): %s", e.Type, e.Code, e.Message)
+	message := e.Message
+	if query, ok := e.Details["canonical-query"].(string); ok && query != "" {
+		message = fmt.Sprintf("%s: %s", message, query)
 	}
-	return fmt.Sprintf("daemon %s error: %s", e.Type, e.Message)
+	if available, ok := e.Details["available"].([]any); ok && len(available) > 0 {
+		names := make([]string, 0, len(available))
+		for _, v := range available {
+			if s, ok := v.(string); ok {
+				names = append(names, s)
+			}
+		}
+		if len(names) > 0 {
+			message = fmt.Sprintf("%s (available: %s)", message, strings.Join(names, ", "))
+		}
+	}
+	if e.Code != "" {
+		return fmt.Sprintf("daemon %s error (%s): %s", e.Type, e.Code, message)
+	}
+	return fmt.Sprintf("daemon %s error: %s", e.Type, message)
 }
 
 func validResponseError(e *ResponseError) bool {
