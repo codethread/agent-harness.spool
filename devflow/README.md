@@ -15,7 +15,7 @@ Root specs are canonical for shipped behavior:
 
 ## Active features
 
-None.
+- `user-daemon-home` — drafted config-dir daemon world, fixed socket discovery, default daemon init, and connected REPL UX.
 
 ## Archived features
 
