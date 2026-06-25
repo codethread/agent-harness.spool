@@ -16,6 +16,11 @@
     (.delete file)
     (.getAbsolutePath file)))
 
+(defn temp-client-config [db-file]
+  (let [file (java.io.File/createTempFile "todo-client-config" ".json")]
+    (spit file (json/write-str {:db db-file :format "human"}))
+    (.getAbsolutePath file)))
+
 (defn with-runtime [f]
   (let [db-file (temp-db-file)
         rt (runtime/start! db-file)]
@@ -29,20 +34,29 @@
 
 (deftest parses-global-options-before-command
   (testing "global options are parsed before the command and command args are preserved"
-    (is (= [{:db "/tmp/todo.sqlite" :format "json"} "ready" []]
-           (let [[opts command args _summary]
-                 (cli/parse-global-options ["--db" "/tmp/todo.sqlite" "--format" "json" "ready"])]
-             [opts command args]))))
+    (let [config (temp-client-config "/tmp/todo.sqlite")]
+      (try
+        (is (= [{:db "/tmp/todo.sqlite" :format "json" :config-path config} "ready" []]
+               (let [[opts command args _summary]
+                     (cli/parse-global-options ["--config-path" config "--format" "json" "ready"])]
+                 [opts command args])))
+        (finally (.delete (java.io.File. config))))))
   (testing "options after the command are command arguments, not global options"
-    (is (= [{:db db/default-db-file :format "human"} "ready" ["--format" "json"]]
-           (let [[opts command args _summary]
-                 (cli/parse-global-options ["ready" "--format" "json"])]
-             [opts command args]))))
+    (let [config (temp-client-config "/tmp/todo.sqlite")]
+      (try
+        (is (= [{:db "/tmp/todo.sqlite" :format "human" :config-path config} "ready" ["--format" "json"]]
+               (let [[opts command args _summary]
+                     (cli/parse-global-options ["--config-path" config "ready" "--format" "json"])]
+                 [opts command args])))
+        (finally (.delete (java.io.File. config))))))
   (testing "daemon lifecycle commands are parsed after global options"
-    (is (= [{:db "/tmp/todo.sqlite" :format "edn"} "daemon" ["status"]]
-           (let [[opts command args _summary]
-                 (cli/parse-global-options ["--db" "/tmp/todo.sqlite" "--format" "edn" "daemon" "status"])]
-             [opts command args])))))
+    (let [config (temp-client-config "/tmp/todo.sqlite")]
+      (try
+        (is (= [{:db "/tmp/todo.sqlite" :format "edn" :config-path config} "daemon" ["status"]]
+               (let [[opts command args _summary]
+                     (cli/parse-global-options ["--config-path" config "--format" "edn" "daemon" "status"])]
+                 [opts command args])))
+        (finally (.delete (java.io.File. config)))))))
 
 (deftest parses-repeatable-command-options
   (is (= {:status "done"
@@ -92,7 +106,10 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Query not found: missing .*available: known"
                             (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))]
-                              (cli/-main "--db" db-file "list" "--query" "missing")))))))
+                              (let [config (temp-client-config db-file)]
+                                (try
+                                  (cli/-main "--config-path" config "list" "--query" "missing")
+                                  (finally (.delete (java.io.File. config)))))))))))
 
 (deftest task-commands-reject-daemon-config-option
   (with-redefs [cli/fail! (fn [message _summary] (throw (ex-info message {})))
@@ -144,8 +161,10 @@
         (try
           (client/init db-file)
           (let [status (cli/run-daemon-command! db-file ["status"] "summary")
-                edn-status (read-string (with-out-str (cli/-main "--db" db-file "--format" "edn" "daemon" "status")))
-                json-status (json/read-str (with-out-str (cli/-main "--db" db-file "--format" "json" "daemon" "status")) :key-fn keyword)]
+                config (temp-client-config db-file)
+                edn-status (read-string (with-out-str (cli/-main "--config-path" config "--format" "edn" "daemon" "status")))
+                json-status (json/read-str (with-out-str (cli/-main "--config-path" config "--format" "json" "daemon" "status")) :key-fn keyword)]
+            (.delete (java.io.File. config))
             (doseq [payload [status edn-status json-status]]
               (is (= "ok" (:health payload)))
               (is (= (metadata/canonical-db-path db-file) (:canonical-db-path payload)))

@@ -100,8 +100,8 @@ func TestCallSuccessAndDaemonError(t *testing.T) {
 func TestMetadataAndTransportFailures(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "missing.sqlite")
 	_, err := New(Config{DB: db, Format: "json"}).Call("init", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "missing daemon metadata") {
-		t.Fatalf("expected missing metadata, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no running daemon") || !strings.Contains(err.Error(), "daemon start") {
+		t.Fatalf("expected missing daemon startup guidance, got %v", err)
 	}
 
 	writeMeta(t, db, filepath.Join(t.TempDir(), "no.sock"), os.Getpid())

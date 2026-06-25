@@ -16,7 +16,7 @@ import (
 )
 
 type App struct{ Stdout, Stderr io.Writer }
-type Options struct{ DB, Format, ClientConfig string }
+type Options struct{ DB, Format, ConfigPath string }
 type ExitError struct {
 	Code int
 	Err  error
@@ -56,15 +56,19 @@ func Resolve(args []string) (Options, []string, error) {
 	if err != nil {
 		return opts, rest, err
 	}
-	cfg, err := config.Load(opts.ClientConfig)
+	if len(rest) == 0 || rest[0] == "help" {
+		if opts.Format == "" {
+			opts.Format = config.DefaultFormat
+		}
+		return opts, rest, nil
+	}
+	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return opts, rest, err
 	}
+	opts.DB = cfg.DB
 	if opts.DB == "" {
-		opts.DB = cfg.DB
-	}
-	if opts.DB == "" {
-		opts.DB = config.DefaultDB
+		return opts, rest, errors.New("client config db is required")
 	}
 	if opts.Format == "" {
 		opts.Format = cfg.Format
@@ -86,24 +90,18 @@ func parseGlobal(args []string) (Options, []string, error) {
 			return o, args[i:], nil
 		}
 		switch s {
-		case "--db":
-			i++
-			if i >= len(args) {
-				return o, nil, errors.New("--db requires a value")
-			}
-			o.DB = args[i]
 		case "--format":
 			i++
 			if i >= len(args) {
 				return o, nil, errors.New("--format requires a value")
 			}
 			o.Format = args[i]
-		case "--client-config":
+		case "--config-path":
 			i++
 			if i >= len(args) {
-				return o, nil, errors.New("--client-config requires a value")
+				return o, nil, errors.New("--config-path requires a value")
 			}
-			o.ClientConfig = args[i]
+			o.ConfigPath = args[i]
 		case "--where":
 			return o, nil, errors.New("--where is not supported by the Go CLI; use --query")
 		case "-h", "--help":
@@ -146,7 +144,7 @@ func (a *App) runCommand(o Options, args []string) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, `Usage: todo [--db path] [--client-config path] [--format human|json] <command> [args]
+	fmt.Fprintln(w, `Usage: todo [--config-path path] [--format human|json] <command> [args]
 
 Commands:
   init
@@ -368,11 +366,15 @@ func (a *App) parseDaemon(o Options, args []string) error {
 }
 
 func (a *App) launchDaemon(o Options, configFile string) error {
-	dbPath, err := filepath.Abs(o.DB)
-	if err != nil {
-		return err
+	args := []string{"-M:todo"}
+	if o.ConfigPath != "" {
+		configPath, err := filepath.Abs(o.ConfigPath)
+		if err != nil {
+			return err
+		}
+		args = append(args, "--config-path", configPath)
 	}
-	args := []string{"-M:todo", "--db", dbPath, "daemon", "start"}
+	args = append(args, "daemon", "start")
 	if configFile != "" {
 		configPath, err := filepath.Abs(configFile)
 		if err != nil {

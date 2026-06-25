@@ -40,29 +40,28 @@ Build and use the daemon-backed Go CLI. Start the daemon in one terminal; it sta
 
 ```sh
 go build -o ./cli/bin/todo ./cli/cmd/todo
-DB=/tmp/todo-agent.sqlite
-./cli/bin/todo --db "$DB" daemon start
+make open-config
+./cli/bin/todo daemon start
 ```
 
 Run task commands from another terminal:
 
 ```sh
-DB=/tmp/todo-agent.sqlite
-./cli/bin/todo --db "$DB" daemon status
-./cli/bin/todo --db "$DB" init
-design=$(./cli/bin/todo --db "$DB" add "Sketch model" --status done --attr priority=high)
-docs=$(./cli/bin/todo --db "$DB" add "Write docs" --attr owner=agent)
-./cli/bin/todo --db "$DB" update "$docs" --edge depends-on:$design
-./cli/bin/todo --db "$DB" --format json ready
-./cli/bin/todo --db "$DB" daemon stop
+./cli/bin/todo daemon status
+./cli/bin/todo init
+design=$(./cli/bin/todo add "Sketch model" --status done --attr priority=high)
+docs=$(./cli/bin/todo add "Write docs" --attr owner=agent)
+./cli/bin/todo update "$docs" --edge depends-on:$design
+./cli/bin/todo --format json ready
+./cli/bin/todo daemon stop
 ```
 
-Task commands connect to the matching daemon selected by `--db`; start the daemon first and stop it when finished.
+Task commands connect to the matching daemon selected by client config; start the daemon first and stop it when finished.
 
 Use the REPL helpers against a running daemon (started in another terminal):
 
 ```sh
-./cli/bin/todo --db agent.sqlite daemon start
+./cli/bin/todo daemon start
 ```
 
 ```clojure
@@ -79,8 +78,8 @@ Use the REPL helpers against a running daemon (started in another terminal):
 Named queries live in daemon memory for the current daemon lifetime. Load them from trusted daemon config or REPL helpers such as `defquery!` / `load-queries!`, then consume them from either REPL helpers or the small CLI surface:
 
 ```sh
-./cli/bin/todo --db agent.sqlite --format json list --query agent-owned
-./cli/bin/todo --db agent.sqlite daemon stop
+./cli/bin/todo --format json list --query agent-owned
+./cli/bin/todo daemon stop
 ```
 
 The registry is not saved to SQLite; restart the daemon and reload trusted config/REPL query definitions when needed. The CLI intentionally has no `--query-file` loader so runtime customization stays daemon/REPL-owned, matching the daemon-core design described in [Devflow Philosophy](./devflow/PHILOSOPHY.md).

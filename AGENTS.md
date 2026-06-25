@@ -22,19 +22,20 @@ PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 Common commands:
 
 ```sh
-# Build the public Go CLI.
+# Build the public Go CLI and create/edit ~/.config/atom/config.json.
 go build -o ./cli/bin/todo ./cli/cmd/todo
+make open-config
 
 # Run in a dedicated terminal; daemon start stays in the foreground.
-./cli/bin/todo --db /tmp/todo-agent.sqlite daemon start
+./cli/bin/todo daemon start
 # Optional trusted startup config:
-# ./cli/bin/todo --db /tmp/todo-agent.sqlite daemon start --config /path/to/daemon.edn
+# ./cli/bin/todo daemon start --config /path/to/daemon.edn
 
 # Run from another terminal while the daemon is alive.
-./cli/bin/todo --db /tmp/todo-agent.sqlite init
-./cli/bin/todo --db /tmp/todo-agent.sqlite --format json list
-./cli/bin/todo --db /tmp/todo-agent.sqlite daemon status
-./cli/bin/todo --db /tmp/todo-agent.sqlite daemon stop
+./cli/bin/todo init
+./cli/bin/todo --format json list
+./cli/bin/todo daemon status
+./cli/bin/todo daemon stop
 clojure -M:test
 (cd cli && go test ./...)
 clojure -M:repl
@@ -43,28 +44,28 @@ clojure -M:run
 
 ## Agent operation quick reference
 
-Agents should prefer the CLI for scripted work. Pass `--db <path>` on every command when using disposable or feature-local databases.
+Agents should prefer the CLI for scripted work. Use `--config-path <path>` when you need a disposable or feature-local client config.
 
 ```sh
 go build -o ./cli/bin/todo ./cli/cmd/todo
-DB=/tmp/todo-agent.sqlite
+make open-config
 # Run in a dedicated terminal; daemon start stays in the foreground.
-./cli/bin/todo --db "$DB" daemon start
+./cli/bin/todo daemon start
 # Optional: daemon.edn may contain {:load-files ["trusted.clj"]}
 
 # Run from another terminal while the daemon is alive.
-./cli/bin/todo --db "$DB" init
-design=$(./cli/bin/todo --db "$DB" add "Sketch model" --status done --attr priority=high)
-docs=$(./cli/bin/todo --db "$DB" add "Write docs" --attr owner=agent)
-./cli/bin/todo --db "$DB" update "$docs" --edge depends-on:$design
-./cli/bin/todo --db "$DB" --format json ready
-./cli/bin/todo --db "$DB" daemon stop
+./cli/bin/todo init
+design=$(./cli/bin/todo add "Sketch model" --status done --attr priority=high)
+docs=$(./cli/bin/todo add "Write docs" --attr owner=agent)
+./cli/bin/todo update "$docs" --edge depends-on:$design
+./cli/bin/todo --format json ready
+./cli/bin/todo daemon stop
 ```
 
 Use `todo.repl` for interactive exploration when a daemon is already running for the same database in another terminal:
 
 ```sh
-./cli/bin/todo --db agent.sqlite daemon start
+./cli/bin/todo daemon start
 ```
 
 ```clojure
@@ -81,8 +82,8 @@ Use `todo.repl` for interactive exploration when a daemon is already running for
 Named queries are daemon-lifetime runtime state: register or load them through trusted daemon config or REPL helpers (`defquery!`, `load-queries!`), inspect them with `queries`, then consume them from either REPL helpers or CLI commands such as `list --query agent-owned`. They disappear when the daemon stops; the CLI does not accept `--query-file` because runtime customization belongs in daemon/REPL workflows rather than the low-privilege CLI.
 
 ```sh
-./cli/bin/todo --db agent.sqlite daemon status
-./cli/bin/todo --db agent.sqlite daemon stop
+./cli/bin/todo daemon status
+./cli/bin/todo daemon stop
 ```
 
 For the full CLI and REPL contracts, read the root specs linked above instead of duplicating details here.

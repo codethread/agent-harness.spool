@@ -2,6 +2,7 @@
   (:gen-class)
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
@@ -15,12 +16,10 @@
 (def commands (conj query-commands "init" "add" "update" "daemon"))
 
 (def global-options
-  [[nil "--db PATH" "SQLite database path"
-    :id :db
-    :default db/default-db-file]
+  [[nil "--config-path PATH" "Client JSON config path"
+    :id :config-path]
    [nil "--format FORMAT" "Output mode: human, edn, json"
     :id :format
-    :default "human"
     :validate [#(s/valid? ::specs/format %) "must be one of: human, edn, json"]]])
 
 (def command-options
@@ -80,7 +79,7 @@
 (defn usage [summary]
   (str "Todo CLI\n\n"
        "Usage:\n"
-       "  clojure -M:todo [--db <path>] [--format human|edn|json] <command> [args]\n\n"
+       "  clojure -M:todo [--config-path <path>] [--format human|edn|json] <command> [args]\n\n"
        "Commands:\n"
        "  init\n"
        "  add <title> [--status status] [--attr key=value ...]\n"
@@ -111,12 +110,42 @@
       (fail! (str "Invalid arguments for " command ":\n" (explain spec args)) summary))
     conformed))
 
+(defn default-client-config-path []
+  (if-let [xdg (System/getenv "XDG_CONFIG_HOME")]
+    (str (io/file xdg "atom" "config.json"))
+    (str (io/file (System/getProperty "user.home") ".config" "atom" "config.json"))))
+
+(defn read-client-config [path]
+  (let [file (io/file (or path (default-client-config-path)))]
+    (if (.isFile file)
+      (let [config (json/read-str (slurp file) :key-fn keyword)]
+        (when-not (map? config)
+          (throw (ex-info "Client config must be a JSON object" {:config (.getPath file)})))
+        (when-let [unknown (seq (remove #{:db :format} (keys config)))]
+          (throw (ex-info "Unsupported client config keys" {:config (.getPath file) :keys (vec unknown)})))
+        (when-not (or (nil? (:db config)) (string? (:db config)))
+          (throw (ex-info "Client config db must be a string" {:config (.getPath file)})))
+        (when-not (or (nil? (:format config)) (string? (:format config)))
+          (throw (ex-info "Client config format must be a string" {:config (.getPath file)})))
+        config)
+      {})))
+
+(defn resolve-global-options [options]
+  (let [config (read-client-config (:config-path options))]
+    (merge {:db db/default-db-file :format "human"}
+           (select-keys config [:db :format])
+           (select-keys options [:format :config-path]))))
+
 (defn parse-global-options [args]
   (let [{:keys [options arguments errors summary]} (parse-opts args global-options :in-order true)]
     (when (seq errors) (fail! (str/join "\n" errors) summary))
-    (when-not (s/valid? ::specs/opts options)
-      (fail! (str "Invalid options:\n" (explain ::specs/opts options)) summary))
-    [options (first arguments) (vec (rest arguments)) summary]))
+    (let [options (try
+                    (resolve-global-options options)
+                    (catch clojure.lang.ExceptionInfo e (fail! (.getMessage e) summary))
+                    (catch Exception e (fail! (.getMessage e) summary)))]
+      (when-not (s/valid? ::specs/opts options)
+        (fail! (str "Invalid options:\n" (explain ::specs/opts options)) summary))
+      [options (first arguments) (vec (rest arguments)) summary])))
 
 (defn parse-options [args option-spec summary]
   (let [{:keys [options arguments errors]} (parse-opts args option-spec)]

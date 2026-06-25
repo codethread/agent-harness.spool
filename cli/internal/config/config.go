@@ -19,13 +19,13 @@ type Config struct {
 
 func DefaultPath() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "todo", "config.json"), nil
+		return filepath.Join(xdg, "atom", "config.json"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "todo", "config.json"), nil
+	return filepath.Join(home, ".config", "atom", "config.json"), nil
 }
 
 func Load(path string) (Config, error) {

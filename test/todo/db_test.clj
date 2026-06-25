@@ -20,6 +20,17 @@
       (finally
         (delete-sqlite-family! db-file)))))
 
+(deftest init-creates-missing-database-parent-directories
+  (let [root (java.nio.file.Files/createTempDirectory "todo-db-parent" (make-array java.nio.file.attribute.FileAttribute 0))
+        db-file (.getAbsolutePath (java.io.File. (.toFile root) "nested/path/todo.sqlite"))]
+    (try
+      (db/init! (db/datasource db-file))
+      (is (.isFile (java.io.File. db-file)))
+      (finally
+        (delete-sqlite-family! db-file)
+        (doseq [f (reverse (file-seq (.toFile root)))]
+          (.delete f))))))
+
 (deftest task-creation-and-attribute-validation
   (with-db
     (fn [ds]

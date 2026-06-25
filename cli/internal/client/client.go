@@ -156,7 +156,7 @@ func (c *SocketClient) metadata() (Metadata, string, string, error) {
 	file := filepath.Join(os.TempDir(), "todo-daemon", stableHash(canonical)+".json")
 	b, err := os.ReadFile(file)
 	if os.IsNotExist(err) {
-		return Metadata{}, "", "", fmt.Errorf("missing daemon metadata for %s", canonical)
+		return Metadata{}, "", "", fmt.Errorf("no running daemon for %s (start one with: todo daemon start, using the same --config-path if set)", canonical)
 	}
 	if err != nil {
 		return Metadata{}, "", "", err

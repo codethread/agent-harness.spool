@@ -1,6 +1,7 @@
 (ns todo.db
   (:import [java.security SecureRandom])
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [next.jdbc :as jdbc]
@@ -23,6 +24,7 @@
 (defn datasource
   ([] (datasource default-db-file))
   ([db-file]
+   (io/make-parents db-file)
    (jdbc/get-datasource {:jdbcUrl (str "jdbc:sqlite:" db-file)})))
 
 (defn execute! [ds sql-params]

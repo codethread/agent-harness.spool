@@ -17,7 +17,7 @@ The public CLI is a thin Go executable named `todo`. It parses simple flags, res
 Entrypoint:
 
 ```text
-todo [--db <path>] [--client-config <path>] [--format human|json] <command> [args]
+todo [--config-path <path>] [--format human|json] <command> [args]
 ```
 
 Commands:
@@ -36,8 +36,8 @@ daemon status
 
 ## SPEC-002.P3 Contracts
 
-- **SPEC-002.C1:** `--db` selects the daemon/database runtime identity and defaults to `todo.sqlite`; task commands require a matching reachable daemon and do not silently open SQLite directly.
-- **SPEC-002.C2:** `--client-config` selects a JSON client config file for low-privilege defaults. Without it, the CLI looks under `$XDG_CONFIG_HOME/todo/config.json` or `~/.config/todo/config.json`. Explicit CLI flags override config values.
+- **SPEC-002.C1:** `--config-path` selects a JSON client config file for low-privilege defaults. Without it, the CLI looks under `$XDG_CONFIG_HOME/atom/config.json` or `~/.config/atom/config.json`. Explicit CLI flags override config values. The internal Clojure daemon entrypoint accepts the same global config path override so daemon startup and CLI calls use the same selected database.
+- **SPEC-002.C2:** The client config `db` value selects the daemon/database runtime identity and is required for task commands; task commands require a matching reachable daemon and do not silently open SQLite directly.
 - **SPEC-002.C3:** Client config may contain only supported client defaults such as `db` and `format`; malformed config, unsupported keys, or wrong value types fail non-zero.
 - **SPEC-002.C4:** `--format` accepts `human` or `json` and defaults to `human`. EDN is not a public CLI output format.
 - **SPEC-002.C5:** `add` creates a task with generated id, first-class status, timestamps, and string-valued CLI attributes.

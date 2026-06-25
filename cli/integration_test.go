@@ -15,6 +15,7 @@ import (
 func TestGoDaemonLifecycleCommands(t *testing.T) {
 	dir := t.TempDir()
 	db := filepath.Join(dir, "todo.sqlite")
+	clientCfg := writeClientConfig(t, dir, db)
 	trusted := filepath.Join(dir, "trusted.clj")
 	loaded := filepath.Join(dir, "loaded.txt")
 	if err := os.WriteFile(trusted, []byte(`(spit `+strconv.Quote(loaded)+` "ok")`), 0644); err != nil {
@@ -25,7 +26,7 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemon := exec.Command("go", "run", "./cmd/todo", "--db", db, "daemon", "start", "--config", cfg)
+	daemon := exec.Command("go", "run", "./cmd/todo", "--config-path", clientCfg, "daemon", "start", "--config", cfg)
 	var daemonOut bytes.Buffer
 	daemon.Stdout = &daemonOut
 	daemon.Stderr = &daemonOut
@@ -36,11 +37,11 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 		_ = daemon.Process.Kill()
 		_, _ = daemon.Process.Wait()
 	})
-	waitForStatus(t, db, &daemonOut)
+	waitForStatus(t, clientCfg, &daemonOut)
 	if _, err := os.Stat(loaded); err != nil {
 		t.Fatalf("trusted config did not load: %v", err)
 	}
-	out, err := outputTodo(db, "--format", "json", "daemon", "status")
+	out, err := outputTodo(clientCfg, "--format", "json", "daemon", "status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +55,13 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 	if nrepl, ok := status["nrepl"].(map[string]any); !ok || nrepl["host"] == "" || nrepl["port"].(float64) <= 0 {
 		t.Fatalf("unexpected nrepl payload: %#v", status["nrepl"])
 	}
-	if err := runTodo(db, "daemon", "stop"); err != nil {
+	if err := runTodo(clientCfg, "daemon", "stop"); err != nil {
 		t.Fatal(err)
 	}
 	if err := daemon.Wait(); err != nil {
 		t.Fatalf("daemon did not exit cleanly: %v\n%s", err, daemonOut.String())
 	}
-	if _, err := outputTodo(db, "daemon", "status"); err == nil {
+	if _, err := outputTodo(clientCfg, "daemon", "status"); err == nil {
 		t.Fatal("expected status to fail after stop cleanup")
 	}
 }
@@ -68,15 +69,16 @@ func TestGoDaemonLifecycleCommands(t *testing.T) {
 func TestGoDaemonStartConfigFailurePublishesNoMetadata(t *testing.T) {
 	dir := t.TempDir()
 	db := filepath.Join(dir, "todo.sqlite")
+	clientCfg := writeClientConfig(t, dir, db)
 	cfg := filepath.Join(dir, "bad.edn")
 	if err := os.WriteFile(cfg, []byte(`{:load-files ["missing.clj"]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := outputTodo(db, "daemon", "start", "--config", cfg)
+	out, err := outputTodo(clientCfg, "daemon", "start", "--config", cfg)
 	if err == nil {
 		t.Fatalf("expected startup config failure, got success: %s", out)
 	}
-	if _, err := outputTodo(db, "daemon", "status"); err == nil {
+	if _, err := outputTodo(clientCfg, "daemon", "status"); err == nil {
 		t.Fatal("expected no metadata after failed startup")
 	}
 }
@@ -84,6 +86,7 @@ func TestGoDaemonStartConfigFailurePublishesNoMetadata(t *testing.T) {
 func TestGoListNamedQueryAgainstRealDaemon(t *testing.T) {
 	dir := t.TempDir()
 	db := filepath.Join(dir, "todo.sqlite")
+	clientCfg := writeClientConfig(t, dir, db)
 	trusted := filepath.Join(dir, "trusted.clj")
 	if err := os.WriteFile(trusted, []byte(`(require '[todo.daemon.runtime :as runtime]
          '[todo.daemon.api :as api])
@@ -96,7 +99,7 @@ func TestGoListNamedQueryAgainstRealDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemon := exec.Command("clojure", "-M:todo", "--db", db, "daemon", "start", "--config", cfg)
+	daemon := exec.Command("clojure", "-M:todo", "--config-path", clientCfg, "daemon", "start", "--config", cfg)
 	daemon.Dir = ".."
 	var daemonErr bytes.Buffer
 	daemon.Stdout = &daemonErr
@@ -105,28 +108,28 @@ func TestGoListNamedQueryAgainstRealDaemon(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 	t.Cleanup(func() {
-		stop := exec.Command("clojure", "-M:todo", "--db", db, "daemon", "stop")
+		stop := exec.Command("clojure", "-M:todo", "--config-path", clientCfg, "daemon", "stop")
 		stop.Dir = ".."
 		_ = stop.Run()
 		_ = daemon.Process.Kill()
 		_, _ = daemon.Process.Wait()
 	})
-	waitForDaemonAndInit(t, db, &daemonErr)
+	waitForDaemonAndInit(t, clientCfg, &daemonErr)
 
-	if err := runTodo(db, "add", "Agent task", "--attr", "owner=agent"); err != nil {
+	if err := runTodo(clientCfg, "add", "Agent task", "--attr", "owner=agent"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runTodo(db, "add", "Human task", "--attr", "owner=human"); err != nil {
+	if err := runTodo(clientCfg, "add", "Human task", "--attr", "owner=human"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := outputTodo(db, "--format", "json", "list", "--query", ":by-owner", "--param", "owner=agent")
+	out, err := outputTodo(clientCfg, "--format", "json", "list", "--query", ":by-owner", "--param", "owner=agent")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "Agent task") || strings.Contains(out, "Human task") {
 		t.Fatalf("unexpected query output: %s", out)
 	}
-	out, err = outputTodo(db, "--format", "json", "ready", "--query", "by-owner", "--param", "owner=agent")
+	out, err = outputTodo(clientCfg, "--format", "json", "ready", "--query", "by-owner", "--param", "owner=agent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +138,21 @@ func TestGoListNamedQueryAgainstRealDaemon(t *testing.T) {
 	}
 }
 
-func waitForStatus(t *testing.T, db string, daemonErr *bytes.Buffer) {
+func writeClientConfig(t *testing.T, dir, db string) string {
+	t.Helper()
+	path := filepath.Join(dir, "client-config.json")
+	if err := os.WriteFile(path, []byte(`{"db":`+strconv.Quote(db)+`,"format":"human"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func waitForStatus(t *testing.T, configPath string, daemonErr *bytes.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if _, err := outputTodo(db, "daemon", "status"); err == nil {
+		if _, err := outputTodo(configPath, "daemon", "status"); err == nil {
 			return
 		} else {
 			lastErr = err
@@ -150,12 +162,12 @@ func waitForStatus(t *testing.T, db string, daemonErr *bytes.Buffer) {
 	t.Fatalf("daemon did not become ready: %v\n%s", lastErr, daemonErr.String())
 }
 
-func waitForDaemonAndInit(t *testing.T, db string, daemonErr *bytes.Buffer) {
+func waitForDaemonAndInit(t *testing.T, configPath string, daemonErr *bytes.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if err := runTodo(db, "init"); err == nil {
+		if err := runTodo(configPath, "init"); err == nil {
 			return
 		} else {
 			lastErr = err
@@ -165,13 +177,13 @@ func waitForDaemonAndInit(t *testing.T, db string, daemonErr *bytes.Buffer) {
 	t.Fatalf("daemon did not become ready: %v\n%s", lastErr, daemonErr.String())
 }
 
-func runTodo(db string, args ...string) error {
-	_, err := outputTodo(db, args...)
+func runTodo(configPath string, args ...string) error {
+	_, err := outputTodo(configPath, args...)
 	return err
 }
 
-func outputTodo(db string, args ...string) (string, error) {
-	full := append([]string{"run", "./cmd/todo", "--db", db}, args...)
+func outputTodo(configPath string, args ...string) (string, error) {
+	full := append([]string{"run", "./cmd/todo", "--config-path", configPath}, args...)
 	cmd := exec.Command("go", full...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
