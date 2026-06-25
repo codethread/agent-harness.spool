@@ -2,7 +2,7 @@ tasks:
   - id: 1
     description: Runtime deps local-root spike
     task_file: tasks/001-runtime-deps-local-root-spike.md
-    status: pending
+    status: complete
     blocked_by: []
   - id: 2
     description: Approved libs config
