@@ -16,7 +16,7 @@
    :state-dir state-dir
    :data-dir data-dir
    :config-file (str config-dir "/config.json")
-   :db-path (str data-dir "/tasks.sqlite")})
+   :db-path (str data-dir "/skein.sqlite")})
 
 (defn world
   ([]

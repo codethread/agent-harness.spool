@@ -6,10 +6,11 @@
 (def fields
   {:id "t.id"
    :title "t.title"
-   :status "t.status"
+   :active "t.active"
+   :ephemeral "t.ephemeral"
    :created_at "t.created_at"
    :updated_at "t.updated_at"
-   :final_at "t.final_at"})
+   :inactive_at "t.inactive_at"})
 
 (defn- fail! [message data]
   (throw (ex-info message data)))

@@ -377,14 +377,16 @@
     (db/add-edge! tx {:from id :to to :type type :attributes (or attributes {})})))
 
 (defn update [runtime id patch]
-  (let [{:keys [title status attributes edges]} patch]
+  (let [{:keys [title active ephemeral attributes edges]} patch]
     (jdbc/with-transaction [tx (ds runtime)]
       (when-not (db/get-task tx id)
         (throw (ex-info "Task not found" {:task-id id})))
       (apply-edges! tx id edges)
-      (normalize (db/update-task! tx id {:title title
-                                         :status status
-                                         :attributes attributes})))))
+      (normalize (db/update-task! tx id (cond-> {}
+                                          (contains? patch :title) (assoc :title title)
+                                          (contains? patch :active) (assoc :active active)
+                                          (contains? patch :ephemeral) (assoc :ephemeral ephemeral)
+                                          (contains? patch :attributes) (assoc :attributes attributes)))))))
 
 (defn show [runtime id]
   (normalize (db/get-task (ds runtime) id)))
@@ -423,9 +425,11 @@
    (db/ancestor-root-ids (ds runtime) seed-ids opts)))
 
 (defn subgraph [runtime root-ids]
-  (let [{:keys [tasks edges] :as result} (db/subgraph (ds runtime) root-ids)]
+  (let [{:keys [strands tasks edges] :as result} (db/subgraph (ds runtime) root-ids)
+        rows (or strands tasks)]
     (assoc result
-           :tasks (normalize tasks)
+           :tasks (normalize rows)
+           :strands (normalize rows)
            :edges (normalize edges))))
 
 (defn- canonical-view-name [view-name]

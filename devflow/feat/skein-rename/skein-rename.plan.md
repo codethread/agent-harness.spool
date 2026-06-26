@@ -102,3 +102,10 @@ Append notes here. Do not rewrite earlier notes.
 ### SR-PLAN-001.DN1 Review pass — 2026-06-26
 
 - Addressed review findings before task generation: explicitly invalidated inactive ephemeral rows and same-patch active/ephemeral changes; restored `ready --query/--param` in the CLI delta; marked the plan and feature deltas Reviewed.
+
+### SR-PLAN-001.DN2 Task 001 implementation — 2026-06-26
+
+- Implemented fresh `strands` / `strand_edges` storage with `active`, `inactive_at`, and `ephemeral`; old task/status storage is not created for new worlds.
+- Active readiness now ignores inactive dependencies; persistent strands can deactivate/reactivate, while active ephemeral strands are deleted with incident edges on deactivation.
+- Clojure DB/query tests now reject `:status` and `:final_at` fields. The Go CLI and smoke path were minimally adjusted to send `active`/`ephemeral` lifecycle fields because smoke exercises the daemon JSON socket end-to-end.
+- Manual smoke exposed that SQLite foreign-key enforcement was not guaranteed on the daemon connection for ephemeral deletion, so delete-on-deactivate now explicitly removes incident edges before deleting the strand.

@@ -1,5 +1,6 @@
 (ns todo.repl
   (:require [clojure.main :as main]
+            [clojure.string :as str]
             [todo.client :as client]
             [todo.daemon.config :as daemon-config]
             [todo.query :as query]))
@@ -46,8 +47,13 @@
    (task! title {}))
   ([title attributes]
    (daemon :add {:title title :attributes attributes}))
-  ([title status attributes]
-   (daemon :add {:title title :status status :attributes attributes})))
+  ([title active attributes]
+   (when-not (boolean? active)
+     (throw (ex-info "task! active argument must be a boolean; status values are no longer core lifecycle fields"
+                     {:active active})))
+   (daemon :add {:title title
+                 :active active
+                 :attributes attributes})))
 
 (defn update!
   ([id patch]

@@ -27,10 +27,10 @@
    :state-dir (str config-dir "/state")
    :data-dir (str config-dir "/data")
    :config-file (str config-dir "/config.json")
-   :db-path (str config-dir "/data/tasks.sqlite")})
+   :db-path (str config-dir "/data/skein.sqlite")})
 
 (defn expected-opts [config-dir format]
-  {:db (str config-dir "/data/tasks.sqlite")
+  {:db (str config-dir "/data/skein.sqlite")
    :format format
    :world (expected-world config-dir)
    :config-dir config-dir})
@@ -121,10 +121,10 @@
                               (cli/parse-global-options ["--config-dir" (.getCanonicalPath dir) "ready"])))))))
 
 (deftest parses-repeatable-command-options
-  (is (= {:status "done"
+  (is (= {:active false
           :attr {:priority "high" :owner "agent"}
           :edge [{:type "depends-on" :to "ue72w"}]}
-         (cli/parse-command-options ["--status" "done"
+         (cli/parse-command-options ["--active" "false"
                                      "--attr" "priority=high"
                                      "--attr" "owner=agent"
                                      "--edge" "depends-on:ue72w"]
@@ -136,7 +136,7 @@
   (testing "legacy Clojure CLI parser/client behavior remains available for daemon and REPL support; public Go CLI rejects --where/EDN"
     (with-runtime
     (fn [db-file]
-      (let [design (:id (cli/run-command! db-file "add" ["Design" "--status" "done" "--attr" "owner=agent"] "summary"))
+      (let [design (:id (cli/run-command! db-file "add" ["Design" "--active" "false" "--attr" "owner=agent"] "summary"))
             docs (:id (cli/run-command! db-file "add" ["Docs" "--attr" "owner=agent"] "summary"))
             misc (:id (cli/run-command! db-file "add" ["Misc" "--attr" "owner=human"] "summary"))]
         (cli/run-command! db-file "update" [docs "--edge" (str "depends-on:" design)] "summary")
@@ -161,10 +161,10 @@
                           (cli/parse-query-options ["--query" "agent" "--query-file" "queries.edn"] "summary")))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Use either --where or --query, not both"
-                          (cli/parse-query-options ["--where" "[:= :status \"todo\"]" "--query" "known"] "summary"))))
+                          (cli/parse-query-options ["--where" "[:= :active true]" "--query" "known"] "summary"))))
   (with-runtime
     (fn [db-file]
-      (client/register-query db-file 'known '[:= :status "todo"])
+      (client/register-query db-file 'known '[:= :active true])
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Daemon API call failed"
                             (cli/run-command! db-file "list" ["--query" "missing"] "summary"))))))
@@ -183,22 +183,22 @@
 (deftest add-and-update-command-route-through-daemon
   (with-runtime
     (fn [db-file]
-      (let [design (cli/run-command! db-file "add" ["Design" "--status" "done"] "summary")
+      (let [design (cli/run-command! db-file "add" ["Design" "--active" "false"] "summary")
             review (cli/run-command! db-file "add" ["Review" "--attr" "owner=agent"] "summary")]
         (is (re-matches #"[a-z0-9]+" (:id design)))
-        (is (= "done" (:status design)))
+        (is (false? (:active design)))
         (cli/run-command! db-file "update" [(:id review) "--edge" (str "depends-on:" (:id design))] "summary")
         (is (= [(:id review)] (mapv :id (cli/run-command! db-file "ready" [] "summary"))))
-        (cli/run-command! db-file "update" [(:id review) "--status" "done" "--title" "Reviewed"] "summary")
+        (cli/run-command! db-file "update" [(:id review) "--active" "false" "--title" "Reviewed"] "summary")
         (let [updated (cli/run-command! db-file "show" [(:id review)] "summary")]
           (is (= "Reviewed" (:title updated)))
-          (is (= "done" (:status updated)))
-          (is (some? (:final_at updated))))))))
+          (is (false? (:active updated)))
+          (is (some? (:inactive_at updated))))))))
 
 (deftest update-command-rolls-back-on-failure
   (with-runtime
     (fn [db-file]
-      (let [target (cli/run-command! db-file "add" ["Design" "--status" "done"] "summary")
+      (let [target (cli/run-command! db-file "add" ["Design" "--active" "false"] "summary")
             task (cli/run-command! db-file "add" ["Review"] "summary")]
         (is (thrown? Exception
                      (cli/run-command! db-file "update" [(:id task) "--edge" "depends-on:missing"] "summary")))

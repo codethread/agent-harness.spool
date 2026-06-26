@@ -24,9 +24,14 @@
 (def command-options
   [[nil "--title TITLE" "Replacement task title"
     :id :title]
-   [nil "--status STATUS" "Task status: todo, done, failed, cancelled"
-    :id :status
-    :validate [#(contains? specs/allowed-statuses %) "must be one of: todo, done, failed, cancelled"]]
+   [nil "--active BOOL" "Strand active state: true or false"
+    :id :active
+    :parse-fn edn/read-string
+    :validate [boolean? "must be true or false"]]
+   [nil "--ephemeral BOOL" "Delete strand when deactivated: true or false"
+    :id :ephemeral
+    :parse-fn edn/read-string
+    :validate [boolean? "must be true or false"]]
    [nil "--attr ATTR" "Repeatable string task attribute patch: key=value"
     :id :attr
     :multi true
@@ -79,8 +84,8 @@
        "  clojure -M:todo [--config-dir <dir>] [--format human|edn|json] <command> [args]\n\n"
        "Commands:\n"
        "  init\n"
-       "  add <title> [--status status] [--attr key=value ...]\n"
-       "  update <id> [--title title] [--status status] [--attr key=value ...] [--edge edge-type:to-id ...]\n"
+       "  add <title> [--active true|false] [--ephemeral true|false] [--attr key=value ...]\n"
+       "  update <id> [--title title] [--active true|false] [--ephemeral true|false] [--attr key=value ...] [--edge edge-type:to-id ...]\n"
        "  show <id>\n"
        "  list [--where EDN | --query name] [--param key=value ...]\n"
        "  ready [--where EDN | --query name] [--param key=value ...]\n"
@@ -203,13 +208,16 @@
                  options (parse-command-options opts summary)]
              (when (seq (:edge options))
                (fail! "add does not accept --edge" summary))
-             (client/add db-file {:title title :status (:status options) :attributes (:attr options)}))
+             (client/add db-file (cond-> {:title title :attributes (:attr options)}
+                                   (contains? options :active) (assoc :active (:active options))
+                                   (contains? options :ephemeral) (assoc :ephemeral (:ephemeral options)))))
     "update" (let [{:keys [id opts]} (require-conform ::specs/update-command args command summary)
                     options (parse-command-options opts summary)]
-                (client/update db-file id {:title (:title options)
-                                           :status (:status options)
-                                           :attributes (when (seq (:attr options)) (:attr options))
-                                           :edges (:edge options)}))
+                (client/update db-file id (cond-> {:edges (:edge options)}
+                                            (contains? options :title) (assoc :title (:title options))
+                                            (contains? options :active) (assoc :active (:active options))
+                                            (contains? options :ephemeral) (assoc :ephemeral (:ephemeral options))
+                                            (seq (:attr options)) (assoc :attributes (:attr options)))))
     "show" (do (require-conform ::specs/one-id-command args command summary) (client/show db-file (first args)))
     "list" (run-query-command db-file (parse-query-options args summary)
                               client/list client/list-query client/list)

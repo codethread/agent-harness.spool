@@ -164,7 +164,7 @@
         start (run-process! "Go CLI daemon start help succeeds" [todo-bin "daemon" "start" "--help"])]
     (doseq [needle ["Available Commands:" "add" "list" "daemon"]]
       (assert-contains root needle "Go CLI root help shows command tree"))
-    (doseq [needle ["add <title>" "--status" "--attr"]]
+    (doseq [needle ["add <title>" "--active" "--ephemeral" "--attr"]]
       (assert-contains add needle "Go CLI command help shows flags"))
     (doseq [needle ["start" "status" "stop"]]
       (assert-contains daemon needle "Go CLI subcommand help shows children"))
@@ -350,7 +350,7 @@
       (try
         (assert= "base layered" (slurp marker) "selected config-dir init.clj activates layered local library during daemon startup")
         (run-cli! db-file "init")
-            (let [design (cli-add! db-file "Sketch task graph model" "--status" "done" "--attr" "priority=high")
+            (let [design (cli-add! db-file "Sketch task graph model" "--active=false" "--attr" "priority=high")
                   schema (cli-add! db-file "Create SQLite schema" "--attr" "priority=high")
                   docs (cli-add! db-file "Write usage notes" "--attr" "owner=agent")]
               (run-cli! db-file "update" schema "--edge" (str "depends-on:" design))
@@ -358,13 +358,13 @@
               (assert= ["Create SQLite schema"]
                        (titles (parse-json (run-cli! db-file "--format" "json" "ready")))
                        "Go CLI ready sees tasks with final dependencies")
-              (run-cli! db-file "update" schema "--status" "done")
+              (run-cli! db-file "update" schema "--active=false")
               (assert= ["Write usage notes"]
                        (titles (parse-json (run-cli! db-file "--format" "json" "ready")))
-                       "Go CLI update status changes readiness")
-              (assert= "done"
-                       (:status (parse-json (run-cli! db-file "--format" "json" "show" schema)))
-                       "Go CLI show exposes first-class status")
+                       "Go CLI update active changes readiness")
+              (assert= false
+                       (:active (parse-json (run-cli! db-file "--format" "json" "show" schema)))
+                       "Go CLI show exposes active lifecycle")
               (let [status (parse-json (run-cli! db-file "--format" "json" "daemon" "status"))]
                 (assert= true
                          (:healthy status)
@@ -401,10 +401,10 @@
       (try
         (repl/connect! (:config-dir world))
         (repl/init!)
-        (let [a (:id (repl/task! "First task" "done" {}))
+        (let [a (:id (repl/task! "First task" false {}))
               b (:id (repl/task! "Second task" {:owner "agent"}))]
           (repl/update! b {:edges [{:type "depends-on" :to a}]})
-          (assert= ["Second task"] (titles (repl/ready)) "todo.repl ready returns tasks with final dependencies")
+          (assert= ["Second task"] (titles (repl/ready)) "todo.repl ready returns strands with inactive dependencies")
           (repl/defquery! 'agent-owner '[:= [:attr :owner] "agent"])
           (assert= ["Second task"]
                    (titles (repl/tasks 'agent-owner))
@@ -412,8 +412,8 @@
           (assert= ["Second task"]
                    (titles (repl/query '[:= [:attr :owner] "agent"]))
                    "todo.repl retains EDN-rich ad hoc query debugging")
-          (repl/update! b {:status "done"})
-          (assert= "done" (:status (repl/task b)) "todo.repl update! updates status"))
+          (repl/update! b {:active false})
+          (assert= false (:active (repl/task b)) "todo.repl update! updates active"))
         (finally
           (runtime/stop! runtime))))
     (finally

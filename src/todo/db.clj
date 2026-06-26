@@ -9,7 +9,7 @@
             [todo.query :as query]
             [todo.specs :as specs]))
 
-(def default-db-file "todo.sqlite")
+(def default-db-file "skein.sqlite")
 
 (def ^:private id-alphabet "abcdefghijklmnopqrstuvwxyz0123456789")
 (def ^:private id-length 5)
@@ -45,46 +45,44 @@
 (defn <-json [s]
   (json/read-str (or s "{}") :key-fn keyword))
 
-(def final-statuses #{"done" "failed" "cancelled"})
-
-(defn final-status? [status]
-  (contains? final-statuses status))
-
 (def schema-sql
   [["PRAGMA foreign_keys = ON"]
-   ["CREATE TABLE IF NOT EXISTS tasks (
+   ["CREATE TABLE IF NOT EXISTS strands (
        id TEXT PRIMARY KEY,
        title TEXT NOT NULL,
-       status TEXT NOT NULL DEFAULT 'todo',
+       active INTEGER NOT NULL DEFAULT 1,
+       ephemeral INTEGER NOT NULL DEFAULT 0,
        attributes TEXT NOT NULL DEFAULT '{}',
        created_at TEXT NOT NULL DEFAULT (datetime('now')),
        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-       final_at TEXT,
-       CHECK (status IN ('todo', 'done', 'failed', 'cancelled')),
-       CHECK ((status IN ('done', 'failed', 'cancelled') AND final_at IS NOT NULL)
-              OR (status = 'todo' AND final_at IS NULL)),
+       inactive_at TEXT,
+       CHECK (active IN (0, 1)),
+       CHECK (ephemeral IN (0, 1)),
+       CHECK (NOT (active = 0 AND ephemeral = 1)),
+       CHECK ((active = 0 AND inactive_at IS NOT NULL)
+              OR (active = 1 AND inactive_at IS NULL)),
        CHECK (json_valid(attributes))
      )"]
-   ["CREATE TABLE IF NOT EXISTS task_edges (
-       from_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-       to_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+   ["CREATE TABLE IF NOT EXISTS strand_edges (
+       from_strand_id TEXT NOT NULL REFERENCES strands(id) ON DELETE CASCADE,
+       to_strand_id TEXT NOT NULL REFERENCES strands(id) ON DELETE CASCADE,
        edge_type TEXT NOT NULL,
        attributes TEXT NOT NULL DEFAULT '{}',
-       PRIMARY KEY (from_task_id, to_task_id, edge_type),
+       PRIMARY KEY (from_strand_id, to_strand_id, edge_type),
        CHECK (edge_type IN ('depends-on', 'related-to', 'parent-of', 'supersedes')),
        CHECK (json_valid(attributes))
      )"]
-   ["CREATE INDEX IF NOT EXISTS idx_task_edges_to ON task_edges(to_task_id, edge_type)"]
-   ["CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(json_extract(attributes, '$.priority'))"]
-   ["CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(json_extract(attributes, '$.due-date'))"]])
+   ["CREATE INDEX IF NOT EXISTS idx_strand_edges_to ON strand_edges(to_strand_id, edge_type)"]
+   ["CREATE INDEX IF NOT EXISTS idx_strands_priority ON strands(json_extract(attributes, '$.priority'))"]
+   ["CREATE INDEX IF NOT EXISTS idx_strands_due_date ON strands(json_extract(attributes, '$.due-date'))"]])
 
-(def required-task-columns #{"id" "title" "status" "attributes" "created_at" "updated_at" "final_at"})
+(def required-strand-columns #{"id" "title" "active" "ephemeral" "attributes" "created_at" "updated_at" "inactive_at"})
 
 (defn- ensure-current-schema! [ds]
-  (let [columns (set (map :name (execute! ds ["PRAGMA table_info(tasks)"])))
-        missing (seq (remove columns required-task-columns))]
+  (let [columns (set (map :name (execute! ds ["PRAGMA table_info(strands)"])))
+        missing (seq (remove columns required-strand-columns))]
     (when missing
-      (throw (ex-info "Existing tasks table is not compatible with the current schema; use a new database or migrate it explicitly."
+      (throw (ex-info "Existing strands table is not compatible with the current schema; use a new database or migrate it explicitly."
                       {:missing-columns (vec missing)})))))
 
 (defn init! [ds]
@@ -94,13 +92,13 @@
   ds)
 
 (defn reset-db! [ds]
-  (execute! ds ["DROP TABLE IF EXISTS task_edges"])
-  (execute! ds ["DROP TABLE IF EXISTS tasks"])
+  (execute! ds ["DROP TABLE IF EXISTS strand_edges"])
+  (execute! ds ["DROP TABLE IF EXISTS strands"])
   (init! ds))
 
-(declare get-task add-edge!)
+(declare get-strand add-edge!)
 
-(def ^:private batch-task-keys #{:title :status :attributes :ref :edges})
+(def ^:private batch-strand-keys #{:title :active :ephemeral :attributes :ref :edges})
 (def ^:private batch-edge-keys #{:type :to :attributes})
 
 (defn- json-compatible? [value]
@@ -140,101 +138,122 @@
   (require-json-object-encodable! (:attributes edge) :edge)
   edge)
 
-(defn- validate-batch-task! [task]
-  (when-not (map? task)
-    (throw (ex-info "Batch task must be a map" {:task task})))
-  (require-no-unknown-keys! task batch-task-keys :task)
-  (when-not (and (string? (:title task)) (not (str/blank? (:title task))))
-    (throw (ex-info "Batch task :title must be a non-blank string" {:task task})))
-  (when (and (contains? task :ref) (not (symbol? (:ref task))))
-    (throw (ex-info "Batch task :ref must be a symbol" {:task task})))
-  (when (and (:status task) (not (contains? specs/allowed-statuses (:status task))))
-    (throw (ex-info "Batch task :status must be one of the allowed statuses"
-                    {:task task :allowed specs/allowed-statuses})))
-  (require-json-object-encodable! (:attributes task) :task)
-  (when-not (or (nil? (:edges task)) (vector? (:edges task)))
-    (throw (ex-info "Batch task :edges must be a vector" {:task task})))
-  (doseq [edge (:edges task)]
+(defn- validate-batch-strand! [strand]
+  (when-not (map? strand)
+    (throw (ex-info "Batch strand must be a map" {:strand strand})))
+  (require-no-unknown-keys! strand batch-strand-keys :strand)
+  (when-not (and (string? (:title strand)) (not (str/blank? (:title strand))))
+    (throw (ex-info "Batch strand :title must be a non-blank string" {:strand strand})))
+  (when (and (contains? strand :ref) (not (symbol? (:ref strand))))
+    (throw (ex-info "Batch strand :ref must be a symbol" {:strand strand})))
+  (require-json-object-encodable! (:attributes strand) :strand)
+  (when-not (or (nil? (:edges strand)) (vector? (:edges strand)))
+    (throw (ex-info "Batch strand :edges must be a vector" {:strand strand})))
+  (doseq [edge (:edges strand)]
     (validate-batch-edge! edge))
-  task)
+  strand)
 
-(defn- validate-batch! [tasks]
-  (when-not (vector? tasks)
-    (throw (ex-info "Batch input must be a vector of task maps" {:value tasks})))
-  (when (empty? tasks)
-    (throw (ex-info "Batch input must contain at least one task" {})))
-  (doseq [task tasks]
-    (validate-batch-task! task))
-  (let [refs (keep :ref tasks)
+(defn- validate-batch! [strands]
+  (when-not (vector? strands)
+    (throw (ex-info "Batch input must be a vector of strand maps" {:value strands})))
+  (when (empty? strands)
+    (throw (ex-info "Batch input must contain at least one strand" {})))
+  (doseq [strand strands]
+    (validate-batch-strand! strand))
+  (let [refs (keep :ref strands)
         duplicate-ref (->> refs frequencies (filter (fn [[_ n]] (> n 1))) ffirst)]
     (when duplicate-ref
       (throw (ex-info "Duplicate batch ref" {:ref duplicate-ref}))))
-  tasks)
+  strands)
 
-(def task-columns "id, title, status, attributes, created_at, updated_at, final_at")
+(def strand-columns "id, title, active, ephemeral, attributes, created_at, updated_at, inactive_at")
 
-(defn- insert-task! [ds id title status attributes]
+(defn- require-boolean! [value field]
+  (when-not (or (true? value) (false? value))
+    (throw (ex-info "Lifecycle fields must be booleans" {:field field :value value})))
+  value)
+
+(defn- sqlite-bool [value]
+  (if value 1 0))
+
+(defn- row->booleans [row]
+  (cond-> row
+    (contains? row :active) (update :active #(case % 0 false 1 true %))
+    (contains? row :ephemeral) (update :ephemeral #(case % 0 false 1 true %))))
+
+(defn- insert-strand! [ds id title active ephemeral attributes]
   (execute-one! ds
-                [(str "INSERT INTO tasks (id, title, status, attributes, final_at)
-                       VALUES (?, ?, ?, json(?), CASE WHEN ? IN ('done', 'failed', 'cancelled') THEN datetime('now') ELSE NULL END)
-                       RETURNING " task-columns)
-                 id title status (->json attributes) status]))
+                [(str "INSERT INTO strands (id, title, active, ephemeral, attributes, inactive_at)
+                       VALUES (?, ?, ?, ?, json(?), CASE WHEN ? = 0 THEN datetime('now') ELSE NULL END)
+                       RETURNING " strand-columns)
+                 id title (sqlite-bool active) (sqlite-bool ephemeral) (->json attributes) (sqlite-bool active)]))
 
-(defn- unique-task-id-error? [^Exception e]
-  (str/includes? (.getMessage e) "UNIQUE constraint failed: tasks.id"))
+(defn- unique-strand-id-error? [^Exception e]
+  (str/includes? (.getMessage e) "UNIQUE constraint failed: strands.id"))
 
-(defn add-task! [ds {:keys [title attributes] :as task}]
-  (let [task (update task :status #(or % "todo"))]
-    (require-valid! ::specs/task-input task "Invalid task")
+(def ^:private removed-lifecycle-fields #{:status :final_at})
+
+(defn- reject-removed-lifecycle-fields! [m context]
+  (when-let [fields (seq (filter removed-lifecycle-fields (keys m)))]
+    (throw (ex-info "Removed lifecycle fields are not core strand fields"
+                    {:context context :fields (vec fields)}))))
+
+(defn add-strand! [ds {:keys [title active ephemeral attributes] :as strand}]
+  (reject-removed-lifecycle-fields! strand :create)
+  (let [strand (merge {:active true :ephemeral false} strand)]
+    (require-valid! ::specs/strand-input strand "Invalid strand")
+    (when (and (= false (:active strand)) (= true (:ephemeral strand)))
+      (throw (ex-info "Inactive ephemeral strands cannot be persisted" {:strand strand})))
     (loop [attempt 1]
-    (when (> attempt max-id-attempts)
-      (throw (ex-info "Unable to generate unique task id" {:attempts max-id-attempts})))
-    (let [id (generate-id)
-          status (or (:status task) "todo")
-          result (try
-                   [:created (insert-task! ds id title status attributes)]
-                   (catch org.sqlite.SQLiteException e
-                     (if (unique-task-id-error? e)
-                       [:retry nil]
-                       (throw e))))]
-      (case (first result)
-        :created (second result)
-        :retry (recur (inc attempt)))))))
+      (when (> attempt max-id-attempts)
+        (throw (ex-info "Unable to generate unique strand id" {:attempts max-id-attempts})))
+      (let [id (generate-id)
+            result (try
+                     [:created (row->booleans (insert-strand! ds id title (:active strand) (:ephemeral strand) attributes))]
+                     (catch org.sqlite.SQLiteException e
+                       (if (unique-strand-id-error? e)
+                         [:retry nil]
+                         (throw e))))]
+        (case (first result)
+          :created (second result)
+          :retry (recur (inc attempt)))))))
 
-(defn add-task-with-edges! [ds task edges]
+(defn add-strand-with-edges! [ds strand edges]
   (jdbc/with-transaction [tx ds]
-    (let [created-task (add-task! tx task)]
+    (let [created-strand (add-strand! tx strand)]
       (doseq [{:keys [to type attributes]} edges]
-        (when-not (get-task tx to)
-          (throw (ex-info "Link target task not found" {:to to :type type})))
-        (add-edge! tx {:from (:id created-task)
+        (when-not (get-strand tx to)
+          (throw (ex-info "Link target strand not found" {:to to :type type})))
+        (add-edge! tx {:from (:id created-strand)
                        :to to
                        :type type
                        :attributes attributes}))
-      created-task)))
+      created-strand)))
 
-(defn add-task-batch! [ds tasks]
-  (validate-batch! tasks)
+(defn add-strand-batch! [ds strands]
+  (validate-batch! strands)
   (jdbc/with-transaction [tx ds]
-    (let [created (mapv (fn [{:keys [title status attributes]}]
-                          (add-task! tx {:title title :status status :attributes attributes}))
-                        tasks)
+    (let [created (mapv (fn [{:keys [title active ephemeral attributes] :as strand}]
+                          (add-strand! tx (cond-> {:title title :attributes attributes}
+                                            (contains? strand :active) (assoc :active active)
+                                            (contains? strand :ephemeral) (assoc :ephemeral ephemeral))))
+                        strands)
           refs (into {}
-                     (keep (fn [[task created-task]]
-                             (when-let [ref (:ref task)]
-                               [(str ref) (:id created-task)])))
-                     (map vector tasks created))]
-      (doseq [[task created-task] (map vector tasks created)
-              {:keys [to type attributes]} (:edges task)]
+                     (keep (fn [[strand created-strand]]
+                             (when-let [ref (:ref strand)]
+                               [(str ref) (:id created-strand)])))
+                     (map vector strands created))]
+      (doseq [[strand created-strand] (map vector strands created)
+              {:keys [to type attributes]} (:edges strand)]
         (let [resolved-to (cond
                             (symbol? to) (or (get refs (str to))
                                              (throw (ex-info "Batch edge target ref not found; symbolic targets only resolve to batch refs, use a string for durable ids"
                                                              {:to to :type type})))
                             (string? to) (do
-                                           (when-not (get-task tx to)
-                                             (throw (ex-info "Batch edge target task not found" {:to to :type type})))
+                                           (when-not (get-strand tx to)
+                                             (throw (ex-info "Batch edge target strand not found" {:to to :type type})))
                                            to))]
-          (add-edge! tx {:from (:id created-task)
+          (add-edge! tx {:from (:id created-strand)
                          :to resolved-to
                          :type type
                          :attributes attributes})))
@@ -245,13 +264,13 @@
   (boolean
    (execute-one! ds
                  ["WITH RECURSIVE reachable(id) AS (
-                     SELECT to_task_id
-                     FROM task_edges
-                     WHERE from_task_id = ?
+                     SELECT to_strand_id
+                     FROM strand_edges
+                     WHERE from_strand_id = ?
                    UNION
-                     SELECT e.to_task_id
+                     SELECT e.to_strand_id
                      FROM reachable r
-                     JOIN task_edges e ON e.from_task_id = r.id
+                     JOIN strand_edges e ON e.from_strand_id = r.id
                    )
                    SELECT 1 AS found
                    FROM reachable
@@ -261,71 +280,87 @@
 
 (defn- require-acyclic-edge! [ds from to type]
   (when (= from to)
-    (throw (ex-info "Task edges must not point to the same task" {:from from :to to :type type})))
+    (throw (ex-info "Strand edges must not point to the same strand" {:from from :to to :type type})))
   (when (path-exists? ds to from)
-    (throw (ex-info "Task edge would create a cycle" {:from from :to to :type type}))))
+    (throw (ex-info "Strand edge would create a cycle" {:from from :to to :type type}))))
 
 (defn add-edge! [ds {:keys [from to type attributes] :as edge}]
   (require-valid! ::specs/edge-input edge "Invalid edge")
   (require-acyclic-edge! ds from to type)
   (execute-one! ds
-                ["INSERT INTO task_edges (from_task_id, to_task_id, edge_type, attributes)
+                ["INSERT INTO strand_edges (from_strand_id, to_strand_id, edge_type, attributes)
                   VALUES (?, ?, ?, json(?))
-                  ON CONFLICT(from_task_id, to_task_id, edge_type) DO UPDATE SET attributes = excluded.attributes
-                  RETURNING from_task_id, to_task_id, edge_type, attributes"
+                  ON CONFLICT(from_strand_id, to_strand_id, edge_type) DO UPDATE SET attributes = excluded.attributes
+                  RETURNING from_strand_id, to_strand_id, edge_type, attributes"
                  from to type (->json attributes)]))
 
-(defn get-task [ds task-id]
-  (execute-one! ds
-                [(str "SELECT " task-columns " FROM tasks WHERE id = ?")
-                 task-id]))
+(defn get-strand [ds strand-id]
+  (some-> (execute-one! ds
+                        [(str "SELECT " strand-columns " FROM strands WHERE id = ?")
+                         strand-id])
+          row->booleans))
 
-(defn- require-updated-task [task-id row]
+(defn- require-updated-strand [strand-id row]
   (or row
-      (throw (ex-info "Task not found" {:task-id task-id}))))
+      (throw (ex-info "Strand not found" {:strand-id strand-id}))))
 
-(defn update-task! [ds task-id {:keys [title status attributes]}]
+(defn update-strand! [ds strand-id {:keys [title active ephemeral attributes] :as patch}]
+  (reject-removed-lifecycle-fields! patch :update)
   (when (and title (str/blank? title))
-    (throw (ex-info "Task title must be non-blank" {:title title})))
-  (when (and status (not (contains? specs/allowed-statuses status)))
-    (throw (ex-info "Invalid task status" {:status status :allowed specs/allowed-statuses})))
-  (require-updated-task
-   task-id
-   (execute-one! ds
-                 [(str "UPDATE tasks
-                        SET title = COALESCE(?, title),
-                            status = COALESCE(?, status),
-                            attributes = CASE WHEN ? IS NULL THEN attributes ELSE json_patch(attributes, json(?)) END,
-                            updated_at = datetime('now'),
-                            final_at = CASE
-                              WHEN COALESCE(?, status) IN ('done', 'failed', 'cancelled')
-                                THEN COALESCE(final_at, datetime('now'))
-                              ELSE NULL
-                            END
-                        WHERE id = ?
-                        RETURNING " task-columns)
-                  title status (when attributes (->json attributes)) (when attributes (->json attributes)) status task-id])))
+    (throw (ex-info "Strand title must be non-blank" {:title title})))
+  (when (contains? patch :active)
+    (require-boolean! active :active))
+  (when (contains? patch :ephemeral)
+    (require-boolean! ephemeral :ephemeral))
+  (when (and (contains? patch :active) (contains? patch :ephemeral))
+    (throw (ex-info "Cannot change active and ephemeral in the same patch" {:patch patch})))
+  (let [current (require-updated-strand strand-id (get-strand ds strand-id))]
+    (when (and (contains? patch :ephemeral) (= true ephemeral) (false? (:active current)))
+      (throw (ex-info "Inactive ephemeral strands cannot be persisted" {:strand-id strand-id :patch patch})))
+    (if (and (contains? patch :active) (= false active) (:ephemeral current))
+      (do
+        (execute! ds ["DELETE FROM strand_edges WHERE from_strand_id = ? OR to_strand_id = ?" strand-id strand-id])
+        (execute! ds ["DELETE FROM strands WHERE id = ?" strand-id])
+        nil)
+      (row->booleans
+       (require-updated-strand
+        strand-id
+        (execute-one! ds
+                      [(str "UPDATE strands
+                             SET title = COALESCE(?, title),
+                                 active = COALESCE(?, active),
+                                 ephemeral = COALESCE(?, ephemeral),
+                                 attributes = CASE WHEN ? IS NULL THEN attributes ELSE json_patch(attributes, json(?)) END,
+                                 updated_at = datetime('now'),
+                                 inactive_at = CASE
+                                   WHEN COALESCE(?, active) = 0 THEN COALESCE(inactive_at, datetime('now'))
+                                   ELSE NULL
+                                 END
+                             WHERE id = ?
+                             RETURNING " strand-columns)
+                       title (when (contains? patch :active) (sqlite-bool active))
+                       (when (contains? patch :ephemeral) (sqlite-bool ephemeral))
+                       (when attributes (->json attributes)) (when attributes (->json attributes))
+                       (when (contains? patch :active) (sqlite-bool active)) strand-id]))))))
 
-(defn update-task-attributes! [ds task-id attributes]
-  (update-task! ds task-id {:attributes attributes}))
+(defn update-strand-attributes! [ds strand-id attributes]
+  (update-strand! ds strand-id {:attributes attributes}))
 
-(defn update-task-status! [ds task-id status]
-  (update-task! ds task-id {:status status}))
-
-(defn query-tasks
+(defn query-strands
   ([ds query-def]
-   (query-tasks ds query-def {}))
+   (query-strands ds query-def {}))
   ([ds query-def params]
    (let [{:keys [sql params]} (query/compile-query query-def params)]
-     (execute! ds (into [(str "SELECT " task-columns " FROM tasks t WHERE " sql " ORDER BY t.id")]
-                       params)))))
+     (mapv row->booleans
+           (execute! ds (into [(str "SELECT " strand-columns " FROM strands t WHERE " sql " ORDER BY t.id")]
+                              params))))))
 
-(defn query-task-ids
+(defn query-strand-ids
   ([ds query-def]
-   (query-task-ids ds query-def {}))
+   (query-strand-ids ds query-def {}))
   ([ds query-def params]
    (let [{:keys [sql params]} (query/compile-query query-def params)]
-     (mapv :id (execute! ds (into [(str "SELECT t.id FROM tasks t WHERE " sql " ORDER BY t.id")]
+     (mapv :id (execute! ds (into [(str "SELECT t.id FROM strands t WHERE " sql " ORDER BY t.id")]
                                   params))))))
 
 (defn- ordered-distinct [xs]
@@ -342,31 +377,31 @@
 (defn- placeholders [xs]
   (str/join ", " (repeat (count xs) "?")))
 
-(defn- require-existing-task-ids! [ds ids context]
+(defn- require-existing-strand-ids! [ds ids context]
   (let [ids (ordered-distinct ids)]
     (when (seq ids)
-      (let [found (set (map :id (execute! ds (into [(str "SELECT id FROM tasks WHERE id IN (" (placeholders ids) ")")]
+      (let [found (set (map :id (execute! ds (into [(str "SELECT id FROM strands WHERE id IN (" (placeholders ids) ")")]
                                                 ids))))
             missing (vec (remove found ids))]
         (when (seq missing)
-          (throw (ex-info "Task ids not found" {:context context :missing missing})))))
+          (throw (ex-info "Strand ids not found" {:context context :missing missing})))))
     ids))
 
-(defn tasks-by-ids [ds ids]
-  (let [ids (require-existing-task-ids! ds ids :tasks-by-ids)]
+(defn strands-by-ids [ds ids]
+  (let [ids (require-existing-strand-ids! ds ids :strands-by-ids)]
     (if (empty? ids)
       []
       (let [rows-by-id (into {}
                              (map (juxt :id identity))
-                             (execute! ds (into [(str "SELECT " task-columns " FROM tasks WHERE id IN (" (placeholders ids) ")")]
+                             (execute! ds (into [(str "SELECT " strand-columns " FROM strands WHERE id IN (" (placeholders ids) ")")]
                                                 ids)))]
-        (mapv rows-by-id ids)))))
+        (mapv (comp row->booleans rows-by-id) ids)))))
 
 (defn ancestor-root-ids
   ([ds seed-ids]
    (ancestor-root-ids ds seed-ids {}))
   ([ds seed-ids {:keys [where params]}]
-   (let [seed-ids (require-existing-task-ids! ds seed-ids :ancestor-root-ids)]
+   (let [seed-ids (require-existing-strand-ids! ds seed-ids :ancestor-root-ids)]
      (if (empty? seed-ids)
        []
        (if where
@@ -375,14 +410,14 @@
                  (execute! ds (into [(str "WITH RECURSIVE paths(id, candidate_id) AS (
                                            SELECT t.id,
                                                   CASE WHEN " where-sql " THEN t.id ELSE NULL END
-                                           FROM tasks t
+                                           FROM strands t
                                            WHERE t.id IN (" (placeholders seed-ids) ")
                                          UNION ALL
                                            SELECT t.id,
                                                   CASE WHEN " where-sql " THEN t.id ELSE paths.candidate_id END
                                            FROM paths
-                                           JOIN task_edges e ON e.to_task_id = paths.id
-                                           JOIN tasks t ON t.id = e.from_task_id
+                                           JOIN strand_edges e ON e.to_strand_id = paths.id
+                                           JOIN strands t ON t.id = e.from_strand_id
                                            WHERE e.edge_type = 'parent-of'
                                          )
                                          SELECT DISTINCT candidate_id AS id
@@ -390,71 +425,77 @@
                                          WHERE candidate_id IS NOT NULL
                                            AND NOT EXISTS (
                                              SELECT 1
-                                             FROM task_edges e
-                                             WHERE e.to_task_id = paths.id
+                                             FROM strand_edges e
+                                             WHERE e.to_strand_id = paths.id
                                                AND e.edge_type = 'parent-of'
                                            )
                                          ORDER BY id")]
                                     (concat where-params seed-ids where-params)))))
          (mapv :id
                (execute! ds (into [(str "WITH RECURSIVE ancestors(id) AS (
-                                         SELECT id FROM tasks WHERE id IN (" (placeholders seed-ids) ")
+                                         SELECT id FROM strands WHERE id IN (" (placeholders seed-ids) ")
                                        UNION
-                                         SELECT e.from_task_id
+                                         SELECT e.from_strand_id
                                          FROM ancestors a
-                                         JOIN task_edges e ON e.to_task_id = a.id
+                                         JOIN strand_edges e ON e.to_strand_id = a.id
                                          WHERE e.edge_type = 'parent-of'
                                        )
                                        SELECT a.id
                                        FROM ancestors a
                                        WHERE NOT EXISTS (
                                          SELECT 1
-                                         FROM task_edges e
-                                         WHERE e.to_task_id = a.id AND e.edge_type = 'parent-of'
+                                         FROM strand_edges e
+                                         WHERE e.to_strand_id = a.id AND e.edge_type = 'parent-of'
                                        )
                                        ORDER BY a.id")]
                                   seed-ids))))))))
 
 (defn subgraph [ds root-ids]
-  (let [root-ids (require-existing-task-ids! ds root-ids :subgraph)]
+  (let [root-ids (require-existing-strand-ids! ds root-ids :subgraph)]
     (if (empty? root-ids)
-      {:root-ids [] :tasks [] :edges []}
+      {:root-ids [] :tasks [] :strands [] :edges []}
       (let [cte (str "WITH RECURSIVE nodes(id) AS (
-                       SELECT id FROM tasks WHERE id IN (" (placeholders root-ids) ")
+                       SELECT id FROM strands WHERE id IN (" (placeholders root-ids) ")
                      UNION
-                       SELECT e.to_task_id
+                       SELECT e.to_strand_id
                        FROM nodes n
-                       JOIN task_edges e ON e.from_task_id = n.id
+                       JOIN strand_edges e ON e.from_strand_id = n.id
                        WHERE e.edge_type = 'parent-of'
                      )")]
-        {:root-ids root-ids
-         :tasks (execute! ds (into [(str cte "
-                                      SELECT " task-columns "
-                                      FROM tasks
+        (let [rows (mapv row->booleans
+                         (execute! ds (into [(str cte "
+                                      SELECT " strand-columns "
+                                      FROM strands
                                       WHERE id IN (SELECT id FROM nodes)
                                       ORDER BY id")]
-                                  root-ids))
-         :edges (execute! ds (into [(str cte "
-                                      SELECT e.from_task_id, e.to_task_id, e.edge_type, e.attributes
-                                      FROM task_edges e
+                                            root-ids)))
+              edges (execute! ds (into [(str cte "
+                                      SELECT e.from_strand_id, e.to_strand_id,
+                                             e.from_strand_id AS from_task_id, e.to_strand_id AS to_task_id,
+                                             e.edge_type, e.attributes
+                                      FROM strand_edges e
                                       WHERE e.edge_type = 'parent-of'
-                                        AND e.from_task_id IN (SELECT id FROM nodes)
-                                        AND e.to_task_id IN (SELECT id FROM nodes)
-                                      ORDER BY e.from_task_id, e.to_task_id, e.edge_type")]
-                                  root-ids))}))))
+                                        AND e.from_strand_id IN (SELECT id FROM nodes)
+                                        AND e.to_strand_id IN (SELECT id FROM nodes)
+                                      ORDER BY e.from_strand_id, e.to_strand_id, e.edge_type")]
+                                        root-ids))]
+          {:root-ids root-ids
+           :tasks rows
+           :strands rows
+           :edges edges})))))
 
-(defn all-tasks
+(defn all-strands
   ([ds]
-   (execute! ds [(str "SELECT " task-columns " FROM tasks ORDER BY id")]))
+   (mapv row->booleans (execute! ds [(str "SELECT " strand-columns " FROM strands ORDER BY id")])))
   ([ds query-def]
-   (query-tasks ds query-def {}))
+   (query-strands ds query-def {}))
   ([ds query-def params]
-   (query-tasks ds query-def params)))
+   (query-strands ds query-def params)))
 
-(defn tasks-by-attribute [ds attr-key attr-value]
+(defn strands-by-attribute [ds attr-key attr-value]
   (execute! ds
             ["SELECT t.id, t.title, t.attributes
-              FROM tasks t
+              FROM strands t
               WHERE EXISTS (
                 SELECT 1
                 FROM json_each(t.attributes) attr
@@ -463,113 +504,136 @@
               ORDER BY t.id"
              (name attr-key) attr-value]))
 
-(defn task-dependencies [ds task-id]
+(defn strand-dependencies [ds strand-id]
   (execute! ds
-            ["SELECT dep.id, dep.title, dep.status, dep.attributes, dep.created_at, dep.updated_at, dep.final_at,
+            ["SELECT dep.id, dep.title, dep.active, dep.attributes, dep.created_at, dep.updated_at, dep.inactive_at,
                      e.attributes AS edge_attributes
-              FROM task_edges e
-              JOIN tasks dep ON dep.id = e.to_task_id
-              WHERE e.from_task_id = ? AND e.edge_type = 'depends-on'
+              FROM strand_edges e
+              JOIN strands dep ON dep.id = e.to_strand_id
+              WHERE e.from_strand_id = ? AND e.edge_type = 'depends-on'
               ORDER BY dep.id"
-             task-id]))
+             strand-id]))
 
-(defn blocking-tasks [ds task-id]
+(defn blocking-strands [ds strand-id]
   (execute! ds
-            ["SELECT blocked.id, blocked.title, blocked.status, blocked.attributes, blocked.created_at, blocked.updated_at, blocked.final_at,
+            ["SELECT blocked.id, blocked.title, blocked.active, blocked.attributes, blocked.created_at, blocked.updated_at, blocked.inactive_at,
                      e.attributes AS edge_attributes
-              FROM task_edges e
-              JOIN tasks blocked ON blocked.id = e.from_task_id
-              WHERE e.to_task_id = ? AND e.edge_type = 'depends-on'
+              FROM strand_edges e
+              JOIN strands blocked ON blocked.id = e.from_strand_id
+              WHERE e.to_strand_id = ? AND e.edge_type = 'depends-on'
               ORDER BY blocked.id"
-             task-id]))
+             strand-id]))
 
-(defn blocked-tasks [ds]
+(defn blocked-strands [ds]
   (execute! ds
             ["SELECT t.id, t.title, json_group_array(dep.id) AS blockers
-              FROM tasks t
-              JOIN task_edges e ON e.from_task_id = t.id AND e.edge_type = 'depends-on'
-              JOIN tasks dep ON dep.id = e.to_task_id
+              FROM strands t
+              JOIN strand_edges e ON e.from_strand_id = t.id AND e.edge_type = 'depends-on'
+              JOIN strands dep ON dep.id = e.to_strand_id
               GROUP BY t.id, t.title
               ORDER BY t.id"]))
 
-(defn ready-tasks
+(defn ready-strands
   ([ds]
-   (execute! ds
-             [(str "SELECT " task-columns "
-               FROM tasks t
-               WHERE t.status NOT IN ('done', 'failed', 'cancelled')
+   (mapv row->booleans
+         (execute! ds
+                   [(str "SELECT " strand-columns "
+               FROM strands t
+               WHERE t.active = 1
                  AND NOT EXISTS (
                    SELECT 1
-                   FROM task_edges e
-                   JOIN tasks dep ON dep.id = e.to_task_id
-                   WHERE e.from_task_id = t.id
+                   FROM strand_edges e
+                   JOIN strands dep ON dep.id = e.to_strand_id
+                   WHERE e.from_strand_id = t.id
                      AND e.edge_type = 'depends-on'
-                     AND dep.status NOT IN ('done', 'failed', 'cancelled')
+                     AND dep.active = 1
                  )
-               ORDER BY t.id")]))
+               ORDER BY t.id")])) )
   ([ds query-def]
-   (ready-tasks ds query-def {}))
+   (ready-strands ds query-def {}))
   ([ds query-def params]
    (let [{query-sql :sql query-params :params} (query/compile-query query-def params)]
-     (execute! ds
-               (into [(str "SELECT " task-columns "
-                 FROM tasks t
-                 WHERE t.status NOT IN ('done', 'failed', 'cancelled')
+     (mapv row->booleans
+           (execute! ds
+                     (into [(str "SELECT " strand-columns "
+                 FROM strands t
+                 WHERE t.active = 1
                    AND NOT EXISTS (
                      SELECT 1
-                     FROM task_edges e
-                     JOIN tasks dep ON dep.id = e.to_task_id
-                     WHERE e.from_task_id = t.id
+                     FROM strand_edges e
+                     JOIN strands dep ON dep.id = e.to_strand_id
+                     WHERE e.from_strand_id = t.id
                        AND e.edge_type = 'depends-on'
-                       AND dep.status NOT IN ('done', 'failed', 'cancelled')
+                       AND dep.active = 1
                    )
                    AND " query-sql "
                  ORDER BY t.id")]
-                     query-params)))))
+                           query-params))))))
 
-(defn transitive-dependencies [ds task-id]
+(defn transitive-dependencies [ds strand-id]
   (execute! ds
-            ["WITH RECURSIVE deps(id, title, status, attributes, created_at, updated_at, final_at) AS (
-                SELECT dep.id, dep.title, dep.status, dep.attributes, dep.created_at, dep.updated_at, dep.final_at
-                FROM task_edges e
-                JOIN tasks dep ON dep.id = e.to_task_id
-                WHERE e.from_task_id = ? AND e.edge_type = 'depends-on'
+            ["WITH RECURSIVE deps(id, title, active, attributes, created_at, updated_at, inactive_at) AS (
+                SELECT dep.id, dep.title, dep.active, dep.attributes, dep.created_at, dep.updated_at, dep.inactive_at
+                FROM strand_edges e
+                JOIN strands dep ON dep.id = e.to_strand_id
+                WHERE e.from_strand_id = ? AND e.edge_type = 'depends-on'
               UNION
-                SELECT dep.id, dep.title, dep.status, dep.attributes, dep.created_at, dep.updated_at, dep.final_at
+                SELECT dep.id, dep.title, dep.active, dep.attributes, dep.created_at, dep.updated_at, dep.inactive_at
                 FROM deps
-                JOIN task_edges e ON e.from_task_id = deps.id AND e.edge_type = 'depends-on'
-                JOIN tasks dep ON dep.id = e.to_task_id
+                JOIN strand_edges e ON e.from_strand_id = deps.id AND e.edge_type = 'depends-on'
+                JOIN strands dep ON dep.id = e.to_strand_id
               )
-              SELECT id, title, status, attributes, created_at, updated_at, final_at
+              SELECT id, title, active, attributes, created_at, updated_at, inactive_at
               FROM deps
               WHERE id <> ?
               ORDER BY id"
-             task-id task-id]))
+             strand-id strand-id]))
 
-(defn tasks-by-priority [ds priority]
+(defn strands-by-priority [ds priority]
   (execute! ds
             ["SELECT id, title, attributes
-              FROM tasks
+              FROM strands
               WHERE json_extract(attributes, '$.priority') = ?
               ORDER BY json_extract(attributes, '$.due-date'), id"
              priority]))
 
-(defn tasks-due-before [ds due-date]
+(defn strands-due-before [ds due-date]
   (execute! ds
             ["SELECT id, title, attributes
-              FROM tasks
+              FROM strands
               WHERE json_extract(attributes, '$.due-date') IS NOT NULL
                 AND json_extract(attributes, '$.due-date') <= ?
               ORDER BY json_extract(attributes, '$.due-date'), id"
              due-date]))
 
-(defn related-tasks [ds task-id]
+(defn related-strands [ds strand-id]
   (execute! ds
-            ["SELECT e.edge_type, e.from_task_id, src.title AS from_title,
-                     e.to_task_id, dst.title AS to_title, e.attributes
-              FROM task_edges e
-              JOIN tasks src ON src.id = e.from_task_id
-              JOIN tasks dst ON dst.id = e.to_task_id
-              WHERE e.from_task_id = ? OR e.to_task_id = ?
-              ORDER BY e.edge_type, e.from_task_id, e.to_task_id"
-             task-id task-id]))
+            ["SELECT e.edge_type, e.from_strand_id, src.title AS from_title,
+                     e.to_strand_id, dst.title AS to_title, e.attributes
+              FROM strand_edges e
+              JOIN strands src ON src.id = e.from_strand_id
+              JOIN strands dst ON dst.id = e.to_strand_id
+              WHERE e.from_strand_id = ? OR e.to_strand_id = ?
+              ORDER BY e.edge_type, e.from_strand_id, e.to_strand_id"
+             strand-id strand-id]))
+
+;; Compatibility function names retained until namespace/API rename slices run.
+(def add-task! add-strand!)
+(def add-task-with-edges! add-strand-with-edges!)
+(def add-task-batch! add-strand-batch!)
+(def get-task get-strand)
+(def update-task! update-strand!)
+(def update-task-attributes! update-strand-attributes!)
+(def query-tasks query-strands)
+(def query-task-ids query-strand-ids)
+(def tasks-by-ids strands-by-ids)
+(def all-tasks all-strands)
+(def tasks-by-attribute strands-by-attribute)
+(def task-dependencies strand-dependencies)
+(def blocking-tasks blocking-strands)
+(def blocked-tasks blocked-strands)
+(def ready-tasks ready-strands)
+(def transitive-dependencies transitive-dependencies)
+(def tasks-by-priority strands-by-priority)
+(def tasks-due-before strands-due-before)
+(def related-tasks related-strands)

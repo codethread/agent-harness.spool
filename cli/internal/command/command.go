@@ -72,34 +72,36 @@ func (a *App) rootCommand() *cobra.Command {
 		return a.initCommand(o)
 	}})
 
-	add := &cobra.Command{Use: "add <title>", Short: "Create a task", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		status, _ := cmd.Flags().GetString("status")
+	add := &cobra.Command{Use: "add <title>", Short: "Create a strand", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		active, _ := cmd.Flags().GetBool("active")
+		ephemeral, _ := cmd.Flags().GetBool("ephemeral")
 		attrs, _ := cmd.Flags().GetStringArray("attr")
-		if err := validStatus(status); err != nil {
-			return err
-		}
 		am, err := parseKV(attrs, "--attr")
 		if err != nil {
 			return err
 		}
+		payload := map[string]any{"title": args[0], "attributes": am}
+		if cmd.Flags().Changed("active") {
+			payload["active"] = active
+		}
+		if cmd.Flags().Changed("ephemeral") {
+			payload["ephemeral"] = ephemeral
+		}
 		return a.withConfig(o, func(r Options) error {
-			return a.call(r, "add", map[string]any{"title": args[0], "status": status, "attributes": am})
+			return a.call(r, "add", payload)
 		})
 	}}
-	add.Flags().String("status", "todo", "task status: todo, done, failed, or cancelled")
+	add.Flags().Bool("active", true, "strand active state")
+	add.Flags().Bool("ephemeral", false, "delete strand when deactivated")
 	add.Flags().StringArray("attr", nil, "string attribute key=value (repeatable)")
 	root.AddCommand(add)
 
-	update := &cobra.Command{Use: "update <id>", Short: "Update a task", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		status, _ := cmd.Flags().GetString("status")
+	update := &cobra.Command{Use: "update <id>", Short: "Update a strand", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		active, _ := cmd.Flags().GetBool("active")
+		ephemeral, _ := cmd.Flags().GetBool("ephemeral")
 		title, _ := cmd.Flags().GetString("title")
 		attrs, _ := cmd.Flags().GetStringArray("attr")
 		edges, _ := cmd.Flags().GetStringArray("edge")
-		if status != "" {
-			if err := validStatus(status); err != nil {
-				return err
-			}
-		}
 		am, err := parseKV(attrs, "--attr")
 		if err != nil {
 			return err
@@ -116,20 +118,25 @@ func (a *App) rootCommand() *cobra.Command {
 		if cmd.Flags().Changed("title") {
 			titleArg = title
 		}
-		var statusArg any
-		if status != "" {
-			statusArg = status
+		var activeArg any
+		if cmd.Flags().Changed("active") {
+			activeArg = active
+		}
+		var ephemeralArg any
+		if cmd.Flags().Changed("ephemeral") {
+			ephemeralArg = ephemeral
 		}
 		var attrArg any
 		if len(attrs) > 0 {
 			attrArg = am
 		}
 		return a.withConfig(o, func(r Options) error {
-			return a.call(r, "update", map[string]any{"id": args[0], "title": titleArg, "status": statusArg, "attributes": attrArg, "edges": edgeRows})
+			return a.call(r, "update", map[string]any{"id": args[0], "title": titleArg, "active": activeArg, "ephemeral": ephemeralArg, "attributes": attrArg, "edges": edgeRows})
 		})
 	}}
-	update.Flags().String("title", "", "new task title")
-	update.Flags().String("status", "", "task status: todo, done, failed, or cancelled")
+	update.Flags().String("title", "", "new strand title")
+	update.Flags().Bool("active", true, "strand active state")
+	update.Flags().Bool("ephemeral", false, "delete strand when deactivated")
 	update.Flags().StringArray("attr", nil, "string attribute key=value (repeatable)")
 	update.Flags().StringArray("edge", nil, "outgoing edge edge-type:to-id (repeatable)")
 	root.AddCommand(update)
@@ -421,13 +428,6 @@ func (a *App) launchRepl(o Options, stdin bool) error {
 		return err
 	}
 	return runReplProcess(o, stdin, os.Stdin, a.Stdout, a.Stderr)
-}
-func validStatus(s string) error {
-	switch s {
-	case "todo", "done", "failed", "cancelled":
-		return nil
-	}
-	return fmt.Errorf("invalid status: %s", s)
 }
 func parseKV(vals []string, name string) (map[string]any, error) {
 	m := map[string]any{}

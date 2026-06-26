@@ -81,21 +81,21 @@
             :state-dir (str state-home "/atom")
             :data-dir (str data-home "/atom")
             :config-file (str config-home "/atom/config.json")
-            :db-path (str data-home "/atom/tasks.sqlite")}
+            :db-path (str data-home "/atom/skein.sqlite")}
            (daemon-config/world))))
   (let [dir (.getCanonicalPath (.toFile (java.nio.file.Files/createTempDirectory "todo-world" (make-array java.nio.file.attribute.FileAttribute 0))))]
     (is (= {:config-dir dir
             :state-dir (str dir "/state")
             :data-dir (str dir "/data")
             :config-file (str dir "/config.json")
-            :db-path (str dir "/data/tasks.sqlite")}
+            :db-path (str dir "/data/skein.sqlite")}
            (daemon-config/world dir)))))
 
 (deftest daemon-api-delegates-to-db-and-normalizes-results
   (with-runtime
     (fn [rt _]
       (is (= {:database "initialized"} (api/init rt)))
-      (let [design (api/add rt {:title "Design" :status "done" :attributes {:priority "high"}})
+      (let [design (api/add rt {:title "Design" :active false :attributes {:priority "high"}})
             docs (api/add rt {:title "Docs" :attributes {:owner "agent"}})]
         (is (= {:priority "high"} (:attributes design)))
         (api/update rt (:id docs) {:attributes {:phase "write"}
@@ -107,7 +107,7 @@
 (deftest daemon-query-registry-add-load-list-and-resolve
   (with-runtime
     (fn [rt _]
-      (let [open-query [:= :status "open"]
+      (let [open-query [:= :active true]
             owner-query {:params [:owner]
                          :where [:= [:attr :owner] [:param :owner]]}]
         (is (= {"mine" owner-query} (api/register-query rt 'mine owner-query)))
@@ -208,21 +208,21 @@
           (is (= "missing" (:canonical-query (ex-data e))))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"simple symbols or keywords"
-                            (api/register-query rt 'user/mine [:= :status "open"])))
+                            (api/register-query rt 'user/mine [:= :active true])))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"simple symbols or keywords"
-                            (api/load-queries rt {"mine" [:= :status "open"]})))
+                            (api/load-queries rt {"mine" [:= :active true]})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"simple symbols or keywords"
-                            (api/load-queries rt {'user/mine [:= :status "open"]})))
+                            (api/load-queries rt {'user/mine [:= :active true]})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown query operator"
-                            (api/register-query rt :broken [:unknown :status "open"])))
-      (api/register-query rt :ok [:= :status "open"])
+                            (api/register-query rt :broken [:unknown :active true])))
+      (api/register-query rt :ok [:= :active true])
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown query operator"
-                            (api/load-queries rt {:bad [:unknown :status "open"]})))
-      (is (= {"ok" [:= :status "open"]} (api/queries rt))))))
+                            (api/load-queries rt {:bad [:unknown :active true]})))
+      (is (= {"ok" [:= :active true]} (api/queries rt))))))
 
 (deftest daemon-api-update-preserves-domain-errors-and-rolls-back
   (with-runtime
@@ -258,10 +258,10 @@
   (let [world (temp-world)
         init (io/file (:config-dir world) "init.clj")]
     (try
-      (spit init "(require '[todo.daemon.api :as api] '[todo.daemon.runtime :as runtime]) (api/register-query @runtime/current-runtime 'trusted [:= :status \"todo\"])")
+      (spit init "(require '[todo.daemon.api :as api] '[todo.daemon.runtime :as runtime]) (api/register-query @runtime/current-runtime 'trusted [:= :active true])")
       (let [rt (runtime/start! nil {:world world})]
         (try
-          (is (= {"trusted" [:= :status "todo"]} (api/queries rt)))
+          (is (= {"trusted" [:= :active true]} (api/queries rt)))
           (finally
             (runtime/stop! rt))))
       (finally
@@ -310,22 +310,22 @@
   (with-runtime
     (fn [rt _]
       (is (= true (get (socket-request rt "init" {}) "ok")))
-      (let [added (socket-request rt "add" {"title" "Socket task" "status" "todo" "attributes" {"owner" "go"}})]
+      (let [added (socket-request rt "add" {"title" "Socket task" "active" true "attributes" {"owner" "go"}})]
         (is (true? (get added "ok")))
         (is (= "Socket task" (get-in added ["result" "title"])))
         (is (= {"owner" "go"} (get-in added ["result" "attributes"]))))
-      (let [target (socket-request rt "add" {"title" "Target" "status" "done" "attributes" {}})
-            source (socket-request rt "add" {"title" "Source" "status" "todo" "attributes" {}})
+      (let [target (socket-request rt "add" {"title" "Target" "active" false "attributes" {}})
+            source (socket-request rt "add" {"title" "Source" "active" true "attributes" {}})
             updated (socket-request rt "update" {"id" (get-in source ["result" "id"])
                                                   "title" nil
-                                                  "status" nil
+                                                  "active" nil
                                                   "attributes" nil
                                                   "edges" [{"type" "depends-on"
                                                             "to" (get-in target ["result" "id"])}]})]
         (is (true? (get updated "ok")))
         (is (= [(get-in target ["result" "id"])]
                (mapv :id (db/task-dependencies (:datasource rt) (get-in source ["result" "id"]))))))
-      (let [missing (socket-request rt "update" {"id" "missing" "title" nil "status" nil "attributes" nil "edges" []})]
+      (let [missing (socket-request rt "update" {"id" "missing" "title" nil "active" nil "attributes" nil "edges" []})]
         (is (false? (get missing "ok")))
         (is (= "domain" (get-in missing ["error" "type"]))))
       (let [rejected (socket-request rt "queries" {})]

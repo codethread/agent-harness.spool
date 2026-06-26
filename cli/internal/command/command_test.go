@@ -35,7 +35,7 @@ func TestHelpIncludesCommandTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"add <title>", "--status", "--attr"} {
+	for _, want := range []string{"add <title>", "--active", "--ephemeral", "--attr"} {
 		if !strings.Contains(add, want) {
 			t.Fatalf("add help missing %q in:\n%s", want, add)
 		}
@@ -543,7 +543,7 @@ func (f *fakeClient) Call(op string, args map[string]any) (any, error) {
 	if f.result != nil {
 		return f.result, nil
 	}
-	return map[string]any{"id": "task-1", "title": "Write docs", "status": "todo", "attributes": map[string]any{}}, nil
+	return map[string]any{"id": "task-1", "title": "Write docs", "active": true, "ephemeral": false, "attributes": map[string]any{}}, nil
 }
 
 func testConfig(t *testing.T) string {
@@ -605,7 +605,7 @@ func TestTaskCommandsUseSocketClientPayloads(t *testing.T) {
 	if strings.TrimSpace(out) != "task-1" {
 		t.Fatalf("expected generated id, got %q", out)
 	}
-	if out, err = run("--config-dir", cfg, "update", "task-1", "--status", "done", "--edge", "depends-on:task-0"); err != nil || out != "" {
+	if out, err = run("--config-dir", cfg, "update", "task-1", "--active=false", "--edge", "depends-on:task-0"); err != nil || out != "" {
 		t.Fatalf("update output/error = %q/%v", out, err)
 	}
 	if _, err = run("--config-dir", cfg, "--format", "json", "show", "task-1"); err != nil {
@@ -614,13 +614,16 @@ func TestTaskCommandsUseSocketClientPayloads(t *testing.T) {
 	if len(fc.calls) != 3 {
 		t.Fatalf("calls = %#v", fc.calls)
 	}
-	if fc.calls[0].op != "add" || fc.calls[0].args["title"] != "Write docs" || fc.calls[0].args["status"] != "todo" {
+	if fc.calls[0].op != "add" || fc.calls[0].args["title"] != "Write docs" {
 		t.Fatalf("bad add call: %#v", fc.calls[0])
+	}
+	if _, ok := fc.calls[0].args["active"]; ok {
+		t.Fatalf("add should omit default active: %#v", fc.calls[0])
 	}
 	if !reflect.DeepEqual(fc.calls[0].args["attributes"], map[string]any{"owner": "agent"}) {
 		t.Fatalf("bad attrs: %#v", fc.calls[0].args)
 	}
-	expectedUpdate := map[string]any{"id": "task-1", "title": nil, "status": "done", "attributes": nil, "edges": []map[string]any{{"type": "depends-on", "to": "task-0"}}}
+	expectedUpdate := map[string]any{"id": "task-1", "title": nil, "active": false, "ephemeral": nil, "attributes": nil, "edges": []map[string]any{{"type": "depends-on", "to": "task-0"}}}
 	if fc.calls[1].op != "update" || !reflect.DeepEqual(fc.calls[1].args, expectedUpdate) {
 		t.Fatalf("bad update call: %#v", fc.calls[1])
 	}

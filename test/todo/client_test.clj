@@ -62,9 +62,9 @@
         (is (= {"mine" query-def} (client/register-query db-file :mine query-def)))
         (is (= query-def (client/resolve-query db-file 'mine)))
         (is (= {"mine" query-def} (client/queries db-file)))
-        (is (= {"done" [:= :status "done"]}
-               (client/load-queries db-file {'done [:= :status "done"]})))
-        (is (= {"done" [:= :status "done"]
+        (is (= {"done" [:= :active false]}
+               (client/load-queries db-file {'done [:= :active false]})))
+        (is (= {"done" [:= :active false]
                 "mine" query-def}
                (client/queries db-file)))))))
 
@@ -78,7 +78,7 @@
         (is (= [(:id agent)] (client/call db-file {} :query-ids 'mine {})))
         (is (= [agent] (client/call db-file {} :tasks-by-ids [(:id agent)])))
         (is (= [] (client/call db-file {} :ancestor-root-ids [(:id agent)] {:where [:= [:attr :kind] "feature"]})))
-        (is (= {:root-ids [(:id agent)] :tasks [agent] :edges []}
+        (is (= {:root-ids [(:id agent)] :tasks [agent] :strands [agent] :edges []}
                (client/call db-file {} :subgraph [(:id agent)])))
         (is (= {:name "client" :fn 'todo.client-test/client-test-view}
                (client/call db-file {} :register-view! 'client 'todo.client-test/client-test-view)))
@@ -98,7 +98,7 @@
           (is (= "Query not found" (:daemon-message (ex-data e))))
           (is (= :missing (get-in (ex-data e) [:daemon-data :query])))))
       (try
-        (client/load-queries db-file {"mine" [:= :status "open"]})
+        (client/load-queries db-file {"mine" [:= :active true]})
         (is false "expected invalid query name error")
         (catch clojure.lang.ExceptionInfo e
           (is (= "Daemon API call failed" (ex-message e)))
@@ -168,7 +168,7 @@
         (catch clojure.lang.ExceptionInfo e
           (is (= "Daemon API call failed" (ex-message e)))
           (is (= :todo.client/daemon-error (:type (ex-data e))))
-          (is (= "Invalid task" (:daemon-message (ex-data e))))
+          (is (= "Invalid strand" (:daemon-message (ex-data e))))
           (is (re-find #"non-blank" (:explain (:daemon-data (ex-data e))))))))))
 
 (deftest client-fails-loudly-for-timeouts

@@ -79,7 +79,7 @@
     (fn [rt db-file]
       (is (= (:config-dir (:metadata rt)) (repl/connect! (:config-dir (:metadata rt)))))
       (is (= {:database "initialized"} (repl/init!)))
-      (let [design (repl/task! "Sketch model" "done" {:priority "high"})
+      (let [design (repl/task! "Sketch model" false {:priority "high"})
             docs (repl/task! "Write docs" {:owner "agent"})]
         (is (= {:priority "high"} (:attributes design)))
         (repl/update! (:id docs) {:edges [{:type "depends-on" :to (:id design)}]})
@@ -122,7 +122,7 @@
     (fn [rt db-file]
       (repl/connect! (:config-dir (:metadata rt)))
       (repl/init!)
-      (let [design (:id (repl/task! "Design" "done" {:owner "agent"}))
+      (let [design (:id (repl/task! "Design" false {:owner "agent"}))
             docs (:id (repl/task! "Docs" {:owner "agent"}))
             misc (:id (repl/task! "Misc" {:owner "human"}))]
         (repl/update! docs {:edges [{:type "depends-on" :to design}]})
