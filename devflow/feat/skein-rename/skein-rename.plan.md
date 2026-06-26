@@ -120,3 +120,9 @@ Append notes here. Do not rewrite earlier notes.
 ### SR-PLAN-001.DN4 Task 002 YAGNI cleanup — 2026-06-26
 
 - Removed the temporary `:todo` Clojure alias and pointed the current Go daemon launcher at `-M:skein`; the public binary/subcommand names still remain for task 4, but the Clojure entrypoint no longer carries an old compatibility alias.
+
+### SR-PLAN-001.DN5 Task 003 implementation — 2026-06-26
+
+- Renamed connected helpers to `skein.repl/strand!`, `strand`, and `strands`; old task helper vars are absent.
+- Moved blessed alpha libraries to `skein.libs.alpha`, `skein.graph.alpha`, and `skein.views.alpha`; graph hydration is now `strands-by-ids` and subgraph helpers expose `:strands` rows.
+- REPL helper tests now cover ephemeral creation, invalid inactive-ephemeral creation, same-patch active/ephemeral rejection, and delete-on-deactivate through the connected weaver path.

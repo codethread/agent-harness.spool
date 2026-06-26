@@ -32,7 +32,7 @@ type Caller interface {
 	Call(string, map[string]any) (any, error)
 }
 
-const defaultInitCLJ = "(require '[atom.libs.alpha :as libs]\n         '[atom.graph.alpha :as graph]\n         '[atom.views.alpha :as views])\n(libs/sync!)\n"
+const defaultInitCLJ = "(require '[skein.libs.alpha :as libs]\n         '[skein.graph.alpha :as graph]\n         '[skein.views.alpha :as views])\n(libs/sync!)\n"
 
 var newClient = func(o Options) Caller {
 	return client.New(client.Config{ConfigDir: o.ConfigDir, StateDir: o.StateDir, Format: o.Format})
@@ -58,7 +58,7 @@ func (a *App) rootCommand() *cobra.Command {
 	o := Options{}
 	root := &cobra.Command{
 		Use:           "todo",
-		Short:         "Manage Atom tasks through the local daemon",
+		Short:         "Manage Skein strands through the local daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -68,7 +68,7 @@ func (a *App) rootCommand() *cobra.Command {
 		o.ConfigDirExplicit = cmd.Flags().Changed("config-dir")
 	}
 	root.PersistentFlags().StringVar(&o.Format, "format", "", "output format: human or json")
-	root.AddCommand(&cobra.Command{Use: "init", Short: "Bootstrap missing config-dir files; initialize task storage via the running daemon", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	root.AddCommand(&cobra.Command{Use: "init", Short: "Bootstrap missing config-dir files; initialize strand storage via the running daemon", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		return a.initCommand(o)
 	}})
 
@@ -141,11 +141,11 @@ func (a *App) rootCommand() *cobra.Command {
 	update.Flags().StringArray("edge", nil, "outgoing edge edge-type:to-id (repeatable)")
 	root.AddCommand(update)
 
-	root.AddCommand(&cobra.Command{Use: "show <id>", Short: "Show one task", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	root.AddCommand(&cobra.Command{Use: "show <id>", Short: "Show one strand", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		return a.withConfig(o, func(r Options) error { return a.call(r, "show", map[string]any{"id": args[0]}) })
 	}})
-	root.AddCommand(a.queryCommand(&o, "list", "List tasks"))
-	root.AddCommand(a.queryCommand(&o, "ready", "List ready tasks"))
+	root.AddCommand(a.queryCommand(&o, "list", "List strands"))
+	root.AddCommand(a.queryCommand(&o, "ready", "List ready strands"))
 
 	daemon := &cobra.Command{Use: "daemon", Short: "Manage the local daemon"}
 	start := &cobra.Command{Use: "start", Short: "Start the daemon in the foreground for the selected config-dir world", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

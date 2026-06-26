@@ -1,4 +1,4 @@
-(ns atom.graph.alpha
+(ns skein.graph.alpha
   (:require [skein.client :as client]
             [skein.weaver.runtime :as runtime]
             [skein.repl :as repl]))
@@ -9,7 +9,7 @@
     (apply client/call-world (repl/connected-config-dir) {} op args)))
 
 (defn query-ids!
-  "Return task ids matching an ad hoc query definition or daemon-registered query name.
+  "Return strand ids matching an ad hoc query definition or daemon-registered query name.
 
   When called inside the daemon JVM, executes directly against the active daemon
   runtime. When called from a connected helper REPL, routes to the selected
@@ -17,14 +17,14 @@
   [query params]
   (call-daemon :query-ids query params))
 
-(defn tasks-by-ids
-  "Hydrate tasks by id through the selected weaver runtime.
+(defn strands-by-ids
+  "Hydrate strands by id through the selected weaver runtime.
 
   Duplicate ids are collapsed by first occurrence, empty input returns [], and
   missing ids fail loudly in the daemon operation. Routes directly daemon-side
   or through the connected helper REPL world."
   [ids]
-  (call-daemon :tasks-by-ids ids))
+  (call-daemon :strands-by-ids ids))
 
 (defn ancestor-root-ids
   "Return parent-of ancestor root ids for seed ids through the selected weaver runtime.
@@ -38,7 +38,7 @@
 (defn subgraph
   "Return a parent-of subgraph for root ids through the selected weaver runtime.
 
-  The result shape is `{:root-ids [...] :tasks [...] :edges [...]}`. Routes
+  The result shape is `{:root-ids [...] :strands [...] :edges [...]}`. Routes
   directly daemon-side or through the connected helper REPL world."
   [root-ids]
   (call-daemon :subgraph root-ids))

@@ -592,7 +592,7 @@ func TestQueryCommandsUseSocketClientPayloads(t *testing.T) {
 	}
 }
 
-func TestTaskCommandsUseSocketClientPayloads(t *testing.T) {
+func TestStrandCommandsUseSocketClientPayloads(t *testing.T) {
 	cfg := testConfig(t)
 	orig := newClient
 	fc := &fakeClient{}

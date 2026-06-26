@@ -1,6 +1,6 @@
 (ns skein.plugin-test
   (:require [clojure.test :refer [deftest is]]
-            [atom.libs.alpha :as libs]
+            [skein.libs.alpha :as libs]
             [skein.client :as client]
             [skein.weaver.api]
             [skein.weaver.config :as daemon-config]

@@ -28,7 +28,7 @@
   (reset-open-state!)
   (is (thrown-with-msg? clojure.lang.ExceptionInfo
                         #"No Skein weaver world is connected"
-                        (repl/tasks)))
+                        (repl/strands)))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo
                         #"No Skein weaver world is connected"
                         (repl/load-queries! "/path/does/not/matter.edn"))))
@@ -51,7 +51,7 @@
                             (repl/connect! config-dir)))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"No Skein weaver world is connected"
-                            (repl/tasks)))
+                            (repl/strands)))
       (finally
         (reset-open-state!)))))
 
@@ -66,7 +66,7 @@
                               (repl/connect! db-file)))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"No Skein weaver world is connected"
-                              (repl/tasks)))
+                              (repl/strands)))
         (finally
           (db-test/delete-sqlite-family! db-file))))))
 
@@ -74,24 +74,36 @@
   (require 'user :reload)
   (is (some? (ns-resolve 'user 'demo!))))
 
-(deftest helpers-use-daemon-backed-task-flow
+(deftest helpers-use-daemon-backed-strand-flow
   (with-runtime
     (fn [rt db-file]
       (is (= (:config-dir (:metadata rt)) (repl/connect! (:config-dir (:metadata rt)))))
       (is (= {:database "initialized"} (repl/init!)))
-      (let [design (repl/task! "Sketch model" false {:priority "high"})
-            docs (repl/task! "Write docs" {:owner "agent"})]
+      (is (nil? (ns-resolve 'skein.repl 'task!)))
+      (is (nil? (ns-resolve 'skein.repl 'task)))
+      (is (nil? (ns-resolve 'skein.repl 'tasks)))
+      (let [design (repl/strand! "Sketch model" {:priority "high"} {:active false})
+            docs (repl/strand! "Write docs" {:owner "agent"})
+            scratch (repl/strand! "Scratch" {:kind "scratch"} {:ephemeral true})]
         (is (= {:priority "high"} (:attributes design)))
+        (is (false? (:active design)))
+        (is (true? (:ephemeral scratch)))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Inactive ephemeral"
+                              (repl/strand! "Invalid" {} {:active false :ephemeral true})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"same patch"
+                              (repl/update! (:id docs) {:active false :ephemeral true})))
         (repl/update! (:id docs) {:edges [{:type "depends-on" :to (:id design)}]})
-        (is (= {:owner "agent"} (:attributes (repl/task (:id docs)))))
-        (is (= #{(:id design) (:id docs)} (set (map :id (repl/tasks)))))
-        (is (= [(:id docs)] (mapv :id (repl/ready))))))))
+        (is (= {:owner "agent"} (:attributes (repl/strand (:id docs)))))
+        (is (= #{(:id design) (:id docs) (:id scratch)} (set (map :id (repl/strands)))))
+        (is (= #{(:id docs) (:id scratch)} (set (map :id (repl/ready)))))
+        (is (nil? (repl/update! (:id scratch) {:active false})))
+        (is (nil? (repl/strand (:id scratch))))))))
 
 (deftest stdin-main-evaluates-multiple-forms-in-helper-context
   (with-runtime
     (fn [rt _]
       (let [out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(init!)\n(tasks)\n(ready)\n")
+        (binding [*in* (java.io.StringReader. "(init!)\n(strands)\n(ready)\n")
                   *out* out
                   *err* (java.io.StringWriter.)
                   *ns* (the-ns 'user)]
@@ -106,7 +118,7 @@
   (with-runtime
     (fn [rt _]
       (let [out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(require '[atom.libs.alpha :as libs])\n(libs/approved)\n(libs/syncs)\n(libs/uses)\n")
+        (binding [*in* (java.io.StringReader. "(require '[skein.libs.alpha :as libs])\n(libs/approved)\n(libs/syncs)\n(libs/uses)\n")
                   *out* out
                   *err* (java.io.StringWriter.)
                   *ns* (the-ns 'user)]
@@ -122,9 +134,9 @@
     (fn [rt db-file]
       (repl/connect! (:config-dir (:metadata rt)))
       (repl/init!)
-      (let [design (:id (repl/task! "Design" false {:owner "agent"}))
-            docs (:id (repl/task! "Docs" {:owner "agent"}))
-            misc (:id (repl/task! "Misc" {:owner "human"}))]
+      (let [design (:id (repl/strand! "Design" {:owner "agent"} {:active false}))
+            docs (:id (repl/strand! "Docs" {:owner "agent"}))
+            misc (:id (repl/strand! "Misc" {:owner "human"}))]
         (repl/update! docs {:edges [{:type "depends-on" :to design}]})
         (is (= {"agent-ready" {:params [:owner]
                                 :where [:= [:attr :owner] [:param :owner]]}}
@@ -134,7 +146,7 @@
                                 :where [:= [:attr :owner] [:param :owner]]}}
                (repl/queries)))
         (is (= #{design docs}
-               (set (map :id (repl/tasks 'agent-ready {:owner "agent"})))))
+               (set (map :id (repl/strands 'agent-ready {:owner "agent"})))))
         (is (= [docs]
                (mapv :id (repl/ready [:= [:attr :owner] "agent"]))))
         (is (= [docs]
@@ -147,20 +159,20 @@
     (fn [rt db-file]
       (repl/connect! (:config-dir (:metadata rt)))
       (repl/init!)
-      (let [agent (:id (repl/task! "Agent task" {:owner "agent"}))
-            human (:id (repl/task! "Human task" {:owner "human"}))]
+      (let [agent (:id (repl/strand! "Agent task" {:owner "agent"}))
+            human (:id (repl/strand! "Human task" {:owner "human"}))]
         (is (= {"mine" [:= [:attr :owner] "agent"]}
                (repl/defquery! :mine [:= [:attr :owner] "agent"])))
         (is (= {"mine" [:= [:attr :owner] "agent"]}
                (repl/queries)))
-        (is (= [agent] (mapv :id (repl/tasks 'mine))))
+        (is (= [agent] (mapv :id (repl/strands 'mine))))
         (runtime/stop! rt)
         (let [fresh-rt (runtime/start! db-file {:world (daemon-config/world (:config-dir (:metadata rt)))})]
           (try
             (is (= {} (repl/queries)))
             (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                   #"Query not found"
-                                  (repl/tasks :mine)))
+                                  (repl/strands :mine)))
             (let [query-file (java.io.File/createTempFile "todo-queries" ".edn")]
               (try
                 (spit query-file (pr-str {'mine [:= [:attr :owner] "human"]}))
@@ -187,7 +199,7 @@
         (runtime/stop! rt)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"metadata is missing or stale"
-                              (repl/tasks)))
+                              (repl/strands)))
         (finally
           (reset-open-state!)
           (runtime/stop! rt)

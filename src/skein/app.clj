@@ -21,38 +21,38 @@
     (doseq [row rows] (println row))
     (println "(no rows)")))
 
-(defn add-task [ds]
+(defn add-strand [ds]
   (let [title (prompt "title: ")
         attrs (prompt "attributes (priority=high,due-date=2026-07-01): ")]
-    (println (db/add-task! ds {:title title :attributes (parse-attrs attrs)}))))
+    (println (db/add-strand! ds {:title title :attributes (parse-attrs attrs)}))))
 
 (defn add-dependency [ds]
-  (let [from (prompt "task id: ")
-        to (prompt "depends on task id: ")]
+  (let [from (prompt "strand id: ")
+        to (prompt "depends on strand id: ")]
     (println (db/add-edge! ds {:from from :to to :type "depends-on" :attributes {}}))))
 
 (defn menu []
   (println)
   (println "Todo graph")
-  (println "1. list tasks")
-  (println "2. add task")
+  (println "1. list strands")
+  (println "2. add strand")
   (println "3. add dependency")
-  (println "4. blocked tasks")
-  (println "5. tasks by priority")
-  (println "6. dependencies for task")
-  (println "7. related edges for task")
+  (println "4. blocked strands")
+  (println "5. strands by priority")
+  (println "6. dependencies for strand")
+  (println "7. related edges for strand")
   (println "q. quit"))
 
 (defn loop! [ds]
   (menu)
   (case (str/trim (or (prompt "> ") ""))
-    "1" (do (print-rows (db/all-tasks ds)) (recur ds))
-    "2" (do (add-task ds) (recur ds))
+    "1" (do (print-rows (db/all-strands ds)) (recur ds))
+    "2" (do (add-strand ds) (recur ds))
     "3" (do (add-dependency ds) (recur ds))
-    "4" (do (print-rows (db/blocked-tasks ds)) (recur ds))
-    "5" (do (print-rows (db/tasks-by-priority ds (prompt "priority: "))) (recur ds))
-    "6" (do (print-rows (db/task-dependencies ds (prompt "task id: "))) (recur ds))
-    "7" (do (print-rows (db/related-tasks ds (prompt "task id: "))) (recur ds))
+    "4" (do (print-rows (db/blocked-strands ds)) (recur ds))
+    "5" (do (print-rows (db/strands-by-priority ds (prompt "priority: "))) (recur ds))
+    "6" (do (print-rows (db/strand-dependencies ds (prompt "strand id: "))) (recur ds))
+    "7" (do (print-rows (db/related-strands ds (prompt "strand id: "))) (recur ds))
     "q" (println "bye")
     (do (println "unknown command") (recur ds))))
 

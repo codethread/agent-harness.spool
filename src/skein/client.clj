@@ -22,7 +22,7 @@
    :list-query 'skein.weaver.api/list-query
    :ready-query 'skein.weaver.api/ready-query
    :query-ids 'skein.weaver.api/query-ids
-   :tasks-by-ids 'skein.weaver.api/tasks-by-ids
+   :strands-by-ids 'skein.weaver.api/strands-by-ids
    :ancestor-root-ids 'skein.weaver.api/ancestor-root-ids
    :subgraph 'skein.weaver.api/subgraph
    :register-view! 'skein.weaver.api/register-view!

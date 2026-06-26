@@ -1,7 +1,7 @@
 (ns skein.libs-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [atom.libs.alpha :as libs]
+            [skein.libs.alpha :as libs]
             [skein.weaver.config :as daemon-config]
             [skein.client :as client]
             [skein.weaver.runtime :as runtime]
@@ -202,7 +202,7 @@
       (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/init-demo"}}}))
       (spit (io/file config-dir "init.clj")
             (str "(do\n"
-                 "  (require '[atom.libs.alpha :as libs])\n"
+                 "  (require '[skein.libs.alpha :as libs])\n"
                  "  (libs/sync!)\n"
                  "  (require '" ns-sym ")\n"
                  "  (spit " (pr-str (str result-file))

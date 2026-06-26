@@ -76,9 +76,9 @@
         (is (= {"mine" [:= [:attr :owner] "agent"]}
                (client/register-query db-file 'mine [:= [:attr :owner] "agent"])))
         (is (= [(:id agent)] (client/call db-file {} :query-ids 'mine {})))
-        (is (= [agent] (client/call db-file {} :tasks-by-ids [(:id agent)])))
+        (is (= [agent] (client/call db-file {} :strands-by-ids [(:id agent)])))
         (is (= [] (client/call db-file {} :ancestor-root-ids [(:id agent)] {:where [:= [:attr :kind] "feature"]})))
-        (is (= {:root-ids [(:id agent)] :tasks [agent] :strands [agent] :edges []}
+        (is (= {:root-ids [(:id agent)] :strands [agent] :edges []}
                (client/call db-file {} :subgraph [(:id agent)])))
         (is (= {:name "client" :fn 'skein.client-test/client-test-view}
                (client/call db-file {} :register-view! 'client 'skein.client-test/client-test-view)))

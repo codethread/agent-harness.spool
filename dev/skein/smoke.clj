@@ -90,7 +90,7 @@
     (spit (java.io.File. config-dir "libs.edn")
           "{:libs {smoke/lib {:local/root \"libs/smoke-lib\"}\n        smoke/missing {:local/root \"libs/missing-lib\"}}}\n")
     (spit (java.io.File. config-dir "init.clj")
-          "(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n(libs/use! :smoke/lib {:ns 'smoke.lib :libs #{'smoke/lib}})\n(libs/use! :smoke/layer {:ns 'smoke.layer :libs #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(libs/use! :smoke/optional-missing {:ns 'smoke.missing :libs #{'smoke/missing}})\n")
+          "(require '[skein.libs.alpha :as libs])\n(libs/sync!)\n(libs/use! :smoke/lib {:ns 'smoke.lib :libs #{'smoke/lib}})\n(libs/use! :smoke/layer {:ns 'smoke.layer :libs #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(libs/use! :smoke/optional-missing {:ns 'smoke.missing :libs #{'smoke/missing}})\n")
     (.getCanonicalPath marker)))
 
 (defn outside-repo-dir []
@@ -207,13 +207,13 @@
         (run-cli-config! config-dir "init")
         (assert (.isFile config-file) "clean bootstrap preserves/creates config.json")
         (assert-file-contents (java.io.File. config-dir "libs.edn") "{:libs {}}\n" "clean bootstrap creates empty libs.edn")
-        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[atom.libs.alpha :as libs]\n         '[atom.graph.alpha :as graph]\n         '[atom.views.alpha :as views])\n(libs/sync!)\n" "clean bootstrap creates helper init.clj template")
+        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[skein.libs.alpha :as libs]\n         '[skein.graph.alpha :as graph]\n         '[skein.views.alpha :as views])\n(libs/sync!)\n" "clean bootstrap creates helper init.clj template")
         (assert (.isDirectory (java.io.File. config-dir "libs")) "clean bootstrap creates libs directory")
         (assert (.isDirectory (java.io.File. config-dir ".git")) "clean bootstrap initializes config-dir git repo")
-        (let [task-id (cli-add-config! config-dir "Bootstrap clean task" "--attr" "owner=ct")]
-          (assert= "Bootstrap clean task"
-                   (:title (parse-json (run-cli-config! config-dir "--format" "json" "show" task-id)))
-                   "clean bootstrap can create and show tasks after init"))
+        (let [strand-id (cli-add-config! config-dir "Bootstrap clean strand" "--attr" "owner=ct")]
+          (assert= "Bootstrap clean strand"
+                   (:title (parse-json (run-cli-config! config-dir "--format" "json" "show" strand-id)))
+                   "clean bootstrap can create and show strands after init"))
         (finally
           (stop-cli-daemon-config! config-dir daemon)
           (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-clean"))))))))
@@ -239,8 +239,8 @@
         (assert-file-contents libs-path original-libs "dirty bootstrap does not rewrite existing libs.edn")
         (assert-file-contents init-path original-init "dirty bootstrap does not rewrite existing init.clj")
         (assert (.isDirectory (java.io.File. config-dir "libs")) "dirty bootstrap fills missing libs directory")
-        (cli-add-config! config-dir "Dirty owned task" "--attr" "owner=dirty")
-        (assert= ["Dirty owned task"]
+        (cli-add-config! config-dir "Dirty owned strand" "--attr" "owner=dirty")
+        (assert= ["Dirty owned strand"]
                  (titles (parse-json (run-cli-config! config-dir "list" "--query" "dirty")))
                  "dirty bootstrap keeps startup query usable from CLI")
         (finally
@@ -253,16 +253,16 @@
     (write-client-config-to-dir! config-dir)
     (spit (java.io.File. config-dir "libs.edn") "{:libs {}}\n")
     (spit (java.io.File. config-dir "init.clj")
-          "(ns smoke.startup\n  (:require [atom.libs.alpha :as libs]\n            [atom.graph.alpha :as graph]\n            [atom.views.alpha :as views]\n            [skein.weaver.api :as api]))\n(libs/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :tasks (graph/tasks-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n")
+          "(ns smoke.startup\n  (:require [skein.libs.alpha :as libs]\n            [skein.graph.alpha :as graph]\n            [skein.views.alpha :as views]\n            [skein.weaver.api :as api]))\n(libs/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :strands (graph/strands-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n")
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "init")
-        (let [task-id (cli-add-config! config-dir "Startup transformed task" "--attr" "owner=smoke")
-              payload (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.graph.alpha :as graph] '[atom.views.alpha :as views]) {:query-ids (graph/query-ids! 'smoke-owned {}) :view (views/view! 'smoke-owned-view {:source \"stdin\"}) :views (views/views)})\n" "daemon" "repl" "--stdin"))]
-          (assert= [task-id] (:query-ids payload) "startup registered query is available through graph helper")
+        (let [strand-id (cli-add-config! config-dir "Startup transformed strand" "--attr" "owner=smoke")
+              payload (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.graph.alpha :as graph] '[skein.views.alpha :as views]) {:query-ids (graph/query-ids! 'smoke-owned {}) :view (views/view! 'smoke-owned-view {:source \"stdin\"}) :views (views/views)})\n" "daemon" "repl" "--stdin"))]
+          (assert= [strand-id] (:query-ids payload) "startup registered query is available through graph helper")
           (assert= {:source "stdin"} (get-in payload [:view :params]) "startup view receives params")
-          (assert= [task-id] (get-in payload [:view :ids]) "startup view can call graph/query-ids!")
-          (assert= ["Startup transformed task"] (titles (get-in payload [:view :tasks])) "startup view can hydrate graph tasks")
+          (assert= [strand-id] (get-in payload [:view :ids]) "startup view can call graph/query-ids!")
+          (assert= ["Startup transformed strand"] (titles (get-in payload [:view :strands])) "startup view can hydrate graph strands")
           (assert= [{:name "smoke-owned-view" :fn 'smoke.startup/smoke-owned-view}]
                    (:views payload)
                    "startup registered view is introspectable"))
@@ -293,18 +293,18 @@
     (delete-tree! (smoke-config-dir-named (str db-file ".live-libs")))
     (write-client-config-to-dir! config-dir)
     (spit (java.io.File. config-dir "libs.edn") "{:libs {}}\n")
-    (spit (java.io.File. config-dir "init.clj") "(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n")
+    (spit (java.io.File. config-dir "init.clj") "(require '[skein.libs.alpha :as libs])\n(libs/sync!)\n")
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "init")
-        (let [initial (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) {:approved (libs/approved) :syncs (libs/syncs) :uses (libs/uses)})\n" "daemon" "repl" "--stdin"))]
+        (let [initial (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.libs.alpha :as libs]) {:approved (libs/approved) :syncs (libs/syncs) :uses (libs/uses)})\n" "daemon" "repl" "--stdin"))]
           (assert= {:libs {}} (:approved initial) "live library smoke starts with no approved libs")
           (assert= {:libs {}} (:syncs initial) "live library smoke starts with no synced libs")
           (assert= {} (:uses initial) "live library smoke starts with no used modules"))
 
         (spit (java.io.File. config-dir "libs.edn") "{:libs {live/missing {:local/root \"libs/missing\"}}}\n")
-        (let [bad-sync (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) (libs/sync!))\n" "daemon" "repl" "--stdin"))
-              bad-use (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) (libs/use! :live/missing {:ns 'live.missing :libs #{'live/missing}}))\n" "daemon" "repl" "--stdin"))]
+        (let [bad-sync (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.libs.alpha :as libs]) (libs/sync!))\n" "daemon" "repl" "--stdin"))
+              bad-use (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.libs.alpha :as libs]) (libs/use! :live/missing {:ns 'live.missing :libs #{'live/missing}}))\n" "daemon" "repl" "--stdin"))]
           (assert= :failed (get-in bad-sync [:libs 'live/missing :status]) "missing live library sync records failure")
           (assert= :missing-root (get-in bad-sync [:libs 'live/missing :reason]) "missing live library sync records missing-root reason")
           (assert= :skipped (:status bad-use) "failed live library use is skipped")
@@ -313,7 +313,7 @@
         (write-live-lib! config-dir "throwing-lib" "live.throwing"
                          "(ns live.throwing)\n(defn install! [] (throw (ex-info \"install boom\" {:phase :install})))\n")
         (spit (java.io.File. config-dir "libs.edn") "{:libs {live/throwing {:local/root \"libs/throwing-lib\"}}}\n")
-        (let [throwing (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) (libs/sync!) (libs/use! :live/throwing {:ns 'live.throwing :libs #{'live/throwing} :call 'live.throwing/install!}))\n" "daemon" "repl" "--stdin"))]
+        (let [throwing (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.libs.alpha :as libs]) (libs/sync!) (libs/use! :live/throwing {:ns 'live.throwing :libs #{'live/throwing} :call 'live.throwing/install!}))\n" "daemon" "repl" "--stdin"))]
           (assert= :failed (:status throwing) "throwing live library call records failed use")
           (assert= "install boom" (get-in throwing [:error :message]) "throwing live library call captures user-code error"))
         (assert= true (:healthy (parse-json (run-cli-config! config-dir "--format" "json" "daemon" "status"))) "daemon remains healthy after bad live library code")
@@ -325,12 +325,12 @@
                               "  (api/register-query! 'live-owned [:= [:attr :owner] \"live\"])\n"
                               "  :installed)\n"))
         (spit (java.io.File. config-dir "libs.edn") "{:libs {live/good {:local/root \"libs/good-lib\"}}}\n")
-        (let [loaded (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) (libs/sync!) (libs/use! :live/good {:ns 'live.good-alpha :libs #{'live/good} :call 'live.good-alpha/install!}))\n" "daemon" "repl" "--stdin"))]
+        (let [loaded (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.libs.alpha :as libs]) (libs/sync!) (libs/use! :live/good {:ns 'live.good-alpha :libs #{'live/good} :call 'live.good-alpha/install!}))\n" "daemon" "repl" "--stdin"))]
           (assert= :loaded (:status loaded) "new good library loads without daemon restart")
           (assert= :installed (get-in loaded [:call :return]) "new good library install call returns value")
           (assert= :installed (edn/read-string (slurp marker)) "new good library install call has visible side effect"))
-        (cli-add-config! config-dir "Live owned task" "--attr" "owner=live")
-        (assert= ["Live owned task"]
+        (cli-add-config! config-dir "Live owned strand" "--attr" "owner=live")
+        (assert= ["Live owned strand"]
                  (titles (parse-json (run-cli-config! config-dir "--format" "json" "list" "--query" "live-owned")))
                  "CLI can consume query registered by live-loaded library")
         (finally
@@ -350,14 +350,14 @@
       (try
         (assert= "base layered" (slurp marker) "selected config-dir init.clj activates layered local library during daemon startup")
         (run-cli! db-file "init")
-            (let [design (cli-add! db-file "Sketch task graph model" "--active=false" "--attr" "priority=high")
+            (let [design (cli-add! db-file "Sketch strand graph model" "--active=false" "--attr" "priority=high")
                   schema (cli-add! db-file "Create SQLite schema" "--attr" "priority=high")
                   docs (cli-add! db-file "Write usage notes" "--attr" "owner=agent")]
               (run-cli! db-file "update" schema "--edge" (str "depends-on:" design))
               (run-cli! db-file "update" docs "--edge" (str "depends-on:" schema))
               (assert= ["Create SQLite schema"]
                        (titles (parse-json (run-cli! db-file "--format" "json" "ready")))
-                       "Go CLI ready sees tasks with final dependencies")
+                       "Go CLI ready sees strands with inactive dependencies")
               (run-cli! db-file "update" schema "--active=false")
               (assert= ["Write usage notes"]
                        (titles (parse-json (run-cli! db-file "--format" "json" "ready")))
@@ -372,9 +372,9 @@
                 (assert= (.getPath (metadata/socket-file (smoke-world db-file)))
                          (:socket_path status)
                          "Go CLI daemon status reports socket metadata")
-                (let [stdin-output (run-cli-stdin! db-file "(do\n  (require '[atom.libs.alpha :as libs])\n  (defquery! 'agent-owned '[:= [:attr :owner] \"agent\"])\n  {:task-count (count (tasks))\n   :ready-titles (mapv :title (ready))\n   :syncs (libs/syncs)\n   :base (libs/use :smoke/lib)\n   :layer (libs/use :smoke/layer)\n   :optional (libs/use :smoke/optional-missing)})\n" "daemon" "repl" "--stdin")
+                (let [stdin-output (run-cli-stdin! db-file "(do\n  (require '[skein.libs.alpha :as libs])\n  (defquery! 'agent-owned '[:= [:attr :owner] \"agent\"])\n  {:strand-count (count (strands))\n   :ready-titles (mapv :title (ready))\n   :syncs (libs/syncs)\n   :base (libs/use :smoke/lib)\n   :layer (libs/use :smoke/layer)\n   :optional (libs/use :smoke/optional-missing)})\n" "daemon" "repl" "--stdin")
                       payload (edn/read-string stdin-output)]
-                  (assert= 3 (:task-count payload) "Go CLI daemon repl --stdin prints direct form result")
+                  (assert= 3 (:strand-count payload) "Go CLI daemon repl --stdin prints direct form result")
                   (assert= ["Write usage notes"] (:ready-titles payload) "Go CLI daemon repl --stdin has connected helper context")
                   (assert= :loaded (get-in payload [:syncs :libs 'smoke/lib :status]) "Go CLI daemon repl --stdin introspects loaded library sync state")
                   (assert= :failed (get-in payload [:syncs :libs 'smoke/missing :status]) "Go CLI daemon repl --stdin introspects missing library sync failure")
@@ -401,19 +401,19 @@
       (try
         (repl/connect! (:config-dir world))
         (repl/init!)
-        (let [a (:id (repl/task! "First task" false {}))
-              b (:id (repl/task! "Second task" {:owner "agent"}))]
+        (let [a (:id (repl/strand! "First strand" {} {:active false}))
+              b (:id (repl/strand! "Second strand" {:owner "agent"}))]
           (repl/update! b {:edges [{:type "depends-on" :to a}]})
-          (assert= ["Second task"] (titles (repl/ready)) "skein.repl ready returns strands with inactive dependencies")
+          (assert= ["Second strand"] (titles (repl/ready)) "skein.repl ready returns strands with inactive dependencies")
           (repl/defquery! 'agent-owner '[:= [:attr :owner] "agent"])
-          (assert= ["Second task"]
-                   (titles (repl/tasks 'agent-owner))
+          (assert= ["Second strand"]
+                   (titles (repl/strands 'agent-owner))
                    "skein.repl consumes a query registered during the daemon lifetime")
-          (assert= ["Second task"]
+          (assert= ["Second strand"]
                    (titles (repl/query '[:= [:attr :owner] "agent"]))
                    "skein.repl retains EDN-rich ad hoc query debugging")
           (repl/update! b {:active false})
-          (assert= false (:active (repl/task b)) "skein.repl update! updates active"))
+          (assert= false (:active (repl/strand b)) "skein.repl update! updates active"))
         (finally
           (runtime/stop! runtime))))
     (finally

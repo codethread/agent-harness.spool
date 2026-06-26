@@ -1,6 +1,6 @@
 (ns skein.alpha-test
-  (:require [atom.graph.alpha :as graph]
-            [atom.views.alpha :as views]
+  (:require [skein.graph.alpha :as graph]
+            [skein.views.alpha :as views]
             [clojure.test :refer [deftest is]]
             [skein.client]
             [skein.weaver.api :as api]
@@ -37,10 +37,10 @@
         (api/update rt (:id feature) {:edges [{:type "parent-of" :to (:id task)}]})
         (api/register-query rt 'agent-owned [:= [:attr :owner] "agent"])
         (is (= [(:id task)] (graph/query-ids! 'agent-owned {})))
-        (is (= [(:id task)] (mapv :id (graph/tasks-by-ids [(:id task) (:id task)]))))
+        (is (= [(:id task)] (mapv :id (graph/strands-by-ids [(:id task) (:id task)]))))
         (is (= [(:id feature)] (graph/ancestor-root-ids [(:id task)] {})))
         (is (= #{(:id feature) (:id task)}
-               (set (map :id (:tasks (graph/subgraph [(:id feature)]))))))
+               (set (map :id (:strands (graph/subgraph [(:id feature)]))))))
         (is (= {:name "daily" :fn 'skein.alpha-test/test-view}
                (views/register-view! :daily 'skein.alpha-test/test-view)))
         (is (= [{:name "daily" :fn 'skein.alpha-test/test-view}]
@@ -63,9 +63,9 @@
            (graph/query-ids! 'mine {:owner "agent"})))
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {}
-            :op :tasks-by-ids
+            :op :strands-by-ids
             :args [["a" "b"]]}
-           (graph/tasks-by-ids ["a" "b"])))
+           (graph/strands-by-ids ["a" "b"])))
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {}
             :op :ancestor-root-ids

@@ -36,30 +36,28 @@
          (reset! active-config-dir default-world)))
      (:config-dir world))))
 
+(declare call-daemon)
+
 (defn- daemon [op & args]
-  (apply client/call-world (config-dir) {} op args))
+  (let [dir (config-dir)]
+    (call-daemon #(apply client/call-world dir {} op args))))
 
 (defn init! []
   (daemon :init))
 
-(defn task!
+(defn strand!
   ([title]
-   (task! title {}))
+   (strand! title {} {}))
   ([title attributes]
-   (daemon :add {:title title :attributes attributes}))
-  ([title active attributes]
-   (when-not (boolean? active)
-     (throw (ex-info "task! active argument must be a boolean; status values are no longer core lifecycle fields"
-                     {:active active})))
-   (daemon :add {:title title
-                 :active active
-                 :attributes attributes})))
+   (strand! title attributes {}))
+  ([title attributes lifecycle]
+   (daemon :add (merge {:title title :attributes attributes} lifecycle))))
 
 (defn update!
   ([id patch]
    (daemon :update id patch)))
 
-(defn task [id]
+(defn strand [id]
   (daemon :show id))
 
 (defn- call-daemon [f]
@@ -99,7 +97,7 @@
   ([query-or-def params]
    (run-query (config-dir) query-or-def params :list :list-query)))
 
-(defn tasks
+(defn strands
   ([]
    (daemon :list))
   ([query-or-def]
@@ -136,7 +134,6 @@
                             (throw (ex-info "Usage: skein.repl [--stdin] [config-dir]" {:args args})))]
     (connect! config-dir)
     (binding [*ns* (the-ns 'skein.repl)]
-      (require '[atom.libs.alpha :as libs])
       (case mode
         :stdin (try
                  (eval-stdin!)

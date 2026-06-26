@@ -155,10 +155,10 @@
         (is (= [(:id agent)] (api/query-ids rt 'agent-owned {:owner "agent"})))
         (is (= [(:id human)] (api/query-ids rt [:= [:attr :owner] "human"] {})))
         (is (= [(:id human) (:id agent)]
-               (mapv :id (api/tasks-by-ids rt [(:id human) (:id agent) (:id human)]))))
+               (mapv :id (api/strands-by-ids rt [(:id human) (:id agent) (:id human)]))))
         (is (= [(:id feature)] (api/ancestor-root-ids rt [(:id agent)])))
         (is (= #{(:id feature) (:id agent) (:id human)}
-               (set (map :id (:tasks (api/subgraph rt [(:id feature)]))))))))))
+               (set (map :id (:strands (api/subgraph rt [(:id feature)]))))))))))
 
 (deftest weaver-view-registry-operations
   (with-runtime
@@ -231,13 +231,13 @@
       (let [source (api/add rt {:title "Source"})
             target (api/add rt {:title "Target"})]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Task not found"
+                              #"Strand not found"
                               (api/update rt "missing" {:edges [{:type "depends-on" :to (:id target)}]})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"non-blank"
                               (api/update rt (:id source) {:title ""
                                                            :edges [{:type "depends-on" :to (:id target)}]})))
-        (is (empty? (db/task-dependencies (:datasource rt) (:id source))))))))
+        (is (empty? (db/strand-dependencies (:datasource rt) (:id source))))))))
 
 (deftest runtime-uses-world-default-database-and-directories
   (let [world (temp-world)
@@ -324,7 +324,7 @@
                                                             "to" (get-in target ["result" "id"])}]})]
         (is (true? (get updated "ok")))
         (is (= [(get-in target ["result" "id"])]
-               (mapv :id (db/task-dependencies (:datasource rt) (get-in source ["result" "id"]))))))
+               (mapv :id (db/strand-dependencies (:datasource rt) (get-in source ["result" "id"]))))))
       (let [missing (socket-request rt "update" {"id" "missing" "title" nil "active" nil "attributes" nil "edges" []})]
         (is (false? (get missing "ok")))
         (is (= "domain" (get-in missing ["error" "type"]))))

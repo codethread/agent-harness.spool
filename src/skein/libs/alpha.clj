@@ -1,4 +1,4 @@
-(ns atom.libs.alpha
+(ns skein.libs.alpha
   (:refer-clojure :exclude [sync use])
   (:require [skein.client :as client]
             [skein.weaver.runtime :as runtime]

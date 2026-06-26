@@ -453,7 +453,7 @@
 (defn subgraph [ds root-ids]
   (let [root-ids (require-existing-strand-ids! ds root-ids :subgraph)]
     (if (empty? root-ids)
-      {:root-ids [] :tasks [] :strands [] :edges []}
+      {:root-ids [] :strands [] :edges []}
       (let [cte (str "WITH RECURSIVE nodes(id) AS (
                        SELECT id FROM strands WHERE id IN (" (placeholders root-ids) ")
                      UNION
@@ -471,7 +471,6 @@
                                             root-ids)))
               edges (execute! ds (into [(str cte "
                                       SELECT e.from_strand_id, e.to_strand_id,
-                                             e.from_strand_id AS from_task_id, e.to_strand_id AS to_task_id,
                                              e.edge_type, e.attributes
                                       FROM strand_edges e
                                       WHERE e.edge_type = 'parent-of'
@@ -480,7 +479,6 @@
                                       ORDER BY e.from_strand_id, e.to_strand_id, e.edge_type")]
                                         root-ids))]
           {:root-ids root-ids
-           :tasks rows
            :strands rows
            :edges edges})))))
 
@@ -617,23 +615,3 @@
               ORDER BY e.edge_type, e.from_strand_id, e.to_strand_id"
              strand-id strand-id]))
 
-;; Compatibility function names retained until namespace/API rename slices run.
-(def add-task! add-strand!)
-(def add-task-with-edges! add-strand-with-edges!)
-(def add-task-batch! add-strand-batch!)
-(def get-task get-strand)
-(def update-task! update-strand!)
-(def update-task-attributes! update-strand-attributes!)
-(def query-tasks query-strands)
-(def query-task-ids query-strand-ids)
-(def tasks-by-ids strands-by-ids)
-(def all-tasks all-strands)
-(def tasks-by-attribute strands-by-attribute)
-(def task-dependencies strand-dependencies)
-(def blocking-tasks blocking-strands)
-(def blocked-tasks blocked-strands)
-(def ready-tasks ready-strands)
-(def transitive-dependencies transitive-dependencies)
-(def tasks-by-priority strands-by-priority)
-(def tasks-due-before strands-due-before)
-(def related-tasks related-strands)

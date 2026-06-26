@@ -367,44 +367,44 @@
   (db/init! (ds runtime))
   {:database "initialized"})
 
-(defn add [runtime task]
-  (normalize (db/add-task! (ds runtime) task)))
+(defn add [runtime strand]
+  (normalize (db/add-strand! (ds runtime) strand)))
 
 (defn- apply-edges! [tx id edges]
   (doseq [{:keys [to type attributes]} edges]
-    (when-not (db/get-task tx to)
-      (throw (ex-info "Edge target task not found" {:to to :type type})))
+    (when-not (db/get-strand tx to)
+      (throw (ex-info "Edge target strand not found" {:to to :type type})))
     (db/add-edge! tx {:from id :to to :type type :attributes (or attributes {})})))
 
 (defn update [runtime id patch]
   (let [{:keys [title active ephemeral attributes edges]} patch]
     (jdbc/with-transaction [tx (ds runtime)]
-      (when-not (db/get-task tx id)
-        (throw (ex-info "Task not found" {:task-id id})))
+      (when-not (db/get-strand tx id)
+        (throw (ex-info "Strand not found" {:strand-id id})))
       (apply-edges! tx id edges)
-      (normalize (db/update-task! tx id (cond-> {}
+      (normalize (db/update-strand! tx id (cond-> {}
                                           (contains? patch :title) (assoc :title title)
                                           (contains? patch :active) (assoc :active active)
                                           (contains? patch :ephemeral) (assoc :ephemeral ephemeral)
                                           (contains? patch :attributes) (assoc :attributes attributes)))))))
 
 (defn show [runtime id]
-  (normalize (db/get-task (ds runtime) id)))
+  (normalize (db/get-strand (ds runtime) id)))
 
 (defn list
   ([runtime]
-   (normalize (db/all-tasks (ds runtime))))
+   (normalize (db/all-strands (ds runtime))))
   ([runtime query-def params]
-   (normalize (db/all-tasks (ds runtime) query-def params))))
+   (normalize (db/all-strands (ds runtime) query-def params))))
 
 (defn list-query [runtime query-name params]
   (list runtime (resolve-query runtime query-name) params))
 
 (defn ready
   ([runtime]
-   (normalize (db/ready-tasks (ds runtime))))
+   (normalize (db/ready-strands (ds runtime))))
   ([runtime query-def params]
-   (normalize (db/ready-tasks (ds runtime) query-def params))))
+   (normalize (db/ready-strands (ds runtime) query-def params))))
 
 (defn ready-query [runtime query-name params]
   (ready runtime (resolve-query runtime query-name) params))
@@ -413,10 +413,10 @@
   (let [query-def (if (or (vector? query-or-name) (map? query-or-name))
                     query-or-name
                     (resolve-query runtime query-or-name))]
-    (db/query-task-ids (ds runtime) query-def params)))
+    (db/query-strand-ids (ds runtime) query-def params)))
 
-(defn tasks-by-ids [runtime ids]
-  (normalize (db/tasks-by-ids (ds runtime) ids)))
+(defn strands-by-ids [runtime ids]
+  (normalize (db/strands-by-ids (ds runtime) ids)))
 
 (defn ancestor-root-ids
   ([runtime seed-ids]
@@ -425,11 +425,9 @@
    (db/ancestor-root-ids (ds runtime) seed-ids opts)))
 
 (defn subgraph [runtime root-ids]
-  (let [{:keys [strands tasks edges] :as result} (db/subgraph (ds runtime) root-ids)
-        rows (or strands tasks)]
+  (let [{:keys [strands edges] :as result} (db/subgraph (ds runtime) root-ids)]
     (assoc result
-           :tasks (normalize rows)
-           :strands (normalize rows)
+           :strands (normalize strands)
            :edges (normalize edges))))
 
 (defn- canonical-view-name [view-name]

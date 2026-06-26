@@ -103,8 +103,11 @@
             child (:id (db/add-strand! ds {:title "Child"}))]
         (db/add-edge! ds {:from root :to child :type "parent-of" :attributes {}})
         (is (= (sort [root child]) (mapv :id (:strands (db/subgraph ds [root])))))
-        (is (= [[root child "parent-of"]]
-               (mapv (juxt :from_strand_id :to_strand_id :edge_type) (:edges (db/subgraph ds [root])))))
+        (let [edges (:edges (db/subgraph ds [root]))]
+          (is (= [[root child "parent-of"]]
+                 (mapv (juxt :from_strand_id :to_strand_id :edge_type) edges)))
+          (is (not-any? #(contains? % :from_task_id) edges))
+          (is (not-any? #(contains? % :to_task_id) edges)))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"same strand"
                               (db/add-edge! ds {:from root :to root :type "related-to" :attributes {}})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"create a cycle"

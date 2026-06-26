@@ -36,19 +36,19 @@
   "Initialize the demo database and add a small dependency graph."
   []
   (demo!)
-  (let [design (task! "Sketch model" "done" {:priority "high" :demo-id "design"})
-        docs (task! "Write docs" {:owner "agent" :demo-id "docs"})
-        impl (task! "Build feature" {:owner "agent" :demo-id "impl"})]
+  (let [design (strand! "Sketch model" {:priority "high" :demo-id "design"} {:active false})
+        docs (strand! "Write docs" {:owner "agent" :demo-id "docs"})
+        impl (strand! "Build feature" {:owner "agent" :demo-id "impl"})]
     (update! (:id docs) {:edges [{:type "depends-on" :to (:id design)}]})
     (update! (:id impl) {:edges [{:type "depends-on" :to (:id docs)}]})
-    (tasks)))
+    (strands)))
 
 (comment
   (start-demo-weaver!)
   (demo!)
   (seed-demo!)
   (ready)
-  (def docs-id (:id (first (filter #(= "docs" (get-in % [:attributes :demo-id])) (tasks)))))
-  (update! docs-id {:status "done"})
+  (def docs-id (:id (first (filter #(= "docs" (get-in % [:attributes :demo-id])) (strands)))))
+  (update! docs-id {:active false})
   (ready)
   (stop-demo-weaver!))

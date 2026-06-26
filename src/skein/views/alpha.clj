@@ -1,4 +1,4 @@
-(ns atom.views.alpha
+(ns skein.views.alpha
   (:require [skein.client :as client]
             [skein.weaver.runtime :as runtime]
             [skein.repl :as repl]))
