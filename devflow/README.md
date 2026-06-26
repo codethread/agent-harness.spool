@@ -15,7 +15,8 @@ Root specs are canonical for shipped behavior:
 
 ## Active features
 
-None.
+- `library-author-testing-support` — proposed library-author testing helpers and daemon storage support.
+- `skein-rename` — proposed Skein/strand/weaver rename across product, contracts, code, storage, docs, and smoke workflows.
 
 ## Archived features
 
