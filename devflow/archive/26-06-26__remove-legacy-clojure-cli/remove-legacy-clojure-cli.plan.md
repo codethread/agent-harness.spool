@@ -4,16 +4,15 @@
 **Feature:** `remove-legacy-clojure-cli`
 **Proposal:** [proposal.md](./proposal.md)
 **Root specs:** [CLI Surface](../../specs/cli.md)
-**Status:** Draft
+**Status:** Shipped
 **Last Updated:** 2026-06-26
 
 ## Scope
 
-Remove the dead Clojure CLI path and its test coverage. The maintained CLI remains the Go `strand` binary; the maintained Clojure code remains the weaver, REPL, and runtime libraries.
+Remove dead Clojure entrypoints and test coverage. The maintained CLI remains the Go `strand` binary; the maintained Clojure code remains the weaver, REPL, and runtime libraries. The `skein.cli` namespace stays only as the Go CLI's Clojure weaver-launch helper until that launcher is redesigned.
 
 ### Files to delete
 
-- `src/skein/cli.clj`
 - `src/skein/app.clj`
 - `test/skein/cli_test.clj`
 
@@ -31,8 +30,8 @@ Remove the dead Clojure CLI path and its test coverage. The maintained CLI remai
 - `rg -n "skein\.cli|skein\.app|clojure -M:skein|clojure -M:run|:main-opts \[\"-m\" \"skein.cli\"\]|:main-opts \[\"-m\" \"skein.app\"\]" .` returns no live references outside archive/history if any remain.
 - `clojure -M:test` passes without `skein.cli-test`.
 - `go test ./...` under `cli/` passes.
-- No new helper code is added solely to preserve the deleted CLI.
+- No new helper code is added solely to preserve dead CLI behavior.
 
 ## Notes
 
-This is intentional YAGNI cleanup: no compatibility shim, no duplicate CLI implementation, no leftover “might be useful” helper surface.
+This is intentional YAGNI cleanup: no compatibility shim, no duplicate dead CLI implementation, no leftover “might be useful” helper surface.

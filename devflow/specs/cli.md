@@ -62,4 +62,4 @@ weaver status
 
 ## SPEC-002.P4 Deferred
 
-`by-attr`, bespoke dependency inspection commands, `link`, `done`, `batch`, public CLI EDN query expressions, query registry mutation commands, view commands, plugin/package commands, compatibility `todo` binaries, and fallback discovery of old `atom` worlds or `daemon.*` artifacts are not part of the public CLI.
+`by-attr`, bespoke dependency inspection commands, `link`, `done`, `batch`, public CLI EDN query expressions, query registry mutation commands, view commands, plugin/package commands, compatibility `todo` binaries, legacy Clojure CLI entrypoints, and fallback discovery of old `atom` worlds or `daemon.*` artifacts are not part of the public CLI.
