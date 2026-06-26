@@ -62,7 +62,7 @@ You should see:
 todo=>
 ```
 
-The REPL starts with the base task helpers loaded. It also preloads the `libs` alias for runtime-library workspace helpers.
+The REPL starts with the base task helpers loaded. It also preloads the `libs` alias for runtime-library workspace helpers. Fresh `todo init` config also shows the blessed transformation helper namespaces `atom.graph.alpha` and `atom.views.alpha` as editable startup imports.
 
 Check your runtime library state:
 
@@ -162,18 +162,44 @@ Named queries disappear when the daemon stops. Put important ones in your config
 Your config-dir `init.clj` is trusted startup code. A minimal generated one looks like:
 
 ```clojure
-(require '[atom.libs.alpha :as libs])
+(require '[atom.libs.alpha :as libs]
+         '[atom.graph.alpha :as graph]
+         '[atom.views.alpha :as views])
 (libs/sync!)
 ```
 
-You can add named queries there:
+`atom.graph.alpha` and `atom.views.alpha` are built into Atom. They come from the Atom checkout on the daemon classpath; they do not need `libs.edn` approval and should not be loaded with `libs/use!`.
+
+You can add named queries and daemon-memory views there:
 
 ```clojure
-(require '[atom.libs.alpha :as libs]
-         '[todo.daemon.api :as api])
+(ns my.atom.init
+  (:require [atom.libs.alpha :as libs]
+            [atom.graph.alpha :as graph]
+            [atom.views.alpha :as views]
+            [todo.daemon.api :as api]))
 
 (libs/sync!)
 (api/register-query! 'mine [:= [:attr :owner] "ct"])
+
+(defn mine-view [{:keys [params]}]
+  (let [ids (graph/query-ids! 'mine {})]
+    {:params params
+     :ids ids
+     :tasks (graph/tasks-by-ids ids)}))
+
+(views/register-view! 'mine-view 'my.atom.init/mine-view)
+```
+
+From a connected REPL, inspect and invoke the registered view:
+
+```clojure
+(require '[atom.graph.alpha :as graph]
+         '[atom.views.alpha :as views])
+
+(graph/query-ids! 'mine {})
+(views/views)
+(views/view! 'mine-view {:format "summary"})
 ```
 
 Restart the daemon after changing `init.clj`:
@@ -191,7 +217,7 @@ todo list --query mine
 
 ## 7. Where runtime libraries fit
 
-When your config grows, move code into local Clojure libraries under your config-dir, commonly as Git submodules:
+When your config grows, move user/community code into local Clojure libraries under your config-dir, commonly as Git submodules:
 
 ```text
 <config-dir>/
@@ -203,13 +229,13 @@ When your config grows, move code into local Clojure libraries under your config
         └── src/...
 ```
 
-Approve the root in `libs.edn`:
+Approve user/community library roots in `libs.edn`:
 
 ```clojure
 {:libs {my/workflows {:local/root "libs/my-workflows"}}}
 ```
 
-Activate it from `init.clj`:
+Activate user/community libraries from `init.clj`:
 
 ```clojure
 (require '[atom.libs.alpha :as libs])
@@ -220,6 +246,8 @@ Activate it from `init.clj`:
    :libs #{'my/workflows}
    :call 'my.workflows.alpha/install!})
 ```
+
+Built-in `atom.*.alpha` namespaces are different from user/community libraries: they ship with Atom and are required directly from `init.clj` or the REPL, not approved in `libs.edn`.
 
 `use!` records loaded, skipped, and failed modules so you can fix forward:
 
@@ -252,4 +280,19 @@ And runtime-library helpers:
 (libs/use! :key {...})
 (libs/uses)
 (libs/use :key)
+```
+
+Transformation helpers:
+
+```clojure
+(require '[atom.graph.alpha :as graph]
+         '[atom.views.alpha :as views])
+
+(graph/query-ids! 'mine {})
+(graph/tasks-by-ids ["task-id"])
+(graph/ancestor-root-ids ["leaf-id"] {:where [:= [:attr :kind] "feature"]})
+(graph/subgraph ["feature-root-id"])
+(views/register-view! 'name 'my.ns/view-fn)
+(views/view! 'name {:key "value"})
+(views/views)
 ```

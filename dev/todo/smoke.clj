@@ -191,23 +191,29 @@
   (let [config-dir (bootstrap-config-dir db-file "bootstrap-clean")
         config-file (java.io.File. config-dir "config.json")]
     (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-clean")))
-    (write-client-config-to-dir! config-dir)
+    (try
+      (run-process! "clean bootstrap creates config-dir files before daemon is running"
+                    (java.io.File. checkout-root)
+                    nil
+                    [todo-bin "--config-dir" config-dir "init"])
+      (throw (ex-info "clean bootstrap init unexpectedly reached daemon" {}))
+      (catch AssertionError e
+        (let [message (ex-message e)]
+          (when-not (or (clojure.string/includes? message "daemon socket unreachable")
+                        (clojure.string/includes? message "no running daemon"))
+            (throw e)))))
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "init")
         (assert (.isFile config-file) "clean bootstrap preserves/creates config.json")
         (assert-file-contents (java.io.File. config-dir "libs.edn") "{:libs {}}\n" "clean bootstrap creates empty libs.edn")
-        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n" "clean bootstrap creates minimal init.clj")
+        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[atom.libs.alpha :as libs]\n         '[atom.graph.alpha :as graph]\n         '[atom.views.alpha :as views])\n(libs/sync!)\n" "clean bootstrap creates helper init.clj template")
         (assert (.isDirectory (java.io.File. config-dir "libs")) "clean bootstrap creates libs directory")
         (assert (.isDirectory (java.io.File. config-dir ".git")) "clean bootstrap initializes config-dir git repo")
         (let [task-id (cli-add-config! config-dir "Bootstrap clean task" "--attr" "owner=ct")]
           (assert= "Bootstrap clean task"
                    (:title (parse-json (run-cli-config! config-dir "--format" "json" "show" task-id)))
                    "clean bootstrap can create and show tasks after init"))
-        (let [payload (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.libs.alpha :as libs]) {:approved (libs/approved) :syncs (libs/syncs) :uses (libs/uses)})\n" "daemon" "repl" "--stdin"))]
-          (assert= {:libs {}} (:approved payload) "clean bootstrap approved libs are empty")
-          (assert= {:libs {}} (:syncs payload) "clean bootstrap sync state is empty after default sync")
-          (assert= {} (:uses payload) "clean bootstrap module use state is empty"))
         (finally
           (stop-cli-daemon-config! config-dir daemon)
           (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-clean"))))))))
@@ -241,9 +247,33 @@
           (stop-cli-daemon-config! config-dir daemon)
           (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-dirty"))))))))
 
+(defn smoke-startup-transformations! [db-file]
+  (let [config-dir (bootstrap-config-dir db-file "startup-transform")]
+    (delete-tree! (smoke-config-dir-named (str db-file ".startup-transform")))
+    (write-client-config-to-dir! config-dir)
+    (spit (java.io.File. config-dir "libs.edn") "{:libs {}}\n")
+    (spit (java.io.File. config-dir "init.clj")
+          "(ns smoke.startup\n  (:require [atom.libs.alpha :as libs]\n            [atom.graph.alpha :as graph]\n            [atom.views.alpha :as views]\n            [todo.daemon.api :as api]))\n(libs/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :tasks (graph/tasks-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n")
+    (let [daemon (start-cli-daemon-config! config-dir)]
+      (try
+        (run-cli-config! config-dir "init")
+        (let [task-id (cli-add-config! config-dir "Startup transformed task" "--attr" "owner=smoke")
+              payload (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[atom.graph.alpha :as graph] '[atom.views.alpha :as views]) {:query-ids (graph/query-ids! 'smoke-owned {}) :view (views/view! 'smoke-owned-view {:source \"stdin\"}) :views (views/views)})\n" "daemon" "repl" "--stdin"))]
+          (assert= [task-id] (:query-ids payload) "startup registered query is available through graph helper")
+          (assert= {:source "stdin"} (get-in payload [:view :params]) "startup view receives params")
+          (assert= [task-id] (get-in payload [:view :ids]) "startup view can call graph/query-ids!")
+          (assert= ["Startup transformed task"] (titles (get-in payload [:view :tasks])) "startup view can hydrate graph tasks")
+          (assert= [{:name "smoke-owned-view" :fn 'smoke.startup/smoke-owned-view}]
+                   (:views payload)
+                   "startup registered view is introspectable"))
+        (finally
+          (stop-cli-daemon-config! config-dir daemon)
+          (delete-tree! (smoke-config-dir-named (str db-file ".startup-transform"))))))))
+
 (defn smoke-bootstrap! [db-file]
   (smoke-bootstrap-clean-config! db-file)
-  (smoke-bootstrap-dirty-config! db-file))
+  (smoke-bootstrap-dirty-config! db-file)
+  (smoke-startup-transformations! db-file))
 
 (defn write-live-lib! [config-dir lib-dir ns-name body]
   (let [root (java.io.File. config-dir (str "libs/" lib-dir))

@@ -63,7 +63,7 @@ Final statuses are `done`, `failed`, and `cancelled`. Full semantics live in [Ta
 
 Atom is daemon-core-first. Runtime customization belongs in trusted daemon startup config and connected REPL workflows; the CLI stays small and scriptable.
 
-Named queries and runtime libraries are loaded into the selected daemon world, then consumed by helpers or by small CLI commands such as `list --query <name>`. The CLI intentionally does not grow loaders for arbitrary query or library files.
+Named queries, daemon-memory views, and runtime libraries are loaded into the selected daemon world, then consumed by helpers or by small CLI commands such as `list --query <name>`. Fresh `todo init` startup config requires the built-in `atom.graph.alpha` and `atom.views.alpha` helper namespaces as an editable template. User/community libraries still belong under `libs.edn`; shipped `atom.*.alpha` namespaces are already on the Atom classpath. The CLI intentionally does not grow loaders for arbitrary query, view, or library files.
 
 ## Reference
 

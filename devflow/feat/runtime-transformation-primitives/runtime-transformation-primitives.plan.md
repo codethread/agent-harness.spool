@@ -175,3 +175,7 @@ Added daemon/client routing for the frozen primitive op names and a daemon-lifet
 ### RTP-PLAN-001.DN5 TASK-004 blessed alpha helpers — 2026-06-26
 
 Added `atom.graph.alpha` and `atom.views.alpha` as source-visible helper namespaces over the daemon operations. The helpers mirror `atom.libs.alpha` routing: direct calls inside the daemon JVM use `todo.daemon.api`, while connected helper REPL calls route through the selected `todo.repl` config-dir world. No install helper was added because this slice has no default registrations to perform.
+
+### RTP-PLAN-001.DN6 TASK-005 init docs smoke workflow — 2026-06-26
+
+Updated fresh `todo init` startup config to require `atom.graph.alpha` and `atom.views.alpha` alongside `atom.libs.alpha` while preserving create-only behavior for existing config files. Smoke now covers generated helper imports plus an equivalent startup workflow that registers a named query and view, then invokes both through `todo daemon repl --stdin`. Docs clarify that shipped `atom.*.alpha` namespaces are built in and distinct from user/community libraries approved through `libs.edn`.

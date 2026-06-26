@@ -114,7 +114,7 @@ Named queries are daemon-lifetime runtime state: register or load them through t
 
 Trusted runtime customization belongs in the selected daemon world's `init.clj` and connected REPL workflows. The selected `--config-dir` is also a user-owned library workspace. Atom does not clone source, install packages, or expose plugin/package/library activation commands in the public CLI.
 
-The recommended workspace is a normal Git repo. Keep the Atom checkout wherever `config.json` `source` points; keep user/community libraries under the config-dir by Git submodule, symlink, or manual copy. `libs.edn` approves local roots, `atom.libs.alpha/sync!` makes them available to the daemon, and `atom.libs.alpha/use!` activates optional modules.
+The recommended workspace is a normal Git repo. Keep the Atom checkout wherever `config.json` `source` points; keep user/community libraries under the config-dir by Git submodule, symlink, or manual copy. `libs.edn` approves local roots, `atom.libs.alpha/sync!` makes them available to the daemon, and `atom.libs.alpha/use!` activates optional modules. Built-in shipped namespaces such as `atom.graph.alpha` and `atom.views.alpha` are already on the Atom classpath; require them directly from trusted config or a connected REPL, and do not add them to `libs.edn` or load them with `libs/use!`.
 
 A fresh default-world setup can look like this:
 
@@ -128,7 +128,12 @@ cd "$ATOM_CONFIG"
 git init
 printf '{"configFormat":"alpha","source":"%s","format":"human"}\n' "$ATOM_SOURCE" | jq . > config.json
 printf '{:libs {}}\n' > libs.edn
-printf '(require '\''[atom.libs.alpha :as libs])\n(libs/sync!)\n' > init.clj
+cat > init.clj <<'EOF'
+(require '[atom.libs.alpha :as libs]
+         '[atom.graph.alpha :as graph]
+         '[atom.views.alpha :as views])
+(libs/sync!)
+EOF
 git add config.json libs.edn init.clj
 git commit -m "Initialize Atom config"
 todo daemon start

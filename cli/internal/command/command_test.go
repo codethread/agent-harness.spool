@@ -253,7 +253,7 @@ func TestInitBootstrapsWorkspaceWhenMissingAndCallsInit(t *testing.T) {
 	if _, err := os.Stat(initPath); err != nil {
 		t.Fatalf("missing init.clj: %v", err)
 	}
-	if got := string(mustReadFile(t, initPath)); got != "(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n" {
+	if got := string(mustReadFile(t, initPath)); got != defaultInitCLJ {
 		t.Fatalf("unexpected init.clj contents: %q", got)
 	}
 	realCfg, err := filepath.EvalSymlinks(cfg)

@@ -22,7 +22,7 @@ tasks:
   - id: 5
     description: init docs smoke workflow
     task_file: tasks/005-init-docs-smoke-workflow.md
-    status: pending
+    status: complete
     blocked_by: [4]
   - id: 6
     description: promote specs validate

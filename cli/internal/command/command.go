@@ -32,6 +32,8 @@ type Caller interface {
 	Call(string, map[string]any) (any, error)
 }
 
+const defaultInitCLJ = "(require '[atom.libs.alpha :as libs]\n         '[atom.graph.alpha :as graph]\n         '[atom.views.alpha :as views])\n(libs/sync!)\n"
+
 var newClient = func(o Options) Caller {
 	return client.New(client.Config{ConfigDir: o.ConfigDir, StateDir: o.StateDir, Format: o.Format})
 }
@@ -66,7 +68,7 @@ func (a *App) rootCommand() *cobra.Command {
 		o.ConfigDirExplicit = cmd.Flags().Changed("config-dir")
 	}
 	root.PersistentFlags().StringVar(&o.Format, "format", "", "output format: human or json")
-	root.AddCommand(&cobra.Command{Use: "init", Short: "Initialize task storage", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	root.AddCommand(&cobra.Command{Use: "init", Short: "Bootstrap missing config-dir files; initialize task storage via the running daemon", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		return a.initCommand(o)
 	}})
 
@@ -381,7 +383,7 @@ func (a *App) bootstrapConfigDir(o Options) error {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(world.ConfigDir, "init.clj")); os.IsNotExist(err) {
-		if err := os.WriteFile(filepath.Join(world.ConfigDir, "init.clj"), []byte("(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(world.ConfigDir, "init.clj"), []byte(defaultInitCLJ), 0o644); err != nil {
 			return err
 		}
 	} else if err != nil {

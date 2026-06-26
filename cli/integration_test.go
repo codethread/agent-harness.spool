@@ -50,7 +50,7 @@ func TestInitBootstrapsConfigDirWorkspaceAndStartsDaemon(t *testing.T) {
 	if _, err := os.Stat(initPath); err != nil {
 		t.Fatalf("expected init.clj bootstrap: %v", err)
 	}
-	if got := string(mustReadFile(t, initPath)); got != "(require '[atom.libs.alpha :as libs])\n(libs/sync!)\n" {
+	if got := string(mustReadFile(t, initPath)); got != "(require '[atom.libs.alpha :as libs]\n         '[atom.graph.alpha :as graph]\n         '[atom.views.alpha :as views])\n(libs/sync!)\n" {
 		t.Fatalf("unexpected init.clj bootstrap contents: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(cfg, ".git")); err != nil {
