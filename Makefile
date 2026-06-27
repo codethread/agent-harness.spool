@@ -25,7 +25,11 @@ bootstrap:
 	fi
 	go install $(GO_CLI)
 	mkdir -p "$(CONFIG_DIR)"
-	printf '{"configFormat":"alpha","source":"%s"}\n' "$(CURDIR)" | jq . > "$(CONFIG_FILE)"
+	@if [ ! -e "$(CONFIG_FILE)" ] && [ ! -L "$(CONFIG_FILE)" ]; then \
+		printf '{"configFormat":"alpha","source":"%s"}\n' "$(CURDIR)" | jq . > "$(CONFIG_FILE)"; \
+	else \
+		echo "Preserving existing $(CONFIG_FILE)"; \
+	fi
 	@if [ ! -e "$(AGENTS_FILE)" ] && [ ! -L "$(AGENTS_FILE)" ]; then \
 		printf '%s\n' 'Always read <source-dir>/docs/skein.md where source-dir = !`cat config.json | jq '\''.source'\''` first.' > "$(AGENTS_FILE)"; \
 	fi
