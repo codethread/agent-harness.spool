@@ -1,7 +1,7 @@
 # Weaver Runtime Delta: Event System
 
 **Document ID:** `SPEC-004-DELTA-001`
-**Status:** Draft
+**Status:** Merged
 **Last Updated:** 2026-06-27
 **Extends:** [Weaver Runtime](../../../specs/daemon-runtime.md)
 

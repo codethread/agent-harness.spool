@@ -85,9 +85,9 @@ Fresh `strand init` creates missing workspace files without overwriting existing
 (libs/sync!)
 ```
 
-Create your own config or library files when you need runtime behavior. `init.clj` is the place to load approved libraries, register queries, register weave patterns, register views, or call your own install functions.
+Create your own config or library files when you need runtime behavior. `init.clj` is the place to load approved libraries, register queries, register weave patterns, register views, register event handlers, or call your own install functions.
 
-Built-in `skein.graph.alpha`, `skein.patterns.alpha`, and `skein.views.alpha` come from the configured Skein checkout. User/community libraries are approved separately in `libs.edn` and synced through `skein.libs.alpha`.
+Built-in `skein.graph.alpha`, `skein.patterns.alpha`, `skein.views.alpha`, and `skein.events.alpha` come from the configured Skein checkout. User/community libraries are approved separately in `libs.edn` and synced through `skein.libs.alpha`.
 
 Example pattern and view setup in your own startup-loaded library:
 
@@ -136,12 +136,28 @@ Call registered views from trusted Clojure, not from a public `strand view` CLI 
 (views/view! 'owned-view {})
 ```
 
+Register event handlers from trusted config or weaver-loadable libraries when you want asynchronous reactions to strand mutations. Event helpers are not public CLI commands:
+
+```clojure
+(ns my.workflow
+  (:require [skein.events.alpha :as events]))
+
+(defn record-add! [event]
+  (println "added" (:strand/id event)))
+
+(events/register! :example/record-add #{:strand/added} 'my.workflow/record-add!)
+(events/handlers)
+(events/recent-failures)
+```
+
 Hot-reload the selected config-dir `init.clj` from a connected REPL:
 
 ```clojure
 (require '[skein.libs.alpha :as libs])
 (libs/reload!)
 ```
+
+Reload clears weaver-lifetime library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then re-runs `init.clj`.
 
 Use the connected stdin REPL for scripts:
 

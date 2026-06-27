@@ -1,7 +1,7 @@
 # Update Docs and Smoke
 
 **Document ID:** `TASK-005`
-**Status:** Pending
+**Status:** Complete
 **Plan:** [Weaver Event System Plan](../weaver-event-system.plan.md)
 
 ## TASK-005.P1 Scope

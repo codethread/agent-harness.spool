@@ -5,13 +5,79 @@
             [skein.weaver.socket :as socket]
             [skein.db :as db])
   (:import [java.lang ProcessHandle]
-           [java.time Instant]))
+           [java.time Instant]
+           [java.util.concurrent ArrayBlockingQueue TimeUnit]))
 
 (def loopback-host "127.0.0.1")
 
 (defonce current-runtime (atom nil))
 
-(declare stop!)
+(def event-queue-capacity 1024)
+(def recent-event-failure-limit 100)
+
+(declare stop! with-library-classloader)
+
+(defn- event-system-base []
+  {:handler-registry (atom {})
+   :recent-failures (atom [])
+   :queue (ArrayBlockingQueue. event-queue-capacity)
+   :running? (atom true)
+   :worker (atom nil)})
+
+(defn stop-event-system! [runtime]
+  (when-let [{:keys [queue running? worker]} (:event-system runtime)]
+    (reset! running? false)
+    (.clear queue)
+    (when-let [worker-thread @worker]
+      (.interrupt ^Thread worker-thread)
+      (.join ^Thread worker-thread 1000)
+      (reset! worker nil)))
+  nil)
+
+(defn- run-event-worker! [runtime event-system]
+  (let [worker (Thread.
+                (fn []
+                  (try
+                    (while @(:running? event-system)
+                      (when-let [event (.poll ^ArrayBlockingQueue (:queue event-system) 100 TimeUnit/MILLISECONDS)]
+                        (when @(:running? event-system)
+                          (doseq [{:keys [key types fn fn-value]} (vals @(:handler-registry event-system))
+                                  :when (contains? types (:event/type event))]
+                            (try
+                              (with-library-classloader runtime #(fn-value event))
+                              (catch Throwable t
+                                (let [failure {:handler/key key
+                                               :handler/fn fn
+                                               :event/id (:event/id event)
+                                               :event/type (:event/type event)
+                                               :exception/message (ex-message t)
+                                               :failed/at (str (Instant/now))}]
+                                  (swap! (:recent-failures event-system)
+                                         #(->> (conj % failure)
+                                               (take-last recent-event-failure-limit)
+                                               vec)))))))))
+                    (catch InterruptedException _ nil)))
+                "skein-event-worker")]
+    (.setDaemon worker true)
+    (.start worker)
+    (reset! (:worker event-system) worker)
+    nil))
+
+(defn start-event-system! [runtime]
+  (let [event-system (event-system-base)
+        runtime* (assoc runtime :event-system event-system)]
+    (run-event-worker! runtime* event-system)
+    runtime*))
+
+(defn restart-event-system! [runtime]
+  (let [{:keys [handler-registry recent-failures queue running?] :as event-system} (:event-system runtime)]
+    (stop-event-system! runtime)
+    (reset! handler-registry {})
+    (reset! recent-failures [])
+    (.clear queue)
+    (reset! running? true)
+    (run-event-worker! runtime event-system)
+    nil))
 
 (defn current-pid []
   (.pid (ProcessHandle/current)))
@@ -70,6 +136,7 @@
                                                (.getContextClassLoader (Thread/currentThread)))
                          :server server
                          :metadata meta}
+           runtime-base (start-event-system! runtime-base)
            runtime-state (atom runtime-base)]
        (try
          (let [socket-runtime (socket/start! runtime-state (:socket-path meta) #(stop! @runtime-state))
@@ -84,6 +151,7 @@
              published-runtime))
          (catch Throwable t
            (reset! current-runtime nil)
+           (stop-event-system! @runtime-state)
            (when-let [socket-runtime (:socket-runtime @runtime-state)]
              (socket/stop! socket-runtime))
            (nrepl/stop-server server)
@@ -94,6 +162,7 @@
   (:metadata runtime))
 
 (defn stop! [runtime]
+  (stop-event-system! runtime)
   (when-let [socket-runtime (:socket-runtime runtime)]
     (socket/stop! socket-runtime))
   (when-let [server (:server runtime)]

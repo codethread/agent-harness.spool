@@ -1,7 +1,7 @@
 # Weaver Event System Plan
 
 **Document ID:** `PLAN-001`
-**Status:** Reviewed
+**Status:** Shipped
 **Last Updated:** 2026-06-27
 **Proposal:** [Weaver Event System Proposal](./proposal.md)
 **Feature Specs:** [Weaver Runtime Delta](./specs/daemon-runtime.delta.md), [REPL API Delta](./specs/repl-api.delta.md)
@@ -68,3 +68,9 @@
 
 - **PLAN-001.DN1:** 2026-06-27 — Feature created from discussion about replacing polling/cron cleanup with core pub/sub primitives. Direction chosen: Skein-owned semantic event lifecycle, async worker, trusted `skein.events.alpha` helpers, no SQLite watcher API.
 - **PLAN-001.DN2:** 2026-06-27 — Deep review tightened MVP scope: remove batch events until a blessed batch API exists, require reload clearing for event handlers/failures, validate handler symbols at registration, require data-first introspection, and add the missing docs/smoke task.
+- **PLAN-001.DN3:** 2026-06-27 — TASK-001 added the internal runtime event registry, bounded queue/worker, latest-100 failure buffer, and internal API helpers. Queue capacity is currently 1024 events; future helper/reload slices should route through these primitives rather than adding CLI surface.
+- **PLAN-001.DN4:** 2026-06-27 — TASK-002 emits `:strand/added`, `:strand/updated`, and `:strand/burned` from `skein.weaver.api` after successful DB mutations. Burn events capture pre-delete rows before deletion; `burn-by-ids` preserves requested ids separately from deduplicated burned ids.
+- **PLAN-001.DN5:** 2026-06-27 — TASK-003 added `skein.events.alpha` trusted helpers and nREPL client routing for event registration/introspection. `libs/reload!` now clears event handlers, queued events, and recent failures before reloading config; reload still does not unload already-loaded namespaces/vars.
+- **PLAN-001.DN6:** 2026-06-27 — TASK-004 added handler integration coverage in `test/skein/weaver_test.clj`: a trusted update handler burns `parent-of` children tagged `{:temporary "true"}`, durable/unrelated strands remain, slow and failing handlers do not fail the original mutation, filtered handlers ignore unrelated events, queue-full enqueue fails loudly, and reload discards queued events before reinstalling handlers.
+- **PLAN-001.DN7:** 2026-06-27 — TASK-005 promoted event runtime/helper contracts into root specs and user docs, and extended smoke startup-transform coverage with a trusted `skein.events.alpha` handler registered from `init.clj` that observes an async `:strand/added` effect in an isolated config-dir world. Validation passed: `clojure -M:test`, `go test ./...` under `cli`, and `clojure -M:smoke`.
+- **PLAN-001.DN8:** 2026-06-27 — Shipped the event system MVP after merging `main`'s patterned-weave feature. Conflict resolution preserved both runtime registries/helpers, kept `weave`/`pattern-explain` as the only added JSON socket operations, kept event registration out of the JSON CLI, and combined smoke coverage for startup patterns, views, and async event handlers. No scope was cut.

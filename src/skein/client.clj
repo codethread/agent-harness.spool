@@ -30,6 +30,10 @@
    :register-view! 'skein.weaver.api/register-view!
    :view! 'skein.weaver.api/view!
    :views 'skein.weaver.api/views
+   :register-event-handler! 'skein.weaver.api/register-event-handler!
+   :unregister-event-handler! 'skein.weaver.api/unregister-event-handler!
+   :event-handlers 'skein.weaver.api/event-handlers
+   :recent-event-failures 'skein.weaver.api/recent-event-failures
    :register-pattern! 'skein.weaver.api/register-pattern!
    :patterns 'skein.weaver.api/patterns
    :resolve-pattern 'skein.weaver.api/resolve-pattern

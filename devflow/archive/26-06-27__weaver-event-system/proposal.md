@@ -1,7 +1,7 @@
 # Weaver Event System Proposal
 
 **Document ID:** `PROP-001`
-**Status:** Draft
+**Status:** Shipped
 **Last Updated:** 2026-06-27
 **Related RFCs:** None
 **Related Specs:** [Weaver Runtime](../../specs/daemon-runtime.md), [REPL API](../../specs/repl-api.md), [Strand Model](../../specs/strand-model.md)

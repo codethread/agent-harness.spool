@@ -1,6 +1,7 @@
 (ns skein.libs-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [skein.events.alpha :as events]
             [skein.libs.alpha :as libs]
             [skein.weaver.config :as daemon-config]
             [skein.weaver.api :as api]
@@ -19,6 +20,11 @@
 (defn- delete-recursive [file]
   (doseq [child (reverse (file-seq file))]
     (.delete child)))
+
+(def reload-deliveries (atom []))
+
+(defn fresh-reload-handler [event]
+  (swap! reload-deliveries conj (:event/id event)))
 
 (defn- with-runtime [f]
   (let [db-file (db-test/temp-db-file)
@@ -45,7 +51,7 @@
                     (.replace \. java.io.File/separatorChar))
         src-file (io/file root "src" (str ns-path ".clj"))]
     (.mkdirs (.getParentFile src-file))
-    (spit src-file (str "(ns " ns-sym ")\n(defn marker [] :synced-lib-loaded)\n"))
+    (spit src-file (str "(ns " ns-sym ")\n(defn marker [] :synced-lib-loaded)\n(defn event-handler [_] :handled)\n"))
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     root))
 
@@ -153,6 +159,71 @@
             :op :use
             :args [:demo]}
            (libs/use :demo)))))
+
+(deftest event-helpers-route-through-connected-helper-context
+  (with-redefs [runtime/current-runtime (atom nil)
+                repl/connected-config-dir (constantly "/tmp/skein-connected-world")
+                skein.client/call-world (fn [config-dir opts op & args]
+                                         {:config-dir config-dir
+                                          :opts opts
+                                          :op op
+                                          :args args})]
+    (is (= {:config-dir "/tmp/skein-connected-world"
+            :opts {}
+            :op :register-event-handler!
+            :args [:capture #{:strand/added} 'demo.events/handle {:purpose :test}]}
+           (events/register! :capture #{:strand/added} 'demo.events/handle {:purpose :test})))
+    (is (= {:config-dir "/tmp/skein-connected-world"
+            :opts {}
+            :op :unregister-event-handler!
+            :args [:capture]}
+           (events/unregister! :capture)))
+    (is (= {:config-dir "/tmp/skein-connected-world"
+            :opts {}
+            :op :event-handlers
+            :args nil}
+           (events/handlers)))
+    (is (= {:config-dir "/tmp/skein-connected-world"
+            :opts {}
+            :op :recent-event-failures
+            :args nil}
+           (events/recent-failures)))))
+
+(deftest event-helpers-register-list-replace-unregister-directly
+  (with-runtime
+    (fn [_ _]
+      (is (= {:key :capture
+              :types #{:strand/added}
+              :fn 'skein.weaver-test/capture-event
+              :metadata {:purpose :test}}
+             (events/register! :capture #{:strand/added} 'skein.weaver-test/capture-event {:purpose :test})))
+      (is (= [:capture] (mapv :key (events/handlers))))
+      (is (= {:key :capture
+              :types #{:strand/updated}
+              :fn 'skein.weaver-test/capture-event
+              :metadata {}}
+             (events/register! :capture #{:strand/updated} 'skein.weaver-test/capture-event)))
+      (is (= #{:strand/updated} (:types (first (events/handlers)))))
+      (is (= {:unregistered :capture} (events/unregister! :capture)))
+      (is (= [] (events/handlers)))
+      (is (= [] (events/recent-failures))))))
+
+(deftest connected-client-can-register-weaver-only-library-handler
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.event_handler_" suffix))
+            lib (symbol (str "demo/event-handler-lib-" suffix))]
+        (write-local-lib! config-dir "event-handler" ns-sym)
+        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/event-handler"}}}))
+        (is (= :loaded (get-in (client/call-world (get-in rt [:metadata :config-dir]) {} :sync-approved-libs)
+                               [:libs lib :status])))
+        (is (= :loaded (:status (client/call-world (get-in rt [:metadata :config-dir]) {} :use! :events {:ns ns-sym :libs [lib]}))))
+        (let [entry (client/call-world (get-in rt [:metadata :config-dir]) {}
+                                       :register-event-handler! :lib #{:strand/added}
+                                       (symbol (str ns-sym) "event-handler") {})]
+          (is (= :lib (:key entry)))
+          (is (= (symbol (str ns-sym) "event-handler") (:fn entry))))))))
 
 (deftest approved-fails-loudly-on-structural-errors
   (with-runtime
@@ -305,17 +376,34 @@
 (deftest reload-clears-prior-runtime-config-state-before-loading
   (with-runtime
     (fn [rt config-dir]
-      (write-module-file! config-dir "modules/stale.clj" "(ns demo.stale)\n")
+      (write-module-file! config-dir "modules/stale.clj" "(ns demo.stale)\n(defn handler [_] :ok)\n")
       (is (= :loaded (:status (libs/use! :stale {:file "modules/stale.clj"}))))
       (api/register-query rt 'stale [:= [:attr :owner] "stale"])
       (api/register-view! rt 'stale-view 'demo.stale/view)
+      (reset! reload-deliveries [])
+      (api/register-event-handler! rt :stale #{:strand/added} 'demo.stale/handler {})
+      (api/register-event-handler! rt :fails #{:strand/added} 'skein.weaver-test/failing-event {})
+      (api/enqueue-event! rt {:event/type :strand/added
+                              :event/id "before-reload"
+                              :event/at "2026-06-27T00:00:00Z"
+                              :event/source :test})
+      (Thread/sleep 250)
+      (is (seq (api/recent-event-failures rt)))
       (spit (io/file config-dir "init.clj")
-            "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n")
+            "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n(api/register-event-handler! @runtime/current-runtime :fresh #{:strand/added} 'skein.libs-test/fresh-reload-handler {})\n")
       (is (= :loaded (:status (libs/reload!))))
       (is (nil? (libs/use :stale)))
       (is (nil? (get (api/queries rt) "stale")))
       (is (= [:= [:attr :owner] "fresh"] (get (api/queries rt) "fresh")))
-      (is (= [] (api/views rt))))))
+      (is (= [] (api/views rt)))
+      (is (= [:fresh] (mapv :key (api/event-handlers rt))))
+      (is (= [] (api/recent-event-failures rt)))
+      (api/enqueue-event! rt {:event/type :strand/added
+                              :event/id "after-reload"
+                              :event/at "2026-06-27T00:00:00Z"
+                              :event/source :test})
+      (Thread/sleep 250)
+      (is (= ["after-reload"] @reload-deliveries)))))
 
 (deftest use-loads-namespace-from-synced-root-and-records-state
   (with-runtime

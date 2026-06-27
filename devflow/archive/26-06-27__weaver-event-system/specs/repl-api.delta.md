@@ -1,7 +1,7 @@
 # REPL API Delta: Event Helpers
 
 **Document ID:** `SPEC-003-DELTA-001`
-**Status:** Draft
+**Status:** Merged
 **Last Updated:** 2026-06-27
 **Extends:** [REPL API](../../../specs/repl-api.md)
 

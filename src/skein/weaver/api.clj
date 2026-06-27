@@ -8,7 +8,9 @@
             [next.jdbc :as jdbc]
             [skein.weaver.runtime :as runtime]
             [skein.db :as db]
-            [skein.query :as query]))
+            [skein.query :as query])
+  (:import [java.time Instant]
+           [java.util UUID]))
 
 (defn normalize-row [row]
   (cond-> row
@@ -19,6 +21,8 @@
     (map? result) (into {} (map (fn [[k v]] [k (normalize v)])) (normalize-row result))
     (sequential? result) (mapv normalize result)
     :else result))
+
+(declare enqueue-event!)
 
 (defn- ds [runtime]
   (:datasource runtime))
@@ -37,6 +41,9 @@
 
 (defn- module-use-state [runtime]
   (:module-use-state runtime))
+
+(defn- event-system [runtime]
+  (:event-system runtime))
 
 (defn- with-library-classloader [runtime f]
   (let [thread (Thread/currentThread)
@@ -185,6 +192,7 @@
       (reset! (query-registry runtime) {})
       (reset! (view-registry runtime) {})
       (reset! (pattern-registry runtime) {})
+      (runtime/restart-event-system! runtime)
       (let [result (with-library-classloader runtime #(load-file canonical-file))]
         {:status :loaded
          :file canonical-file
@@ -388,8 +396,18 @@
   (db/init! (ds runtime))
   {:database "initialized"})
 
+(defn- event-base [type]
+  {:event/type type
+   :event/id (str (UUID/randomUUID))
+   :event/at (str (Instant/now))
+   :event/source :skein.weaver.api})
+
 (defn add [runtime strand]
-  (normalize (db/add-strand! (ds runtime) strand)))
+  (let [created (normalize (db/add-strand! (ds runtime) strand))]
+    (enqueue-event! runtime (assoc (event-base :strand/added)
+                                   :strand/id (:id created)
+                                   :strand created))
+    created))
 
 (defn- apply-edges! [tx id edges]
   (doseq [{:keys [to type attributes]} edges]
@@ -406,24 +424,39 @@
 
 (defn update [runtime id patch]
   (reject-unknown-update-keys! patch)
-  (let [{:keys [title active attributes edges]} patch]
-    (jdbc/with-transaction [tx (ds runtime)]
-      (when-not (db/get-strand tx id)
-        (throw (ex-info "Strand not found" {:strand-id id})))
-      (apply-edges! tx id edges)
-      (normalize (db/update-strand! tx id (cond-> {}
-                                          (contains? patch :title) (assoc :title title)
-                                          (contains? patch :active) (assoc :active active)
-                                          (contains? patch :attributes) (assoc :attributes attributes)))))))
+  (let [{:keys [title active attributes edges]} patch
+        result (jdbc/with-transaction [tx (ds runtime)]
+                 (let [before (or (some-> (db/get-strand tx id) normalize)
+                                  (throw (ex-info "Strand not found" {:strand-id id})))]
+                   (apply-edges! tx id edges)
+                   (let [after (normalize (db/update-strand! tx id (cond-> {}
+                                                                     (contains? patch :title) (assoc :title title)
+                                                                     (contains? patch :active) (assoc :active active)
+                                                                     (contains? patch :attributes) (assoc :attributes attributes))))]
+                     {:before before :after after})))]
+    (enqueue-event! runtime (assoc (event-base :strand/updated)
+                                   :strand/id id
+                                   :strand/patch patch
+                                   :strand/before (:before result)
+                                   :strand/after (:after result)))
+    (:after result)))
 
 (defn show [runtime id]
   (normalize (db/get-strand (ds runtime) id)))
 
-(defn burn-by-id [runtime id]
-  (db/burn-by-id! (ds runtime) id))
-
 (defn burn-by-ids [runtime ids]
-  (db/burn-by-ids! (ds runtime) ids))
+  (let [requested-ids (vec ids)
+        {:keys [before result]} (jdbc/with-transaction [tx (ds runtime)]
+                                  {:before (normalize (db/strands-by-ids tx requested-ids))
+                                   :result (db/burn-by-ids! tx requested-ids)})]
+    (enqueue-event! runtime (assoc (event-base :strand/burned)
+                                   :strand/requested-ids requested-ids
+                                   :strand/burned-ids (:burned result)
+                                   :strand/before before))
+    result))
+
+(defn burn-by-id [runtime id]
+  (burn-by-ids runtime [id]))
 
 (defn list
   ([runtime]
@@ -555,3 +588,89 @@
                   runtime
                   #((requiring-resolve fn-sym) {:input input}))]
       (normalize (db/add-strand-batch! (ds runtime) batch)))))
+
+(defn- validate-event-handler-key! [key]
+  (when-not (or (keyword? key) (symbol? key) (string? key))
+    (throw (ex-info "Event handler key must be a keyword, symbol, or string" {:key key})))
+  (when (and (string? key) (str/blank? key))
+    (throw (ex-info "Event handler key string must be non-blank" {:key key})))
+  key)
+
+(defn- validate-event-types! [types]
+  (when-not (set? types)
+    (throw (ex-info "Event handler types must be a set" {:types types})))
+  (when-not (seq types)
+    (throw (ex-info "Event handler types must be non-empty" {:types types})))
+  (doseq [type types]
+    (when-not (keyword? type)
+      (throw (ex-info "Event handler types must be keywords" {:type type :types types}))))
+  types)
+
+(defn- resolve-event-handler-fn! [runtime fn-sym]
+  (when-not (and (symbol? fn-sym) (namespace fn-sym))
+    (throw (ex-info "Event handler function must be a fully qualified symbol" {:fn fn-sym})))
+  (let [resolved (try
+                   (with-library-classloader runtime #(requiring-resolve fn-sym))
+                   (catch Throwable t
+                     (throw (ex-info "Event handler function could not be resolved" {:fn fn-sym} t))))
+        value (if (var? resolved) @resolved resolved)]
+    (when-not (ifn? value)
+      (throw (ex-info "Event handler symbol must resolve to a callable value" {:fn fn-sym :resolved-class (str (class value))})))
+    value))
+
+(defn- data-first-value? [value]
+  (cond
+    (nil? value) true
+    (or (string? value)
+        (number? value)
+        (keyword? value)
+        (symbol? value)
+        (boolean? value)
+        (inst? value)
+        (uuid? value)) true
+    (map? value) (and (every? data-first-value? (keys value))
+                      (every? data-first-value? (vals value)))
+    (vector? value) (every? data-first-value? value)
+    (set? value) (every? data-first-value? value)
+    :else false))
+
+(defn- validate-event-handler-metadata! [metadata]
+  (let [metadata (or metadata {})]
+    (when-not (map? metadata)
+      (throw (ex-info "Event handler metadata must be a map" {:metadata metadata})))
+    (when-not (data-first-value? metadata)
+      (throw (ex-info "Event handler metadata must contain only data-first values" {:metadata metadata})))
+    metadata))
+
+(defn register-event-handler! [runtime key types fn-sym metadata]
+  (let [entry {:key (validate-event-handler-key! key)
+               :types (validate-event-types! types)
+               :fn fn-sym
+               :fn-value (resolve-event-handler-fn! runtime fn-sym)
+               :metadata (validate-event-handler-metadata! metadata)}]
+    (swap! (:handler-registry (event-system runtime)) assoc (:key entry) entry)
+    (dissoc entry :fn-value)))
+
+(defn unregister-event-handler! [runtime key]
+  (let [key (validate-event-handler-key! key)]
+    (swap! (:handler-registry (event-system runtime)) dissoc key)
+    {:unregistered key}))
+
+(defn event-handlers [runtime]
+  (mapv #(dissoc % :fn-value)
+        (sort-by (comp pr-str :key) (vals @(:handler-registry (event-system runtime))))))
+
+(defn recent-event-failures [runtime]
+  @(:recent-failures (event-system runtime)))
+
+(defn enqueue-event! [runtime event]
+  (when-not (map? event)
+    (throw (ex-info "Event must be a map" {:event event})))
+  (doseq [k [:event/type :event/id :event/at :event/source]]
+    (when-not (contains? event k)
+      (throw (ex-info "Event requires key" {:key k :event event}))))
+  (when-not (keyword? (:event/type event))
+    (throw (ex-info "Event :event/type must be a keyword" {:event/type (:event/type event)})))
+  (when-not (.offer (:queue (event-system runtime)) event)
+    (throw (ex-info "Event queue is full" {:event/type (:event/type event) :event/id (:event/id event)})))
+  {:enqueued true :event/id (:event/id event) :event/type (:event/type event)})

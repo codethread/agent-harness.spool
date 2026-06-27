@@ -253,16 +253,23 @@
           (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-dirty"))))))))
 
 (defn smoke-startup-transformations! [db-file]
-  (let [config-dir (bootstrap-config-dir db-file "startup-transform")]
+  (let [config-dir (bootstrap-config-dir db-file "startup-transform")
+        event-marker (java.io.File. config-dir "event-handler.txt")]
     (delete-tree! (smoke-config-dir-named (str db-file ".startup-transform")))
     (write-client-config-to-dir! config-dir)
     (spit (java.io.File. config-dir "libs.edn") "{:libs {}}\n")
     (spit (java.io.File. config-dir "init.clj")
-          "(ns smoke.startup\n  (:require [clojure.spec.alpha :as s]\n            [skein.libs.alpha :as libs]\n            [skein.graph.alpha :as graph]\n            [skein.views.alpha :as views]\n            [skein.weaver.api :as api]))\n(libs/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(s/def ::title string?)\n(s/def ::review-input (s/keys :req-un [::title]))\n(defn review-pattern [{:keys [input]}]\n  (let [title (:title input)]\n    [{:ref 'impl :title title :attributes {:owner \"smoke\"}}\n     {:ref 'review :title (str \"Review: \" title) :attributes {:kind \"review\"} :edges [{:type \"depends-on\" :to 'impl}]}]))\n(api/register-pattern! 'review-task 'smoke.startup/review-pattern ::review-input)\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :strands (graph/strands-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n")
+          (str "(ns smoke.startup\n  (:require [clojure.spec.alpha :as s]\n            [skein.libs.alpha :as libs]\n            [skein.events.alpha :as events]\n            [skein.graph.alpha :as graph]\n            [skein.views.alpha :as views]\n            [skein.weaver.api :as api]))\n(libs/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(s/def ::title string?)\n(s/def ::review-input (s/keys :req-un [::title]))\n(defn review-pattern [{:keys [input]}]\n  (let [title (:title input)]\n    [{:ref 'impl :title title :attributes {:owner \"smoke\"}}\n     {:ref 'review :title (str \"Review: \" title) :attributes {:kind \"review\"} :edges [{:type \"depends-on\" :to 'impl}]}]))\n(api/register-pattern! 'review-task 'smoke.startup/review-pattern ::review-input)\n(def event-marker " (pr-str (.getCanonicalPath event-marker)) ")\n(defn record-added! [event]\n  (spit event-marker (:title (:strand event))))\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :strands (graph/strands-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n(events/register! :smoke/record-added #{:strand/added} 'smoke.startup/record-added! {:source :smoke})\n"))
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "init")
         (let [strand-id (cli-add-config! config-dir "Startup transformed strand" "--attr" "owner=smoke")
+              _ (loop [attempts 50]
+                  (when-not (.isFile event-marker)
+                    (when (zero? attempts)
+                      (throw (ex-info "event handler did not record async add event" {})))
+                    (Thread/sleep 100)
+                    (recur (dec attempts))))
               payload (edn/read-string (run-cli-config-stdin! config-dir "(do (require '[skein.graph.alpha :as graph] '[skein.views.alpha :as views]) {:query-ids (graph/query-ids! 'smoke-owned {}) :view (views/view! 'smoke-owned-view {:source \"stdin\"}) :views (views/views)})\n" "weaver" "repl" "--stdin"))]
           (assert= [strand-id] (:query-ids payload) "startup registered query is available through graph helper")
           (assert= {:source "stdin"} (get-in payload [:view :params]) "startup view receives params")
@@ -271,6 +278,7 @@
           (assert= [{:name "smoke-owned-view" :fn 'smoke.startup/smoke-owned-view}]
                    (:views payload)
                    "startup registered view is introspectable")
+          (assert= "Startup transformed strand" (slurp event-marker) "startup event handler observes async strand add event")
           (let [explanation (parse-json (run-cli-config! config-dir "pattern" "explain" "review-task"))
                 woven (parse-json (run-cli-config-stdin! config-dir "{\"title\":\"Patterned smoke\"}\n" "weave" "--pattern" "review-task"))]
             (assert= "review-task" (:name explanation) "pattern explain exposes registered pattern")

@@ -157,10 +157,11 @@
                                          :attributes (get args "attributes")}
                                   (contains? args "active") (assoc :active (get args "active"))))
     "update" ((api 'update) runtime (get args "id")
-              (cond-> {:edges (mapv (fn [edge]
-                                      {:type (get edge "type")
-                                       :to (get edge "to")})
-                                    (or (get args "edges") []))}
+              (cond-> {}
+                (contains? args "edges") (assoc :edges (mapv (fn [edge]
+                                                                {:type (get edge "type")
+                                                                 :to (get edge "to")})
+                                                              (get args "edges")))
                 (some? (get args "title")) (assoc :title (get args "title"))
                 (some? (get args "active")) (assoc :active (get args "active"))
                 (some? (get args "attributes")) (assoc :attributes (get args "attributes"))))

@@ -34,3 +34,4 @@ Archived feature folders preserve historical planning context. Current shipped c
 - `26-06-26__skein-rename` — shipped Skein/strand/weaver rename, strand model lifecycle/retention, `strand` CLI, and `skein.*` namespaces.
 - `26-06-24__stripped-task-api` — shipped smaller CLI/REPL surface with first-class task lifecycle fields.
 - `26-06-27__patterned-weave` — shipped named weaver-side patterns for owner-controlled strand DAG creation from JSON CLI input.
+- `26-06-27__weaver-event-system` — shipped weaver-owned semantic strand mutation events with trusted async handlers.

@@ -2,7 +2,7 @@
 
 **Document ID:** `SPEC-003`
 **Status:** Implemented
-**Last Updated:** 2026-06-26
+**Last Updated:** 2026-06-27
 **Code:** `src/skein/repl.clj`
 
 ## SPEC-003.P1 Purpose
@@ -67,10 +67,13 @@ Skein ships blessed source-visible runtime transformation namespaces for trusted
 - `skein.graph.alpha` exposes `(query-ids! query params)`, `(burn-by-id! id)`, `(burn-by-ids! ids)`, `(strands-by-ids ids)`, `(ancestor-root-ids seed-ids opts)`, and `(subgraph root-ids)`. These helpers route to weaver operations for set-oriented query id selection, raw deletion, strand hydration by ids, parent-of feature-root traversal, and parent-of DAG/subgraph expansion.
 - `skein.views.alpha` exposes `(register-view! name fn-sym)`, `(view! name params)`, and `(views)`. View registration accepts a simple view name and a fully qualified function symbol, not an arbitrary client-side function value.
 - `skein.patterns.alpha` exposes `(register-pattern! name fn-sym input-spec)`, `(patterns)`, `(pattern name)`, `(explain name)`, and `(weave! name input)`. Pattern functions are weaver-loadable function symbols called with `{:input input}` after input spec validation.
+- `skein.events.alpha` exposes `(register! key types fn-sym)`, `(register! key types fn-sym metadata)`, `(unregister! key)`, `(handlers)`, and `(recent-failures)`. Event registration accepts a stable handler key, a non-empty set of event type keywords, and a fully qualified function symbol resolvable in the weaver JVM.
 
-Helpers execute weaver-side when called from `init.clj` or activated runtime libraries, and route to the selected weaver world when called from connected REPL clients. Connected helper REPL users who want to register new view functions should place them in weaver-loadable config/library code and register their symbols. View registrations are weaver-lifetime runtime state unless user config reloads them on startup.
+Helpers execute weaver-side when called from `init.clj` or activated runtime libraries, and route to the selected weaver world when called from connected REPL clients. Connected helper REPL users who want to register new view, pattern, or event handler functions should place them in weaver-loadable config/library code and register their symbols. View, pattern, and event registrations are weaver-lifetime runtime state unless user config reloads them on startup.
 
-User config may require `skein.graph.alpha`, `skein.patterns.alpha`, and `skein.views.alpha` so users can inspect and extend the blessed path. These built-in namespaces come from the Skein checkout on the weaver classpath; they do not require `libs.edn` approval.
+User config may require `skein.graph.alpha`, `skein.patterns.alpha`, `skein.views.alpha`, and `skein.events.alpha` so users can inspect and extend the blessed path. These built-in namespaces come from the Skein checkout on the weaver classpath; they do not require `libs.edn` approval.
+
+Event handlers receive one event map and may perform trusted side effects, including calling Skein APIs. They are dispatched asynchronously after successful mutation commits; handler return values are ignored. `(events/recent-failures)` returns bounded, data-first failure records for handler exceptions. Handler exceptions do not fail the already-committed mutation.
 
 ## SPEC-003.P5 Runtime library workspace helpers
 
@@ -85,7 +88,7 @@ Helpers include:
 - `(libs/approved)` returns normalized approved config.
 - `(libs/sync!)` uses Clojure runtime dependency tooling to add approved local roots and returns structured results for loaded, already-available, and failed libraries.
 - `(libs/syncs)` returns weaver-lifetime approved-library sync state.
-- `(libs/reload!)` clears weaver-lifetime approved-library sync state, module-use state, named queries, and views, then reloads selected config-dir `init.clj` inside the active weaver and returns its file, status, and final form result. Missing `init.clj` fails loudly.
+- `(libs/reload!)` clears weaver-lifetime approved-library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then reloads selected config-dir `init.clj` inside the active weaver and returns its file, status, and final form result. Missing `init.clj` fails loudly. Reload does not unload already-loaded Clojure namespaces or vars.
 - `(libs/use! key opts)` records one weaver-lifetime module-use attempt under keyword `key`; duplicate keys replace prior state for reload workflows.
 - `(libs/uses)` and `(libs/use key)` expose weaver-lifetime module-use state.
 

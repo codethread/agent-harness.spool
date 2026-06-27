@@ -2,7 +2,7 @@
 
 **Document ID:** `SPEC-004`
 **Status:** Implemented
-**Last Updated:** 2026-06-26
+**Last Updated:** 2026-06-27
 **Related RFCs:** [RFC-002 Task Query DSL](../rfcs/2026-06-24-task-query-dsl.md), [RFC-003 Fast JSON Socket CLI](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-fast-json-socket-cli.md), [RFC-004 Go CLI Migration](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-go-cli-migration.md)
 **Code:** `src/skein/weaver`, `src/skein/client.clj`, `cli/`
 
@@ -12,7 +12,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 
 ## SPEC-004.P2 Runtime model
 
-- **SPEC-004.C1:** A weaver owns exactly one active SQLite datasource, one in-memory named-query registry, one in-memory read-only view registry, one in-memory weave-pattern registry, one in-memory approved-library sync state, and one in-memory module-use registry for its lifetime.
+- **SPEC-004.C1:** A weaver owns exactly one active SQLite datasource, one in-memory named-query registry, one in-memory read-only view registry, one in-memory weave-pattern registry, one in-memory event handler registry with asynchronous dispatch state, one in-memory approved-library sync state, and one in-memory module-use registry for its lifetime.
 - **SPEC-004.C2:** A weaver exposes two local transports: nREPL for Clojure REPL/client workflows and a JSON Unix domain socket for the public Go CLI.
 - **SPEC-004.C3:** Transports are local-only by default: nREPL binds to loopback, and the JSON CLI transport uses a Unix domain socket under the selected runtime state directory.
 - **SPEC-004.C4:** A weaver world is selected by config-dir. The default config-dir is `$XDG_CONFIG_HOME/skein` or `~/.config/skein`; an explicit config-dir override selects a separate world.
@@ -33,7 +33,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 ## SPEC-004.P4 API boundary
 
 - **SPEC-004.C15:** `skein.weaver.api` is the semantic boundary used by clients. Transport-specific eval strings, JSON envelopes, nREPL messages, and wire details are not the durable product API.
-- **SPEC-004.C16:** Weaver API operations cover the current stripped strand surface and trusted runtime state helpers: initialize storage, add strand, update strand, show strand, burn strands, list strands, ready strands, register one named query, load named queries, list registered query definitions, resolve a named query, execute list/ready through a named query, read approved library config, sync approved libraries, inspect approved-library sync state, reload selected config-dir `init.clj`, activate one module with `use!`, inspect module-use state, execute set-oriented runtime transformation primitives (`query-ids`, `burn-by-id`, `burn-by-ids`, `strands-by-ids`, `ancestor-root-ids`, and `subgraph`), register/list/invoke weaver-memory views, and register/list/resolve/explain/invoke weaver-memory weave patterns.
+- **SPEC-004.C16:** Weaver API operations cover the current stripped strand surface and trusted runtime state helpers: initialize storage, add strand, update strand, show strand, burn strands, list strands, ready strands, register one named query, load named queries, list registered query definitions, resolve a named query, execute list/ready through a named query, read approved library config, sync approved libraries, inspect approved-library sync state, reload selected config-dir `init.clj`, activate one module with `use!`, inspect module-use state, execute set-oriented runtime transformation primitives (`query-ids`, `burn-by-id`, `burn-by-ids`, `strands-by-ids`, `ancestor-root-ids`, and `subgraph`), register/list/invoke weaver-memory views, register/list/resolve/explain/invoke weaver-memory weave patterns, and register/unregister/list/inspect trusted event handlers.
 - **SPEC-004.C17:** Weaver API return values are Clojure data with JSON-bearing database columns normalized before transport-specific formatting. Strand rows use `active` and `inactive_at`; they do not expose core `status` or `final_at`.
 - **SPEC-004.C18:** Weaver API failures preserve domain error information well enough for clients to exit non-zero with useful messages.
 
@@ -50,7 +50,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C24:** JSON socket responses include protocol version, request id, success flag, result on success, and a structured error envelope on failure. Error types distinguish domain, protocol, and transport failures.
 - **SPEC-004.C25:** The JSON transport dispatches to weaver semantic operations rather than duplicating SQL or query logic in transport handlers.
 - **SPEC-004.C26:** The JSON socket operation allowlist is limited to public CLI behavior: `init`, `add`, `update`, `show`, `burn`, `list`, `ready`, `list-query`, `ready-query`, `weave`, `pattern-explain`, `status`, and `stop`.
-- **SPEC-004.C27:** Query registry mutation/listing/inspection, pattern registry mutation/listing, and view registry operations are intentionally excluded from the JSON socket allowlist; those remain REPL/trusted config workflows.
+- **SPEC-004.C27:** Query registry mutation/listing/inspection, pattern registry mutation/listing, view registry operations, and event handler operations are intentionally excluded from the JSON socket allowlist; those remain REPL/trusted config workflows.
 - **SPEC-004.C28:** `status` validates the matched weaver over the socket and reports weaver health, pid, selected config/data paths, weaver-owned database path, weaver identity, socket path, and nREPL endpoint. `stop` stops only the matched weaver and removes `weaver.edn`, `weaver.json`, and `weaver.sock` artifacts.
 
 ## SPEC-004.P7 Configuration and user code
@@ -78,7 +78,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C43:** Missing `libs.edn` yields an empty approved config unless user code explicitly requires libraries to exist. Per-library missing, unreadable, or add-libs-failed roots are sync outcomes rather than structural config errors.
 - **SPEC-004.C44:** `skein.libs.alpha/sync!` uses Clojure runtime dependency tooling to add approved local roots to the weaver runtime and records per-library loaded, already-available, or failed outcomes in weaver memory.
 - **SPEC-004.C45:** Runtime library availability and runtime activation are distinct. Making a root available allows weaver-side `require`; activation remains explicit trusted Clojure such as `use!`, direct function calls, or selected-config-dir-relative `load-file`.
-- **SPEC-004.C46:** `skein.libs.alpha/use!` records module-use attempts and loaded, skipped, or failed outcomes for weaver-lifetime introspection. `skein.libs.alpha/reload!` clears weaver-lifetime approved-library sync state, module-use state, named queries, and views, then reloads selected config-dir `init.clj` inside the active weaver for common config hot-reload workflows. This state is not durable package metadata.
+- **SPEC-004.C46:** `skein.libs.alpha/use!` records module-use attempts and loaded, skipped, or failed outcomes for weaver-lifetime introspection. `skein.libs.alpha/reload!` clears weaver-lifetime approved-library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then reloads selected config-dir `init.clj` inside the active weaver for common config hot-reload workflows. Reload does not unload already-loaded Clojure namespaces or vars. This state is not durable package metadata.
 - **SPEC-004.C47:** Runtime dependency loading is weaver-wide. There is no per-module version isolation or unloading guarantee; clean replacement may require weaver restart.
 - **SPEC-004.C48:** Runtime source acquisition is outside normal weaver boot. Skein must not silently clone repositories, add Git submodules, or fetch source as part of module activation.
 - **SPEC-004.C49:** The MVP supports approved local roots first. Maven/remote dependency downloads, package registries, git fetching, dependency solving, lockfiles, and CLI package commands are outside this contract.
@@ -100,6 +100,20 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C61:** Pattern invocation validates input against the registered spec before calling user code, invokes the function with `{:input input}`, requires a batch strand vector return value, and delegates persistence to `skein.db/add-strand-batch!` for id generation, ref resolution, edge insertion, cycle checks, and transactionality.
 - **SPEC-004.C62:** Pattern explanation returns serializable guidance containing the pattern name, function symbol string, input spec string, and printable spec form. This is caller guidance; invocation-time spec validation remains authoritative.
 - **SPEC-004.C63:** Pattern registry contents are weaver-lifetime runtime state and are not durable across restarts. `libs/reload!` clears pattern state before loading selected config again.
+
+## SPEC-004.P10a Event helpers
+
+- **SPEC-004.C64:** Skein ships `skein.events.alpha` as a blessed source-visible namespace for trusted config and connected REPL workflows. It exposes registration, unregistration, registry introspection, and recent failure introspection.
+- **SPEC-004.C65:** Event handler registration uses a stable key, a non-empty set of event type keywords, and a fully qualified function symbol resolvable in the weaver JVM under the runtime library classloader. Duplicate keys replace prior entries for reload workflows.
+- **SPEC-004.C66:** Event registry introspection returns data-first entries containing handler keys, subscribed event type sets, handler function symbols, and metadata. It does not expose function values or worker internals.
+- **SPEC-004.C67:** Event handler failures are recorded in bounded weaver-lifetime introspection state. Handler exceptions do not fail the already-committed mutation that emitted the event.
+- **SPEC-004.C68:** Event helper operations route directly inside the weaver JVM and through fixed nREPL client forms from connected helper REPLs; they are not public JSON socket operations.
+- **SPEC-004.C69:** Event registry contents are runtime state, not durable storage, and are reinstalled by trusted startup config or connected REPL workflows after weaver restart.
+- **SPEC-004.C70:** Runtime config reload stops event dispatch, discards queued events that have not started handling, clears event handlers and recent handler failures, restarts dispatch, then re-runs selected config-dir `init.clj`. Reload does not unload Clojure namespaces or remove already-loaded vars.
+- **SPEC-004.C71:** Events are Clojure maps with at least `:event/type`, `:event/id`, `:event/at`, and `:event/source`. Strand mutation events currently include `:strand/added`, `:strand/updated`, and `:strand/burned`.
+- **SPEC-004.C72:** Add events include `:strand/id` and the normalized created `:strand`. Update events include `:strand/id`, submitted `:strand/patch` including any `:edges`, normalized `:strand/before`, and normalized `:strand/after`. Burn events include `:strand/requested-ids`, `:strand/burned-ids`, and normalized pre-delete `:strand/before` rows.
+- **SPEC-004.C73:** Events are emitted by Skein mutation operations after the database mutation succeeds, not by SQLite triggers or table watchers. Edge writes performed through `update` are represented by the same `:strand/updated` event in the MVP; batch mutation events are deferred until a blessed batch mutation API exists.
+- **SPEC-004.C74:** Event dispatch is asynchronous through a single sequential worker with a bounded queue. Enqueueing fails loudly when the queue is full. Recent handler failures are bounded to the latest 100 entries and include handler key, function symbol, event id/type, exception message, and time.
 
 ## SPEC-004.P11 Removed compatibility
 

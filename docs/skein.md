@@ -28,6 +28,7 @@ running weaver
   owns named queries
   owns weave pattern registrations
   owns view registrations
+  owns event handler registrations
   owns synced library state
 
 clients
@@ -91,6 +92,7 @@ The weaver is the application core. It is a long-lived local Clojure process tha
 - the in-memory named-query registry;
 - the in-memory weave-pattern registry;
 - the in-memory view registry;
+- the in-memory event handler registry and async dispatch worker;
 - the approved-library sync state;
 - runtime module activation state.
 
@@ -351,7 +353,7 @@ Use reload during development:
 (libs/reload!)
 ```
 
-Reload clears weaver-lifetime library sync state, module-use state, named queries, weave patterns, and views, then reloads `init.clj`.
+Reload clears weaver-lifetime library sync state, module-use state, named queries, weave patterns, views, event handlers, queued events, and recent event failures, then reloads `init.clj`.
 
 ## Authoring your own library code
 
@@ -503,6 +505,41 @@ There is no public `strand view` CLI command; view registration and invocation a
 
 Like queries, views are weaver-lifetime runtime state. Register them from startup config if they should always exist after restart or reload. View functions should be read-only; mutating workflows such as updates, burns, or cleanup helpers should be ordinary trusted functions, not views.
 
+## Events
+
+Skein ships `skein.events.alpha` for trusted config and connected REPL workflows that need to react to strand mutations. There are no public JSON socket or `strand` CLI commands for event registration.
+
+Register handlers from startup-loaded code or weaver-loadable libraries:
+
+```clojure
+(ns my.workflow
+  (:require [skein.events.alpha :as events]))
+
+(defn cleanup-temporary! [event]
+  ;; Handler receives one event map and can call trusted Skein helpers/APIs.
+  (when (= :strand/updated (:event/type event))
+    ;; your world-specific cleanup here
+    nil))
+
+(defn install! []
+  (events/register! :my/cleanup-temporary
+                    #{:strand/updated}
+                    'my.workflow/cleanup-temporary!
+                    {:purpose :cleanup}))
+```
+
+Handlers are selected by explicit event-type filters such as `:strand/added`, `:strand/updated`, and `:strand/burned`. Registration uses a stable key and a fully qualified function symbol resolvable in the weaver JVM; duplicate keys replace prior handlers for reload workflows.
+
+Event dispatch is asynchronous after successful mutations. Handler exceptions do not roll back the mutation; inspect bounded failure state from trusted Clojure:
+
+```clojure
+(require '[skein.events.alpha :as events])
+(events/handlers)
+(events/recent-failures)
+```
+
+Event handler state is weaver-lifetime runtime state. Register handlers from `init.clj` or an installed library if they should exist after startup or reload.
+
 ## Fail loudly
 
 Skein intentionally fails loudly instead of guessing. Expect errors for malformed config, unsupported fields, missing weavers, stale metadata, invalid edge targets, cycles, unknown queries, missing libraries, and bad runtime code.
@@ -589,7 +626,7 @@ Covers:
 - `strand weaver repl --stdin` behavior;
 - query registration and execution;
 - `skein.libs.alpha` helpers;
-- graph and view helper namespaces;
+- graph, view, and event helper namespaces;
 - runtime library workspace activation.
 
 Read this when writing trusted Clojure forms, config code, local libraries, or custom query/view workflows.
@@ -608,6 +645,7 @@ Covers:
 - startup config loading;
 - named query registry behavior;
 - runtime library workspace model;
-- graph/view runtime primitives.
+- graph/view runtime primitives;
+- trusted event handler runtime and helper contracts.
 
 Read this when debugging weaver startup, metadata, transports, runtime state, library loading, or multi-world behavior.
