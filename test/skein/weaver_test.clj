@@ -41,6 +41,9 @@
 (defn test-view [{:keys [params]}]
   {:view :test :params params})
 
+(defn test-op [{:op/keys [name argv]}]
+  {:operation name :argv argv})
+
 (def delivered-events (atom []))
 (def handler-started (atom (promise)))
 (def handler-release (atom (promise)))
@@ -523,7 +526,7 @@
         (is (= {"blocked" edge-query} (api/queries rt)))))))
 
 (deftest json-socket-public-operation-allowlist-stays-thin
-  (is (= #{"init" "add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-explain" "status" "stop"}
+  (is (= #{"init" "add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-explain" "op" "status" "stop"}
          socket/allowed-operations)))
 
 (deftest weaver-runtime-transformation-primitives
@@ -578,6 +581,23 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"simple symbols or keywords"
                             (api/register-view! rt 'user/daily 'skein.weaver-test/test-view))))))
+
+(deftest weaver-op-registry-and-built-in-help
+  (with-runtime
+    (fn [rt _]
+      (is (= {:name "custom" :doc "Echo argv" :fn 'skein.weaver-test/test-op}
+             (api/register-op! rt 'custom "Echo argv" 'skein.weaver-test/test-op)))
+      (is (= {:operation "custom" :argv ["--flag" "value"]}
+             (api/op! rt 'custom ["--flag" "value"])))
+      (let [help (api/op! rt 'help [])]
+        (is (= "strand op <name> [args...]" (:usage help)))
+        (is (some #(= "help" (:name %)) (:registered help))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Operation not found"
+                            (api/op! rt 'missing [])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Operation function"
+                            (api/register-op! rt 'bad 'unqualified))))))
 
 (deftest weaver-pattern-registry-and-weave
   (with-runtime
@@ -673,6 +693,21 @@
         (is (true? (get woven "ok")))
         (is (= ["From socket" "Review: From socket"]
                (mapv #(get % "title") (get-in woven ["result" "created"]))))))))
+
+(deftest json-socket-op-dispatch
+  (with-runtime
+    (fn [rt _]
+      (api/register-op! rt 'custom 'skein.weaver-test/test-op)
+      (let [custom (socket-request rt "op" {"name" "custom" "args" ["--flag" "value"]})]
+        (is (true? (get custom "ok")))
+        (is (= {"operation" "custom" "argv" ["--flag" "value"]}
+               (get custom "result"))))
+      (let [help (socket-request rt "op" {"name" "help" "args" []})]
+        (is (true? (get help "ok")))
+        (is (= "strand op <name> [args...]" (get-in help ["result" "usage"]))))
+      (let [bad (socket-request rt "op" {"name" "custom" "args" [1]})]
+        (is (false? (get bad "ok")))
+        (is (= "protocol/malformed-request" (get-in bad ["error" "code"])))))))
 
 (deftest weaver-query-registry-fails-clearly
   (with-runtime

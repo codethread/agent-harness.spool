@@ -130,6 +130,7 @@
                          :query-registry (atom {})
                          :view-registry (atom {})
                          :pattern-registry (atom {})
+                         :op-registry (atom {})
                          :approved-lib-sync-state (atom {})
                          :module-use-state (atom {})
                          :library-classloader (clojure.lang.DynamicClassLoader.
@@ -143,6 +144,7 @@
                runtime (assoc runtime-base :socket-runtime socket-runtime)]
            (reset! runtime-state runtime)
            (reset! current-runtime runtime)
+           ((requiring-resolve 'skein.weaver.api/register-built-in-ops!) runtime)
            (when-let [init (init-file world)]
              (with-library-classloader runtime #(load-file init)))
            (let [published-runtime (assoc runtime :metadata-file (metadata/publish! meta))]

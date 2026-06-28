@@ -129,6 +129,27 @@ strand --config-dir "$world" pattern explain task
 printf '{"title":"Implement feature"}\n' | strand --config-dir "$world" weave --pattern task
 ```
 
+`strand op` is the generic custom-operation portal. The built-in help operation explains the contract:
+
+```sh
+strand --config-dir "$world" op help
+```
+
+Register custom handlers from trusted Clojure with `skein.weaver.api/register-op!`. The Go CLI forwards everything after the operation name as string argv:
+
+```clojure
+(require '[skein.weaver.api :as api])
+
+(defn echo-op [{:op/keys [name argv]}]
+  {:operation name :argv argv})
+
+(api/register-op! 'echo "Echo raw argv" 'my.workflow/echo-op)
+```
+
+```sh
+strand --config-dir "$world" op echo --flag value
+```
+
 Call registered views from trusted Clojure, not from a public `strand view` CLI command:
 
 ```clojure

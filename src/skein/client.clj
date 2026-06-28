@@ -38,6 +38,10 @@
    :event-handlers 'skein.weaver.api/event-handlers
    :recent-event-failures 'skein.weaver.api/recent-event-failures
    :register-pattern! 'skein.weaver.api/register-pattern!
+   :register-op! 'skein.weaver.api/register-op!
+   :ops 'skein.weaver.api/ops
+   :resolve-op 'skein.weaver.api/resolve-op
+   :op! 'skein.weaver.api/op!
    :patterns 'skein.weaver.api/patterns
    :resolve-pattern 'skein.weaver.api/resolve-pattern
    :pattern-explain 'skein.weaver.api/pattern-explain

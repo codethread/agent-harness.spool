@@ -10,7 +10,7 @@
            [org.sqlite SQLiteException]))
 
 (def allowed-operations
-  #{"init" "add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-explain" "status" "stop"})
+  #{"init" "add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-explain" "op" "status" "stop"})
 
 (def required-request-keys #{"protocol_version" "request_id" "weaver_id" "operation" "arguments" "options"})
 
@@ -89,6 +89,11 @@
                      (string? (get args "pattern")))
         "pattern-explain" (and (= #{"pattern"} (set (keys args)))
                                (string? (get args "pattern")))
+        "op" (and (= #{"name" "args"} (set (keys args)))
+                  (string? (get args "name"))
+                  (not (str/blank? (get args "name")))
+                  (vector? (get args "args"))
+                  (every? string? (get args "args")))
         false)
       (protocol-error (get req "request_id") "protocol/malformed-request" "operation arguments do not match protocol" {"operation" op}))))
 
@@ -181,6 +186,7 @@
     "ready-query" (dispatch-query runtime 'ready args)
     "weave" ((api 'weave!) runtime (query-name (get args "pattern")) (walk/keywordize-keys (get args "input")))
     "pattern-explain" ((api 'pattern-explain) runtime (query-name (get args "pattern")))
+    "op" ((api 'op!) runtime (query-name (get args "name")) (get args "args"))
     "status" (status-result runtime)
     "stop" {"stopping" true "pid" (get-in runtime [:metadata :pid]) "weaver_id" (get-in runtime [:metadata :nonce])}))
 

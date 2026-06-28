@@ -53,11 +53,47 @@ func (a *App) Run(args []string) error {
 	if a.Stdin == nil {
 		a.Stdin = os.Stdin
 	}
+	if handled, err := a.runOpPassThrough(args); handled {
+		return err
+	}
 	cmd := a.rootCommand()
 	cmd.SetArgs(args)
 	cmd.SetOut(a.Stdout)
 	cmd.SetErr(a.Stderr)
 	return cmd.Execute()
+}
+
+func (a *App) runOpPassThrough(args []string) (bool, error) {
+	o := Options{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--config-dir":
+			if i+1 >= len(args) {
+				return true, errors.New("flag needs an argument: --config-dir")
+			}
+			o.ConfigDir = args[i+1]
+			o.ConfigDirExplicit = true
+			i++
+		case strings.HasPrefix(arg, "--config-dir="):
+			o.ConfigDir = strings.TrimPrefix(arg, "--config-dir=")
+			o.ConfigDirExplicit = true
+		case arg == "op":
+			opArgs := args[i+1:]
+			if len(opArgs) == 0 || opArgs[0] == "--help" || opArgs[0] == "-h" {
+				return false, nil
+			}
+			if strings.TrimSpace(opArgs[0]) == "" {
+				return true, errors.New("op requires a non-empty name")
+			}
+			return true, a.withConfig(o, func(r Options) error {
+				return a.call(r, "op", map[string]any{"name": opArgs[0], "args": opArgs[1:]})
+			})
+		default:
+			return false, nil
+		}
+	}
+	return false, nil
 }
 
 func (a *App) rootCommand() *cobra.Command {
@@ -185,6 +221,21 @@ func (a *App) rootCommand() *cobra.Command {
 		return a.withConfig(o, func(r Options) error { return a.call(r, "pattern-explain", map[string]any{"pattern": args[0]}) })
 	}})
 	root.AddCommand(pattern)
+
+	op := &cobra.Command{
+		Use:   "op <name> [args...]",
+		Short: "Invoke a weaver-registered operation",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(args[0]) == "" {
+				return errors.New("op requires a non-empty name")
+			}
+			return a.withConfig(o, func(r Options) error {
+				return a.call(r, "op", map[string]any{"name": args[0], "args": args[1:]})
+			})
+		},
+	}
+	root.AddCommand(op)
 
 	weaver := &cobra.Command{Use: "weaver", Short: "Manage the local weaver"}
 	start := &cobra.Command{Use: "start", Short: "Start the weaver in the foreground for the selected config-dir world", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

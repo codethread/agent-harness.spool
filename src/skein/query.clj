@@ -1,4 +1,9 @@
 (ns skein.query
+  "Compile trusted EDN query definitions into SQL fragments for strand selection.
+
+  Query definitions are data-shaped expressions used by the daemon and REPL query
+  registry. Invalid query forms fail loudly with ex-info data rather than being
+  coerced into broad or empty SQL predicates."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
@@ -12,9 +17,9 @@
    :created_at "created_at"
    :updated_at "updated_at"})
 
-(def ^:dynamic *strand-alias* "t")
-(def ^:dynamic *allow-edge-predicates* true)
-(def ^:dynamic *validating-query-def* false)
+(def ^:dynamic ^:private *strand-alias* "t")
+(def ^:dynamic ^:private *allow-edge-predicates* true)
+(def ^:dynamic ^:private *validating-query-def* false)
 
 (defn- fail! [message data]
   (throw (ex-info message data)))
@@ -94,6 +99,12 @@
      :params (vec (cons relation (:params endpoint)))}))
 
 (defn compile-expr
+  "Compile a query expression into a SQL predicate fragment.
+
+  Returns a map with `:sql` and positional `:params` suitable for use against the
+  strands table. Optional params resolve `[:param :name]` references in the query
+  expression. Throws ex-info for malformed expressions, missing params, unknown
+  fields, unknown operators, or invalid nested edge predicates."
   ([expr] (compile-expr expr {}))
   ([expr params]
    (when-not (vector? expr)
@@ -149,7 +160,11 @@
                   (compile-edge :in (first args) (second args) params))
        (fail! "Unknown query operator" {:operator op :expr expr})))))
 
-(defn read-edn-file [path]
+(defn read-edn-file
+  "Read exactly one EDN form from path.
+
+  Throws ex-info when the file contains trailing forms after the first value."
+  [path]
   (let [eof ::eof]
     (with-open [r (io/reader (io/file path))]
       (let [reader (java.io.PushbackReader. r)
@@ -158,7 +173,12 @@
           (fail! "EDN file must contain exactly one form" {:path path}))
         value))))
 
-(defn canonical-query-name [query-name]
+(defn canonical-query-name
+  "Return the registry key string for a simple query symbol or keyword.
+
+  Query names are intentionally unqualified handles. Throws ex-info for namespaced,
+  blank, or non-symbol/non-keyword names."
+  [query-name]
   (let [canonical-name (cond
                          (and (symbol? query-name) (nil? (namespace query-name))) (name query-name)
                          (and (keyword? query-name) (nil? (namespace query-name))) (name query-name)
@@ -172,7 +192,12 @@
     query-name
     (canonical-query-name query-name)))
 
-(defn query-def [registry query-name]
+(defn query-def
+  "Return a query definition from registry by simple symbol or keyword name.
+
+  Registry keys may be strings, simple symbols, or simple keywords. Throws ex-info
+  with available names when no matching definition exists."
+  [registry query-name]
   (let [canonical-name (canonical-query-name query-name)
         normalized-registry (update-keys registry registry-query-name)]
     (or (get normalized-registry canonical-name)
@@ -180,7 +205,13 @@
                                    :canonical-query canonical-name
                                    :available (sort (keys normalized-registry))}))))
 
-(defn query-expr [query-def params]
+(defn query-expr
+  "Return the query expression for a vector or map query definition.
+
+  Map definitions must provide `:where`; when they declare `:params`, provided
+  runtime params must be a subset of those declared keyword names. Throws ex-info
+  for malformed definitions or unknown params."
+  [query-def params]
   (cond
     (vector? query-def) query-def
     (map? query-def) (do
@@ -196,7 +227,13 @@
 
 (declare compile-query)
 
-(defn validate-query-def! [query-def]
+(defn validate-query-def!
+  "Validate that query-def compiles, then return it unchanged.
+
+  Used when loading trusted query registry definitions so malformed query data
+  fails at registration time. Parameter references are substituted with sentinel
+  values during validation."
+  [query-def]
   (let [params (if (map? query-def)
                  (zipmap (:params query-def) (repeat ["skein-query-param"]))
                  {})]
@@ -204,5 +241,10 @@
       (compile-query query-def params)))
   query-def)
 
-(defn compile-query [query-def params]
+(defn compile-query
+  "Compile a query definition into a SQL predicate fragment.
+
+  Accepts either a raw expression vector or a map containing `:where` and optional
+  declared `:params`. Runtime params resolve `[:param :name]` references."
+  [query-def params]
   (compile-expr (query-expr query-def params) params))

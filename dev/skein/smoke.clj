@@ -168,12 +168,15 @@
 (defn smoke-cli-help! []
   (let [root (run-process! "Go CLI root help succeeds" [strand-bin "--help"])
         add (run-process! "Go CLI add help succeeds" [strand-bin "add" "--help"])
+        op (run-process! "Go CLI op help succeeds" [strand-bin "op" "--help"])
         weaver (run-process! "Go CLI weaver help succeeds" [strand-bin "weaver" "--help"])
         start (run-process! "Go CLI weaver start help succeeds" [strand-bin "weaver" "start" "--help"])]
     (doseq [needle ["Available Commands:" "add" "list" "weaver"]]
       (assert-contains root needle "Go CLI root help shows command tree"))
     (doseq [needle ["add <title>" "--state" "--attr"]]
       (assert-contains add needle "Go CLI command help shows flags"))
+    (doseq [needle ["op <name> [args...]" "weaver-registered operation"]]
+      (assert-contains op needle "Go CLI op help shows argv passthrough surface"))
     (doseq [needle ["start" "status" "stop"]]
       (assert-contains weaver needle "Go CLI subcommand help shows children"))
     (assert-contains start "--config-dir" "Go CLI nested subcommand help shows selected world flag")))
@@ -335,6 +338,9 @@
       (try
         (assert= "base layered" (slurp marker) "selected config-dir init.clj activates layered local library during weaver startup")
         (run-cli! db-file "init")
+        (let [op-help (parse-json (run-cli! db-file "op" "help"))]
+          (assert= "strand op <name> [args...]" (:usage op-help) "Go CLI op help is served by built-in weaver operation")
+          (assert (some #(= "help" (:name %)) (:registered op-help)) "Go CLI op help lists the built-in operation"))
             (let [design (cli-add! db-file "Sketch strand graph model" "--state=closed" "--attr" "priority=high")
                   schema (cli-add! db-file "Create SQLite schema" "--attr" "priority=high")
                   docs (cli-add! db-file "Write usage notes" "--attr" "owner=agent")]

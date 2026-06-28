@@ -29,7 +29,7 @@ func TestHelpIncludesCommandTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Available Commands:", "init", "add", "update", "show", "supersede", "burn", "list", "ready", "weave", "pattern", "weaver"} {
+	for _, want := range []string{"Available Commands:", "init", "add", "update", "show", "supersede", "burn", "list", "ready", "weave", "pattern", "op", "weaver"} {
 		if !strings.Contains(root, want) {
 			t.Fatalf("root help missing %q in:\n%s", want, root)
 		}
@@ -115,6 +115,7 @@ func TestRejectsRemovedAndMalformedInputs(t *testing.T) {
 		{"weave", "extra", "--pattern", "x"},
 		{"pattern", "explain"},
 		{"pattern", "explain", "x", "extra"},
+		{"op"},
 	}
 	for _, c := range cases {
 		if _, err := run(c...); err == nil {
@@ -635,6 +636,25 @@ func TestQueryCommandsUseSocketClientPayloads(t *testing.T) {
 	}
 }
 
+func TestOpCommandPassesThroughUserArgs(t *testing.T) {
+	cfg := testConfig(t)
+	orig := newClient
+	fc := &fakeClient{result: map[string]any{"ok": true}}
+	newClient = func(o Options) Caller { return fc }
+	t.Cleanup(func() { newClient = orig })
+	out, err := run("--config-dir", cfg, "op", "help", "--topic", "custom invocations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != `{"ok":true}` {
+		t.Fatalf("unexpected op output: %q", out)
+	}
+	expected := map[string]any{"name": "help", "args": []string{"--topic", "custom invocations"}}
+	if len(fc.calls) != 1 || fc.calls[0].op != "op" || !reflect.DeepEqual(fc.calls[0].args, expected) {
+		t.Fatalf("bad op call: %#v", fc.calls)
+	}
+}
+
 func TestWeaveAndPatternCommandsUseSocketClientPayloads(t *testing.T) {
 	cfg := testConfig(t)
 	orig := newClient
@@ -740,9 +760,9 @@ func TestSupersedeCommandUsesSocketPayloadAndJsonOutput(t *testing.T) {
 	cfg := testConfig(t)
 	orig := newClient
 	result := map[string]any{
-		"old": map[string]any{"before": map[string]any{"id": "old", "state": "active"}, "after": map[string]any{"id": "old", "state": "replaced"}},
-		"replacement_id": "new",
-		"supersedes_edge": map[string]any{"from_strand_id": "new", "to_strand_id": "old", "edge_type": "supersedes"},
+		"old":                  map[string]any{"before": map[string]any{"id": "old", "state": "active"}, "after": map[string]any{"id": "old", "state": "replaced"}},
+		"replacement_id":       "new",
+		"supersedes_edge":      map[string]any{"from_strand_id": "new", "to_strand_id": "old", "edge_type": "supersedes"},
 		"rewired_dependencies": []any{},
 	}
 	fc := &fakeClient{result: result}

@@ -22,7 +22,7 @@
     (sequential? result) (mapv normalize result)
     :else result))
 
-(declare enqueue-event!)
+(declare enqueue-event! register-built-in-ops! runtime?)
 
 (defn- ds [runtime]
   (:datasource runtime))
@@ -35,6 +35,9 @@
 
 (defn- pattern-registry [runtime]
   (:pattern-registry runtime))
+
+(defn- op-registry [runtime]
+  (:op-registry runtime))
 
 (defn- approved-lib-sync-state [runtime]
   (:approved-lib-sync-state runtime))
@@ -192,6 +195,8 @@
       (reset! (query-registry runtime) {})
       (reset! (view-registry runtime) {})
       (reset! (pattern-registry runtime) {})
+      (reset! (op-registry runtime) {})
+      (register-built-in-ops! runtime)
       (runtime/restart-event-system! runtime)
       (let [result (with-library-classloader runtime #(load-file canonical-file))]
         {:status :loaded
@@ -571,6 +576,9 @@
 (defn- validate-pattern-fn-symbol! [fn-sym]
   (validate-fn-symbol! "Pattern" fn-sym))
 
+(defn- validate-op-fn-symbol! [fn-sym]
+  (validate-fn-symbol! "Operation" fn-sym))
+
 (defn register-view! [runtime view-name fn-sym]
   (let [name (canonical-view-name view-name)
         entry {:name name :fn (validate-view-fn-symbol! fn-sym)}]
@@ -592,6 +600,72 @@
     (with-library-classloader
       runtime
       #((requiring-resolve fn-sym) {:params params}))))
+
+(defn- canonical-op-name [op-name]
+  (query/canonical-query-name op-name))
+
+(defn- validate-op-doc! [doc]
+  (when-not (and (string? doc) (not (str/blank? doc)))
+    (throw (ex-info "Operation doc must be a non-blank string" {:doc doc})))
+  doc)
+
+(defn register-op!
+  "Register a trusted weaver-side CLI operation.
+
+  Registered operations are invoked by `strand op <name> [args...]`. The handler
+  symbol must resolve to a function that accepts one context map with `:op/name`
+  and `:op/argv`, and returns JSON-compatible data. Registry contents live only
+  for the current weaver lifetime and are normally installed from init.clj or a
+  connected REPL. Duplicate names replace prior entries for reload workflows."
+  ([op-name fn-sym]
+   (register-op! (current-runtime) op-name nil fn-sym))
+  ([a b c]
+   (if (runtime? a)
+     (register-op! a b nil c)
+     (register-op! (current-runtime) a b c)))
+  ([runtime op-name doc fn-sym]
+   (let [entry (cond-> {:name (canonical-op-name op-name)
+                        :fn (validate-op-fn-symbol! fn-sym)}
+                 doc (assoc :doc (validate-op-doc! doc)))]
+     (swap! (op-registry runtime) assoc (:name entry) entry)
+     entry)))
+
+(defn ops
+  "Return registered CLI operation entries for the current weaver runtime."
+  [runtime]
+  (mapv val (sort-by key @(op-registry runtime))))
+
+(defn resolve-op
+  "Return the registered CLI operation entry for `op-name`, or fail loudly."
+  [runtime op-name]
+  (let [canonical-name (canonical-op-name op-name)]
+    (or (get @(op-registry runtime) canonical-name)
+        (throw (ex-info "Operation not found" {:operation op-name
+                                                :canonical-operation canonical-name
+                                                :available (sort (keys @(op-registry runtime)))})))))
+
+(defn op!
+  "Invoke a registered CLI operation with raw string argv from `strand op`."
+  [runtime op-name argv]
+  (let [{fn-sym :fn name :name} (resolve-op runtime op-name)]
+    (with-library-classloader
+      runtime
+      #((requiring-resolve fn-sym) {:op/name name :op/argv (vec argv)}))))
+
+(defn op-help-handler
+  "Return help for `strand op` and currently registered operations."
+  [_ctx]
+  {:summary "strand op invokes trusted weaver-side operations by name."
+   :usage "strand op <name> [args...]"
+   :details ["The Go CLI stops parsing after the operation name and forwards the remaining arguments as strings."
+             "Register handlers from trusted init.clj, activated libraries, or a connected REPL with skein.weaver.api/register-op!."
+             "Handlers receive {:op/name <canonical-name> :op/argv [<strings>...]} and return JSON-compatible data."]
+   :registered (ops (current-runtime))})
+
+(defn register-built-in-ops!
+  "Install Skein-provided CLI operations into the runtime op registry."
+  [runtime]
+  (register-op! runtime 'help "Explain how strand op invokes custom weaver operations" 'skein.weaver.api/op-help-handler))
 
 (defn- canonical-pattern-name [pattern-name]
   (query/canonical-query-name pattern-name))
