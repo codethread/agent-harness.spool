@@ -15,6 +15,7 @@ Root specs are canonical for shipped behavior:
 
 ## Active features
 
+- `batch-graph-upsert` — proposed transactional batch graph mutation primitive with local refs.
 - `library-author-testing-support` — proposed library-author testing helpers and weaver storage support.
 
 ## Archived features
