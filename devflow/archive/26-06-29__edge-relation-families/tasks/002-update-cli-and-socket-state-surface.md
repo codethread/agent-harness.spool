@@ -30,6 +30,6 @@ Update the public JSON socket and Go CLI lifecycle contract from old boolean lif
 
 ## ERF-TASK-002.P5 References
 
-- **ERF-TASK-002.REF1:** `devflow/feat/edge-relation-families/specs/cli.delta.md`
-- **ERF-TASK-002.REF2:** `devflow/feat/edge-relation-families/specs/daemon-runtime.delta.md`
+- **ERF-TASK-002.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/cli.delta.md`
+- **ERF-TASK-002.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/daemon-runtime.delta.md`
 - **ERF-TASK-002.REF3:** `cli/internal/command/command.go`

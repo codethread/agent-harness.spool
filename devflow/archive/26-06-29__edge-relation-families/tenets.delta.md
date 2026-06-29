@@ -3,8 +3,8 @@
 **Document ID:** `ERF-DELTA-005`
 **Root document:** [TENETS.md](../../TENETS.md)
 **Feature:** [proposal.md](./proposal.md)
-**Status:** Draft
-**Last Updated:** 2026-06-28
+**Status:** Merged
+**Last Updated:** 2026-06-29
 
 ## ERF-DELTA-005.P1 Summary
 

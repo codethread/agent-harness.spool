@@ -3,11 +3,11 @@
 **Document ID:** `ERF-PLAN-001`
 **Feature:** `edge-relation-families`
 **Proposal:** [proposal.md](./proposal.md)
-**RFC:** [RFC-007 Edge Relation Families, Strand State, and Supersession](../../rfcs/2026-06-28-edge-relation-families.md)
+**RFC:** [RFC-007 Edge Relation Families, Strand State, and Supersession](rfcs/2026-06-28-edge-relation-families.md)
 **Root specs:** [Strand Model](../../specs/strand-model.md), [Weaver Runtime](../../specs/daemon-runtime.md), [REPL API](../../specs/repl-api.md), [CLI Surface](../../specs/cli.md), [TENETS](../../TENETS.md)
 **Feature specs:** [Strand Model delta](./specs/strand-model.delta.md), [Weaver Runtime delta](./specs/daemon-runtime.delta.md), [REPL API delta](./specs/repl-api.delta.md), [CLI Surface delta](./specs/cli.delta.md), [TENETS delta](./tenets.delta.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-28
+**Status:** Shipped
+**Last Updated:** 2026-06-29
 
 ## ERF-PLAN-001.P1 Goal and scope
 
@@ -149,3 +149,7 @@ Append notes here. Do not rewrite earlier notes.
 ### ERF-PLAN-001.DN13 Task 8 docs smoke final validation — 2026-06-28
 
 - Promoted TEN-005 to declared structural relation DAGs, aligned remaining docs/spec examples, and changed smoke config-dir worlds to short `/tmp` paths so repo-path smoke avoids Unix socket path-length failures. Smoke now exercises `--state`, state-based readiness, edge predicates through a registered query, CLI supersession rewiring, and batch state results. Full Clojure tests, Go tests, and smoke pass; generated smoke artifacts were cleaned.
+
+### ERF-PLAN-001.DN14 Feature finish — 2026-06-29
+
+- Marked the feature shipped. Root specs and TENETS already reflected the shipped state lifecycle, relation families, edge predicates, relation-scoped traversal, annotation catalog, and core supersession behavior. All queued tasks were complete; no scope was cut. Archived RFC-007 with the feature.

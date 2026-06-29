@@ -15,7 +15,6 @@ Root specs are canonical for shipped behavior:
 
 ## Active features
 
-- `edge-relation-families` — proposed state lifecycle model, operational relation families, core supersession, edge predicates, and relation-scoped traversal.
 - `library-author-testing-support` — proposed library-author testing helpers and weaver storage support.
 
 ## Archived features
@@ -38,3 +37,4 @@ Archived feature folders preserve historical planning context. Current shipped c
 - `26-06-27__weaver-event-system` — shipped weaver-owned semantic strand mutation events with trusted async handlers.
 - `26-06-28__cli-attribute-inputs` — shipped file, stdin, and bulk JSON attribute input sources for `strand add`.
 - `26-06-28__batch-graph-upsert` — shipped transactional trusted Clojure batch graph mutation primitive with local refs, create/update/burn/edge upsert support, weaver events, and `skein.batch.alpha/apply!`.
+- `26-06-29__edge-relation-families` — shipped state lifecycle model, declared acyclic relation families, core supersession, edge predicates, relation-scoped traversal, and annotation catalog.

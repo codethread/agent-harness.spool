@@ -1,7 +1,7 @@
 # Edge Relation Families, Strand State, and Supersession
 
 **Document ID:** `RFC-007`
-**Status:** Proposed
+**Status:** Implemented
 **Created:** 2026-06-28
 **Related specs:** [Strand Model](../specs/strand-model.md), [Weaver Runtime](../specs/daemon-runtime.md), [REPL API](../specs/repl-api.md), [CLI Surface](../specs/cli.md)
 **Related tenets:** TEN-000 (alpha software), TEN-004 (Less is More), TEN-005 (Task graphs are DAGs)
@@ -132,4 +132,4 @@ TEN-005 should narrow from a whole-graph DAG to declared structural relations:
 
 ## RFC-007.P15 Outcome
 
-Proposed. Follow-on work is the feature proposal, spec deltas, implementation plan, and AFK task queue for the state model, operational relations, supersession transaction, edge query/traversal primitives, CLI/API/docs sweep, and validation.
+Implemented by the archived `edge-relation-families` feature. The shipped system uses `state`, declared acyclic relation families, core supersession, direct edge predicates, relation-scoped traversal, and an advisory annotation catalog.

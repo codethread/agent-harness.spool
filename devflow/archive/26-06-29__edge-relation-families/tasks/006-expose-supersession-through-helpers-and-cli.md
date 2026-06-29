@@ -32,7 +32,7 @@ Expose the core supersession operation through trusted Clojure helpers, JSON soc
 
 ## ERF-TASK-006.P5 References
 
-- **ERF-TASK-006.REF1:** `devflow/feat/edge-relation-families/specs/cli.delta.md`
-- **ERF-TASK-006.REF2:** `devflow/feat/edge-relation-families/specs/repl-api.delta.md`
+- **ERF-TASK-006.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/cli.delta.md`
+- **ERF-TASK-006.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/repl-api.delta.md`
 - **ERF-TASK-006.REF3:** `src/skein/repl.clj`
 - **ERF-TASK-006.REF4:** `cli/internal/command/command.go`

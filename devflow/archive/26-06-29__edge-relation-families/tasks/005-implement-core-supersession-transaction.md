@@ -34,6 +34,6 @@ Implement supersession as a storage/weaver transaction that owns replacement lif
 
 ## ERF-TASK-005.P5 References
 
-- **ERF-TASK-005.REF1:** `devflow/feat/edge-relation-families/specs/strand-model.delta.md`
-- **ERF-TASK-005.REF2:** `devflow/feat/edge-relation-families/specs/daemon-runtime.delta.md`
-- **ERF-TASK-005.REF3:** `devflow/feat/edge-relation-families/edge-relation-families.plan.md`
+- **ERF-TASK-005.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/strand-model.delta.md`
+- **ERF-TASK-005.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/daemon-runtime.delta.md`
+- **ERF-TASK-005.REF3:** `devflow/archive/26-06-29__edge-relation-families/edge-relation-families.plan.md`

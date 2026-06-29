@@ -32,6 +32,6 @@ Replace the Clojure storage/query/weaver lifecycle model with `state`, without a
 
 ## ERF-TASK-001.P5 References
 
-- **ERF-TASK-001.REF1:** `devflow/feat/edge-relation-families/proposal.md`
-- **ERF-TASK-001.REF2:** `devflow/feat/edge-relation-families/specs/strand-model.delta.md`
-- **ERF-TASK-001.REF3:** `devflow/feat/edge-relation-families/edge-relation-families.plan.md`
+- **ERF-TASK-001.REF1:** `devflow/archive/26-06-29__edge-relation-families/proposal.md`
+- **ERF-TASK-001.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/strand-model.delta.md`
+- **ERF-TASK-001.REF3:** `devflow/archive/26-06-29__edge-relation-families/edge-relation-families.plan.md`

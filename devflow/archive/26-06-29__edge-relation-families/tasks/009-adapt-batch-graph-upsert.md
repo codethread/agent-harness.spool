@@ -33,7 +33,7 @@ After the batch graph upsert feature has landed, update its shipped code, tests,
 
 ## ERF-TASK-009.P5 References
 
-- **ERF-TASK-009.REF1:** `devflow/feat/edge-relation-families/specs/strand-model.delta.md`
-- **ERF-TASK-009.REF2:** `devflow/feat/edge-relation-families/specs/repl-api.delta.md`
-- **ERF-TASK-009.REF3:** `devflow/feat/edge-relation-families/specs/daemon-runtime.delta.md`
+- **ERF-TASK-009.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/strand-model.delta.md`
+- **ERF-TASK-009.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/repl-api.delta.md`
+- **ERF-TASK-009.REF3:** `devflow/archive/26-06-29__edge-relation-families/specs/daemon-runtime.delta.md`
 - **ERF-TASK-009.REF4:** Batch graph upsert implementation and tests after that feature lands.

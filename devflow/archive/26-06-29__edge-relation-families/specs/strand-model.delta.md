@@ -3,8 +3,8 @@
 **Document ID:** `ERF-DELTA-001`
 **Root spec:** [strand-model.md](../../../specs/strand-model.md)
 **Feature:** [../proposal.md](../proposal.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-28
+**Status:** Merged
+**Last Updated:** 2026-06-29
 
 ## ERF-DELTA-001.P1 Summary
 

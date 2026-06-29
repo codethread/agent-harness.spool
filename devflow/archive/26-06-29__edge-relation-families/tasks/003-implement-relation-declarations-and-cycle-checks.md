@@ -32,6 +32,6 @@ Replace closed edge-type validation and global DAG checks with open relation nam
 
 ## ERF-TASK-003.P5 References
 
-- **ERF-TASK-003.REF1:** `devflow/feat/edge-relation-families/specs/strand-model.delta.md`
-- **ERF-TASK-003.REF2:** `devflow/feat/edge-relation-families/specs/daemon-runtime.delta.md`
+- **ERF-TASK-003.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/strand-model.delta.md`
+- **ERF-TASK-003.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/daemon-runtime.delta.md`
 - **ERF-TASK-003.REF3:** `src/skein/db.clj`

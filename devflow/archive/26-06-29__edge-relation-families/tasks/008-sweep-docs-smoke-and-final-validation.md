@@ -35,7 +35,7 @@ Finish the feature by updating current specs/docs/smoke examples, running full v
 
 ## ERF-TASK-008.P5 References
 
-- **ERF-TASK-008.REF1:** `devflow/feat/edge-relation-families/edge-relation-families.plan.md`
-- **ERF-TASK-008.REF2:** `devflow/feat/edge-relation-families/specs/`
-- **ERF-TASK-008.REF3:** `devflow/rfcs/2026-06-28-edge-relation-families.md`
+- **ERF-TASK-008.REF1:** `devflow/archive/26-06-29__edge-relation-families/edge-relation-families.plan.md`
+- **ERF-TASK-008.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/`
+- **ERF-TASK-008.REF3:** `devflow/archive/26-06-29__edge-relation-families/rfcs/2026-06-28-edge-relation-families.md`
 - **ERF-TASK-008.REF4:** `AGENTS.md`

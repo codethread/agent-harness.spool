@@ -31,6 +31,6 @@ Ship the source-visible annotation relation catalog and align active devflow fea
 
 ## ERF-TASK-007.P5 References
 
-- **ERF-TASK-007.REF1:** `devflow/feat/edge-relation-families/specs/repl-api.delta.md`
-- **ERF-TASK-007.REF2:** `devflow/feat/edge-relation-families/specs/daemon-runtime.delta.md`
-- **ERF-TASK-007.REF3:** `devflow/feat/edge-relation-families/tasks/009-adapt-batch-graph-upsert.md`
+- **ERF-TASK-007.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/repl-api.delta.md`
+- **ERF-TASK-007.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/daemon-runtime.delta.md`
+- **ERF-TASK-007.REF3:** `devflow/archive/26-06-29__edge-relation-families/tasks/009-adapt-batch-graph-upsert.md`

@@ -3,8 +3,8 @@
 **Document ID:** `ERF-DELTA-004`
 **Root spec:** [cli.md](../../../specs/cli.md)
 **Feature:** [../proposal.md](../proposal.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-28
+**Status:** Merged
+**Last Updated:** 2026-06-29
 
 ## ERF-DELTA-004.P1 Summary
 

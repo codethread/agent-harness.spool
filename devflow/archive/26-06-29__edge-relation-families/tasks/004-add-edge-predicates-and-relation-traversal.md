@@ -33,7 +33,7 @@ Add direct relationship-aware query predicates and relation-scoped traversal hel
 
 ## ERF-TASK-004.P5 References
 
-- **ERF-TASK-004.REF1:** `devflow/feat/edge-relation-families/specs/strand-model.delta.md`
-- **ERF-TASK-004.REF2:** `devflow/feat/edge-relation-families/specs/repl-api.delta.md`
+- **ERF-TASK-004.REF1:** `devflow/archive/26-06-29__edge-relation-families/specs/strand-model.delta.md`
+- **ERF-TASK-004.REF2:** `devflow/archive/26-06-29__edge-relation-families/specs/repl-api.delta.md`
 - **ERF-TASK-004.REF3:** `src/skein/query.clj`
 - **ERF-TASK-004.REF4:** `src/skein/graph/alpha.clj`
