@@ -1,6 +1,7 @@
 (ns skein.alpha-test
   (:require [skein.batch.alpha :as batch]
             [skein.graph.alpha :as graph]
+            [skein.hooks.alpha :as hooks]
             [skein.views.alpha :as views]
             [clojure.test :refer [deftest is]]
             [skein.client]
@@ -29,6 +30,9 @@
 (defn test-view [{:keys [params]}]
   {:alpha-view params})
 
+(defn test-hook [_ctx]
+  :ok)
+
 (deftest alpha-helpers-route-directly-inside-daemon-runtime
   (with-runtime
     (fn [rt]
@@ -48,6 +52,19 @@
                (views/views)))
         (is (= {:alpha-view {:owner "agent"}}
                (views/view! 'daily {:owner "agent"})))
+        (is (= {:key :policy
+                :types #{:payload/received}
+                :fn 'skein.alpha-test/test-hook
+                :order 5
+                :metadata {:doc "policy"}}
+               (hooks/register! :policy #{:payload/received} 'skein.alpha-test/test-hook {:order 5 :doc "policy"})))
+        (is (= [{:key :policy
+                 :types #{:payload/received}
+                 :fn 'skein.alpha-test/test-hook
+                 :order 5
+                 :metadata {:doc "policy"}}]
+               (hooks/hooks)))
+        (is (= :policy (hooks/unregister! :policy)))
         (let [batch-result (batch/apply! {:refs {:feature (:id feature)
                                                  :task (:id task)}
                                           :strands [{:ref :task
@@ -91,7 +108,16 @@
             (is (= (:id created) (get-in result [:refs :connected-task])))
             (is (= {:title "Connected task" :state "active" :attributes {:owner "connected"}}
                    (select-keys created [:title :state :attributes])))
-            (is (= [(:id created)] (mapv :id (api/list rt))))))))))
+            (is (= [(:id created)] (mapv :id (api/list rt))))
+            (is (= {:key :connected-policy
+                    :types #{:payload/received}
+                    :fn 'skein.alpha-test/test-hook
+                    :order 3
+                    :metadata {}}
+                   (hooks/register! :connected-policy #{:payload/received} 'skein.alpha-test/test-hook {:order 3})))
+            (is (= [:connected-policy] (mapv :key (api/hooks rt))))
+            (is (= :connected-policy (hooks/unregister! :connected-policy)))
+            (is (= [] (api/hooks rt)))))))))
 
 (deftest alpha-helpers-route-through-connected-helper-context
   (with-redefs [runtime/current-runtime (atom nil)

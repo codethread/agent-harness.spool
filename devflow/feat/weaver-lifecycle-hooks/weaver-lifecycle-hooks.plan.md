@@ -98,3 +98,8 @@ Append notes here. Do not rewrite earlier notes.
 
 - Created eight AFK tasks covering registry/helper surface, hook runner and normalization, simple mutation gates, supersession seam, graph batch gate, pattern weave gate, socket payload hooks, and final spec promotion/validation.
 - Review found no remaining blockers after context-key amendments to Tasks 3-6.
+
+### WLH-PLAN-001.DN2 Task 1 implementation — 2026-06-29
+
+- Added hook registry state/API/helpers without mutation invocation. Registry stores resolved callables internally and returns data-first introspection only.
+- Validation passed: `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test`, `(cd cli && go test ./...)`, and `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke`.

@@ -151,6 +151,7 @@
                          :view-registry (atom {})
                          :pattern-registry (atom {})
                          :op-registry (atom {})
+                         :hook-registry (atom {})
                          :approved-lib-sync-state (atom {})
                          :module-use-state (atom {})
                          :library-classloader (clojure.lang.DynamicClassLoader.

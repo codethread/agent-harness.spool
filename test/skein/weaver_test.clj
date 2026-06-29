@@ -98,6 +98,11 @@
 
 (def not-callable-event-handler 42)
 
+(defn capture-hook [_ctx]
+  :ok)
+
+(def not-callable-hook 42)
+
 (defn replacement-view [{:keys [params]}]
   {:view :replacement :params params})
 
@@ -473,6 +478,56 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"callable" (api/register-event-handler! rt :bad #{:x} 'skein.weaver-test/not-callable-event-handler {})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"metadata" (api/register-event-handler! rt :bad #{:x} 'skein.weaver-test/capture-event :opaque)))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Event requires key" (api/enqueue-event! rt {:event/type :x :event/id "missing-shape"}))))))
+
+(deftest weaver-hook-registry-registers-replaces-orders-and-unregisters
+  (with-runtime
+    (fn [rt _]
+      (let [entry (api/register-hook! rt :capture #{:payload/received} 'skein.weaver-test/capture-hook {:doc "Capture"})]
+        (is (= {:key :capture
+                :types #{:payload/received}
+                :fn 'skein.weaver-test/capture-hook
+                :order 0
+                :metadata {:doc "Capture"}}
+               entry))
+        (is (= [entry] (api/hooks rt)))
+        (is (not (contains? (first (api/hooks rt)) :fn-value)))
+        (is (ifn? (:fn-value (get @(:hook-registry rt) :capture))))
+        (let [replacement (api/register-hook! rt :capture #{:strand/add-before-commit} 'skein.weaver-test/capture-hook {:order 10 :doc "Replaced"})
+              early (api/register-hook! rt "early" #{:payload/received} 'skein.weaver-test/capture-hook {:order -1})
+              peer-a (api/register-hook! rt :a #{:payload/received} 'skein.weaver-test/capture-hook {})
+              peer-b (api/register-hook! rt :b #{:payload/received} 'skein.weaver-test/capture-hook {})]
+          (is (= ["early" :a :b :capture] (mapv :key (api/hooks rt))))
+          (is (= [early peer-a peer-b replacement] (api/hooks rt)))
+          (is (= :a (api/unregister-hook! rt :a)))
+          (is (= ["early" :b :capture] (mapv :key (api/hooks rt)))))))))
+
+(deftest weaver-hook-registry-validates-inputs
+  (with-runtime
+    (fn [rt _]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"key" (api/register-hook! rt [] #{:x} 'skein.weaver-test/capture-hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"non-empty" (api/register-hook! rt :bad #{} 'skein.weaver-test/capture-hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"set" (api/register-hook! rt :bad [:x] 'skein.weaver-test/capture-hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"keywords" (api/register-hook! rt :bad #{"x"} 'skein.weaver-test/capture-hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"fully qualified" (api/register-hook! rt :bad #{:x} 'capture-hook {})))
+      (is (thrown? Throwable (api/register-hook! rt :bad #{:x} 'missing.ns/hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"callable" (api/register-hook! rt :bad #{:x} 'skein.weaver-test/not-callable-hook {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"opts" (api/register-hook! rt :bad #{:x} 'skein.weaver-test/capture-hook :opaque)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"data-first" (api/register-hook! rt :bad #{:x} 'skein.weaver-test/capture-hook {:opaque (Object.)})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"integer" (api/register-hook! rt :bad #{:x} 'skein.weaver-test/capture-hook {:order 1.5}))))))
+
+(deftest reload-config-clears-and-reinstalls-hooks
+  (with-runtime
+    (fn [rt _]
+      (let [init (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
+        (api/register-hook! rt :stale #{:payload/received} 'skein.weaver-test/capture-hook {})
+        (spit init "(require '[skein.hooks.alpha :as hooks])\n(hooks/register! :fresh #{:payload/received} 'skein.weaver-test/capture-hook {:order 2})\n")
+        (api/reload-config! rt)
+        (is (= [{:key :fresh
+                 :types #{:payload/received}
+                 :fn 'skein.weaver-test/capture-hook
+                 :order 2
+                 :metadata {}}]
+               (api/hooks rt)))))))
 
 (deftest weaver-query-registry-add-load-list-and-resolve
   (with-runtime

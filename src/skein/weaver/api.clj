@@ -43,6 +43,9 @@
 (defn- op-registry [runtime]
   (:op-registry runtime))
 
+(defn- hook-registry [runtime]
+  (:hook-registry runtime))
+
 (defn- approved-lib-sync-state [runtime]
   (:approved-lib-sync-state runtime))
 
@@ -210,6 +213,7 @@
       (reset! (view-registry runtime) {})
       (reset! (pattern-registry runtime) {})
       (reset! (op-registry runtime) {})
+      (reset! (hook-registry runtime) {})
       (register-built-in-ops! runtime)
       (runtime/restart-event-system! runtime)
       (let [result (with-library-classloader runtime #(load-file canonical-file))]
@@ -876,6 +880,76 @@
                   runtime
                   #((requiring-resolve fn-sym) {:input input}))]
       (normalize (db/add-strand-batch! (ds runtime) batch)))))
+
+(declare data-first-value?)
+
+(defn- validate-hook-key! [key]
+  (when-not (or (keyword? key) (symbol? key) (string? key))
+    (throw (ex-info "Hook key must be a keyword, symbol, or string" {:key key})))
+  (when (and (string? key) (str/blank? key))
+    (throw (ex-info "Hook key string must be non-blank" {:key key})))
+  key)
+
+(defn- validate-hook-types! [types]
+  (when-not (set? types)
+    (throw (ex-info "Hook types must be a set" {:types types})))
+  (when-not (seq types)
+    (throw (ex-info "Hook types must be non-empty" {:types types})))
+  (doseq [type types]
+    (when-not (keyword? type)
+      (throw (ex-info "Hook types must be keywords" {:type type :types types}))))
+  types)
+
+(defn- resolve-hook-fn! [runtime fn-sym]
+  (when-not (and (symbol? fn-sym) (namespace fn-sym))
+    (throw (ex-info "Hook function must be a fully qualified symbol" {:fn fn-sym})))
+  (let [resolved (with-library-classloader runtime #(requiring-resolve fn-sym))
+        value (if (var? resolved) @resolved resolved)]
+    (when-not (ifn? value)
+      (throw (ex-info "Hook symbol must resolve to a callable value" {:fn fn-sym :resolved-class (str (class value))})))
+    resolved))
+
+(defn- validate-hook-opts! [opts]
+  (let [opts (or opts {})]
+    (when-not (map? opts)
+      (throw (ex-info "Hook opts must be a map" {:opts opts})))
+    (when-not (data-first-value? opts)
+      (throw (ex-info "Hook opts must contain only data-first values" {:opts opts})))
+    (when (and (contains? opts :order) (not (integer? (:order opts))))
+      (throw (ex-info "Hook :order must be an integer" {:order (:order opts)})))
+    opts))
+
+(defn register-hook!
+  "Register a trusted lifecycle hook for selected hook types."
+  ([key types fn-sym]
+   (register-hook! (current-runtime) key types fn-sym {}))
+  ([a b c d]
+   (if (runtime? a)
+     (register-hook! a b c d {})
+     (register-hook! (current-runtime) a b c d)))
+  ([runtime key types fn-sym opts]
+   (let [opts (validate-hook-opts! opts)
+         entry {:key (validate-hook-key! key)
+                :types (validate-hook-types! types)
+                :fn fn-sym
+                :fn-value (resolve-hook-fn! runtime fn-sym)
+                :order (get opts :order 0)
+                :metadata (dissoc opts :order)}]
+     (swap! (hook-registry runtime) assoc (:key entry) entry)
+     (dissoc entry :fn-value))))
+
+(defn unregister-hook!
+  "Remove a registered lifecycle hook by key and return that key."
+  [runtime key]
+  (let [key (validate-hook-key! key)]
+    (swap! (hook-registry runtime) dissoc key)
+    key))
+
+(defn hooks
+  "Return lifecycle hook registry entries in deterministic execution order."
+  [runtime]
+  (mapv #(dissoc % :fn-value)
+        (sort-by (juxt :order (comp pr-str :key)) (vals @(hook-registry runtime)))))
 
 (defn- validate-event-handler-key! [key]
   (when-not (or (keyword? key) (symbol? key) (string? key))

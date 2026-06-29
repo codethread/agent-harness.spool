@@ -41,6 +41,9 @@
    :unregister-event-handler! 'skein.weaver.api/unregister-event-handler!
    :event-handlers 'skein.weaver.api/event-handlers
    :recent-event-failures 'skein.weaver.api/recent-event-failures
+   :register-hook! 'skein.weaver.api/register-hook!
+   :unregister-hook! 'skein.weaver.api/unregister-hook!
+   :hooks 'skein.weaver.api/hooks
    :register-pattern! 'skein.weaver.api/register-pattern!
    :register-op! 'skein.weaver.api/register-op!
    :ops 'skein.weaver.api/ops
