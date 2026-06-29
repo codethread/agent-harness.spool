@@ -115,3 +115,7 @@ Outcome: Clojure and Go tests cover repo discovery/init/layering/overrides, smok
 ### PLAN-RepoFirstConfig-001.DN5 Task 1 completed — 2026-06-29
 
 - Completed focused Go coverage for explicit/no-flag world selection: parent `.skein` discovery from subdirectories, no-world remediation, incomplete discovered lifecycle remediation, Git-root implicit init without nested `.git`, outside-Git cwd init, `--source`/`SKEIN_SOURCE`/cwd source precedence, and no-overwrite bootstrap behavior. Weaver lifecycle errors for discovered worlds missing local source now name the selected config-dir and direct users to `strand init --source <skein-source>` or `SKEIN_SOURCE`.
+
+### PLAN-RepoFirstConfig-001.DN6 Task 2 completed — 2026-06-29
+
+- Clojure world construction now requires an explicit selected config-dir and no-arg `connect!` fails loudly, preventing helper code from silently targeting XDG global state. CLI-launched helper REPL flows continue to pass the selected config-dir into `skein.repl`, and Clojure tests retain deterministic disposable world construction via `(skein.weaver.config/world config-dir)`. Clojure client coverage now exercises `call-world`/selected config-dir metadata discovery; old database-path client wrappers were removed rather than retained as failing compatibility shims.

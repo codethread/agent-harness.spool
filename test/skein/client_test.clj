@@ -20,13 +20,6 @@
                       (make-array java.nio.file.attribute.FileAttribute 0)))]
     (daemon-config/world (.getCanonicalPath dir))))
 
-(defn with-default-world [world f]
-  (let [real-world daemon-config/world]
-    (with-redefs [daemon-config/world (fn
-                                        ([] world)
-                                        ([config-dir] (real-world config-dir)))]
-      (f))))
-
 (defn client-test-view [{:keys [params]}]
   {:client-view params})
 
@@ -42,40 +35,44 @@
 
 (defn with-runtime [f]
   (let [db-file (db-test/temp-db-file)
-        world (temp-world)]
-    (with-default-world world
-      (fn []
-        (let [rt (runtime/start! db-file {:world world})]
-          (try
-            (f rt db-file)
-            (finally
-              (runtime/stop! rt)
-              (db-test/delete-sqlite-family! db-file)
-              (delete-tree! (java.io.File. (:config-dir world))))))))))
+        world (temp-world)
+        rt (runtime/start! db-file {:world world})]
+    (try
+      (f rt world db-file)
+      (finally
+        (runtime/stop! rt)
+        (db-test/delete-sqlite-family! db-file)
+        (delete-tree! (java.io.File. (:config-dir world)))))))
+
+(defn call-world [world op & args]
+  (apply client/call-world (:config-dir world) {} op args))
+
+(defn call-world-with-opts [world opts op & args]
+  (apply client/call-world (:config-dir world) opts op args))
 
 (deftest client-calls-running-daemon-and-returns-clojure-data
   (with-runtime
-    (fn [_ db-file]
-      (is (= {:database "initialized"} (client/init db-file)))
-      (let [task (client/add db-file {:title "Bridge" :attributes {:owner "agent"}})]
+    (fn [_ world db-file]
+      (is (= {:database "initialized"} (call-world world :init)))
+      (let [task (call-world world :add {:title "Bridge" :attributes {:owner "agent"}})]
         (is (= "Bridge" (:title task)))
         (is (= {:owner "agent"} (:attributes task)))
-        (is (= task (client/show db-file (:id task))))
-        (is (= [(:id task)] (mapv :id (client/list db-file))))
-        (is (= [(:id task)] (mapv :id (client/ready db-file))))))))
+        (is (= task (call-world world :show (:id task))))
+        (is (= [(:id task)] (mapv :id (call-world world :list))))
+        (is (= [(:id task)] (mapv :id (call-world world :ready))))))))
 
 (deftest client-supersede-routes-to-weaver-and-preserves-domain-errors
   (with-runtime
-    (fn [_ db-file]
-      (client/init db-file)
-      (let [old (client/add db-file {:title "Old"})
-            replacement (client/add db-file {:title "New"})
-            result (client/supersede db-file (:id old) (:id replacement))]
+    (fn [_ world db-file]
+      (call-world world :init)
+      (let [old (call-world world :add {:title "Old"})
+            replacement (call-world world :add {:title "New"})
+            result (call-world world :supersede (:id old) (:id replacement))]
         (is (= "replaced" (get-in result [:old :after :state])))
         (is (= [(:id replacement) (:id old) "supersedes"]
                ((juxt :from_strand_id :to_strand_id :edge_type) (:supersedes-edge result))))
         (try
-          (client/supersede db-file (:id old) (:id replacement))
+          (call-world world :supersede (:id old) (:id replacement))
           (is false "expected supersession domain error")
           (catch clojure.lang.ExceptionInfo e
             (is (= "Weaver API call failed" (ex-message e)))
@@ -83,28 +80,28 @@
 
 (deftest client-query-registry-calls-share-daemon-state
   (with-runtime
-    (fn [_ db-file]
+    (fn [_ world db-file]
       (let [query-def {:params [:owner]
                        :where [:= [:attr :owner] [:param :owner]]}]
-        (is (= {"mine" query-def} (client/register-query db-file :mine query-def)))
-        (is (= query-def (client/resolve-query db-file 'mine)))
-        (is (= {"mine" query-def} (client/queries db-file)))
+        (is (= {"mine" query-def} (call-world world :register-query :mine query-def)))
+        (is (= query-def (call-world world :resolve-query 'mine)))
+        (is (= {"mine" query-def} (call-world world :queries)))
         (is (= {"done" [:= :state "closed"]}
-               (client/load-queries db-file {'done [:= :state "closed"]})))
+               (call-world world :load-queries {'done [:= :state "closed"]})))
         (is (= {"done" [:= :state "closed"]
                 "mine" query-def}
-               (client/queries db-file)))))))
+               (call-world world :queries)))))))
 
 (deftest client-mutations-thread-nrepl-request-context-to-hooks
   (with-runtime
-    (fn [rt db-file]
-      (client/init db-file)
+    (fn [rt world db-file]
+      (call-world world :init)
       (reset! client-hook-contexts [])
       (api/register-hook! rt :client-normalize #{:attributes/normalize} 'skein.client-test/client-normalize-hook {})
       (api/register-hook! rt :client-add #{:strand/add-before-commit} 'skein.client-test/client-capture-hook {})
       (api/register-hook! rt :client-update #{:strand/update-before-commit} 'skein.client-test/client-capture-hook {})
-      (let [created (client/add db-file {:title "Hooked client" :attributes {:owner "agent"}})]
-        (client/update db-file (:id created) {:attributes {:owner "agent" :phase "updated"}}))
+      (let [created (call-world world :add {:title "Hooked client" :attributes {:owner "agent"}})]
+        (call-world world :update (:id created) {:attributes {:owner "agent" :phase "updated"}}))
       (is (= [:client-normalize :client-add :client-normalize :client-update]
              (mapv :hook/key @client-hook-contexts)))
       (is (= #{:nrepl} (set (map :request/source @client-hook-contexts))))
@@ -113,35 +110,35 @@
 
 (deftest client-routes-runtime-transformation-operations
   (with-runtime
-    (fn [_ db-file]
-      (client/init db-file)
-      (let [agent (client/add db-file {:title "Agent" :attributes {:owner "agent"}})]
+    (fn [_ world db-file]
+      (call-world world :init)
+      (let [agent (call-world world :add {:title "Agent" :attributes {:owner "agent"}})]
         (is (= {"mine" [:= [:attr :owner] "agent"]}
-               (client/register-query db-file 'mine [:= [:attr :owner] "agent"])))
-        (is (= [(:id agent)] (client/call db-file {} :query-ids 'mine {})))
-        (is (= [agent] (client/call db-file {} :strands-by-ids [(:id agent)])))
-        (is (= [] (client/call db-file {} :ancestor-root-ids [(:id agent)] {:where [:= [:attr :kind] "feature"]})))
+               (call-world world :register-query 'mine [:= [:attr :owner] "agent"])))
+        (is (= [(:id agent)] (call-world world :query-ids 'mine {})))
+        (is (= [agent] (call-world world :strands-by-ids [(:id agent)])))
+        (is (= [] (call-world world :ancestor-root-ids [(:id agent)] {:where [:= [:attr :kind] "feature"]})))
         (is (= {:root-ids [(:id agent)] :strands [agent] :edges []}
-               (client/call db-file {} :subgraph [(:id agent)])))
+               (call-world world :subgraph [(:id agent)])))
         (is (= {:name "client" :fn 'skein.client-test/client-test-view}
-               (client/call db-file {} :register-view! 'client 'skein.client-test/client-test-view)))
+               (call-world world :register-view! 'client 'skein.client-test/client-test-view)))
         (is (= [{:name "client" :fn 'skein.client-test/client-test-view}]
-               (client/call db-file {} :views)))
+               (call-world world :views)))
         (is (= {:client-view {:ok true}}
-               (client/call db-file {} :view! 'client {:ok true})))))))
+               (call-world world :view! 'client {:ok true})))))))
 
 (deftest client-query-registry-preserves-domain-errors
   (with-runtime
-    (fn [_ db-file]
+    (fn [_ world db-file]
       (try
-        (client/resolve-query db-file :missing)
+        (call-world world :resolve-query :missing)
         (is false "expected missing query error")
         (catch clojure.lang.ExceptionInfo e
           (is (= "Weaver API call failed" (ex-message e)))
           (is (= "Query not found" (:weaver-message (ex-data e))))
           (is (= :missing (get-in (ex-data e) [:weaver-data :query])))))
       (try
-        (client/load-queries db-file {"mine" [:= :state "active"]})
+        (call-world world :load-queries {"mine" [:= :state "active"]})
         (is false "expected invalid query name error")
         (catch clojure.lang.ExceptionInfo e
           (is (= "Weaver API call failed" (ex-message e)))
@@ -151,20 +148,18 @@
   (let [db-file (db-test/temp-db-file)
         canonical (metadata/canonical-db-path db-file)
         world (temp-world)]
-    (with-default-world world
-      (fn []
-        (try
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                #"metadata is missing or stale"
-                                (client/list db-file)))
-          (metadata/publish! {:pid 1 :canonical-db-path canonical :state-dir (:state-dir world)})
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                #"metadata is missing or stale"
-                                (client/list db-file)))
-          (finally
-            (metadata/delete! world)
-            (db-test/delete-sqlite-family! db-file)
-            (delete-tree! (java.io.File. (:config-dir world)))))))))
+    (try
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"metadata is missing or stale"
+                            (call-world world :list)))
+      (metadata/publish! {:pid 1 :canonical-db-path canonical :state-dir (:state-dir world)})
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"metadata is missing or stale"
+                            (call-world world :list)))
+      (finally
+        (metadata/delete! world)
+        (db-test/delete-sqlite-family! db-file)
+        (delete-tree! (java.io.File. (:config-dir world)))))))
 
 (deftest client-fails-loudly-for-unreachable-and-non-local-endpoints
   (let [db-file (db-test/temp-db-file)
@@ -176,37 +171,35 @@
                                        :canonical-db-path canonical
                                        :nonce "unreachable"
                                        :world world})]
-    (with-default-world world
-      (fn []
-        (try
-          (metadata/publish! meta)
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                #"Unable to connect"
-                                (client/list db-file {:timeout-ms 100})))
-          (metadata/publish! (assoc-in meta [:endpoint :host] "203.0.113.1"))
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                #"not loopback"
-                                (client/list db-file {:timeout-ms 100})))
-          (finally
-            (metadata/delete! world)
-            (db-test/delete-sqlite-family! db-file)
-            (delete-tree! (java.io.File. (:config-dir world)))))))))
+    (try
+      (metadata/publish! meta)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unable to connect"
+                            (call-world-with-opts world {:timeout-ms 100} :list)))
+      (metadata/publish! (assoc-in meta [:endpoint :host] "203.0.113.1"))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"not loopback"
+                            (call-world-with-opts world {:timeout-ms 100} :list)))
+      (finally
+        (metadata/delete! world)
+        (db-test/delete-sqlite-family! db-file)
+        (delete-tree! (java.io.File. (:config-dir world)))))))
 
 (deftest client-fails-loudly-for-wrong-daemon-identity
   (with-runtime
-    (fn [rt db-file]
+    (fn [rt world db-file]
       (let [bad (assoc (:metadata rt) :nonce "wrong")]
         (metadata/publish! bad)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"identity does not match"
-                              (client/list db-file)))))))
+                              (call-world world :list)))))))
 
 (deftest client-fails-loudly-for-daemon-thrown-domain-errors
   (with-runtime
-    (fn [_ db-file]
-      (client/init db-file)
+    (fn [_ world db-file]
+      (call-world world :init)
       (try
-        (client/add db-file {:title ""})
+        (call-world world :add {:title ""})
         (is false "expected daemon domain error")
         (catch clojure.lang.ExceptionInfo e
           (is (= "Weaver API call failed" (ex-message e)))
@@ -216,11 +209,11 @@
 
 (deftest client-fails-loudly-for-timeouts
   (with-runtime
-    (fn [_ db-file]
+    (fn [_ world db-file]
       (with-redefs [nrepl/client (fn [conn _timeout-ms] conn)
                     nrepl/client-session (fn [client _timeout-ms] client)
                     nrepl/message (fn [_session _message]
                                     (throw (java.net.SocketTimeoutException. "timed out")))]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"timed out"
-                              (client/list db-file {:timeout-ms 50})))))))
+                              (call-world-with-opts world {:timeout-ms 50} :list)))))))

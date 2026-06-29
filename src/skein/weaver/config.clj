@@ -1,13 +1,6 @@
 (ns skein.weaver.config
-  "Resolve Skein weaver world directories from XDG defaults or an explicit config dir."
+  "Resolve Skein weaver world directories from an explicit selected config dir."
   (:require [clojure.java.io :as io]))
-
-(defn- env-or [k fallback]
-  (let [v (System/getenv k)]
-    (if (seq v) v fallback)))
-
-(defn- user-home []
-  (System/getProperty "user.home"))
 
 (defn- canonical-path [file]
   (.getCanonicalPath (io/file file)))
@@ -20,21 +13,19 @@
    :db-path (str data-dir "/skein.sqlite")})
 
 (defn world
-  "Return the config, state, and data paths for a weaver world.
+  "Return the config, state, and data paths for an explicit weaver world.
 
-  With no argument, uses XDG base directories under the user's home. With
-  `config-dir`, derives isolated state and data directories below that canonical
-  directory."
+  `config-dir` is the selected Skein world directory supplied by the CLI or by
+  tests/helpers that intentionally construct disposable worlds. State and data
+  directories are derived below the canonical config directory. Calling without a
+  config dir fails loudly so Clojure helpers do not silently target XDG global
+  state when ordinary CLI use is repo-first."
   ([]
-   (let [home (user-home)
-         config-home (env-or "XDG_CONFIG_HOME" (str home "/.config"))
-         state-home (env-or "XDG_STATE_HOME" (str home "/.local/state"))
-         data-home (env-or "XDG_DATA_HOME" (str home "/.local/share"))]
-     (world-map (str config-home "/skein")
-                (str state-home "/skein")
-                (str data-home "/skein"))))
+   (throw (ex-info "No Skein config dir selected; pass an explicit config-dir from the CLI, repo discovery, or a disposable test world"
+                   {:code :skein.config/no-selected-world})))
   ([config-dir]
-   (if config-dir
-     (let [dir (canonical-path config-dir)]
-       (world-map dir (str dir "/state") (str dir "/data")))
-     (world))))
+   (when-not (seq (str config-dir))
+     (throw (ex-info "No Skein config dir selected; pass an explicit config-dir from the CLI, repo discovery, or a disposable test world"
+                     {:code :skein.config/no-selected-world})))
+   (let [dir (canonical-path config-dir)]
+     (world-map dir (str dir "/state") (str dir "/data")))))

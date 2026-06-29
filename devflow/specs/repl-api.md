@@ -39,7 +39,7 @@ weave!
 
 ## SPEC-003.P3 Contracts
 
-- **SPEC-003.C1:** `connect!` selects one active weaver connection by Skein world. With no arguments it selects the default weaver world; with a config-dir argument it selects that explicit weaver world. It never accepts a database path.
+- **SPEC-003.C1:** `connect!` selects one active weaver connection by Skein world. It requires an explicit selected config-dir, either passed by `strand weaver repl` after CLI world resolution or supplied directly by standalone Clojure/test helpers. It never accepts a database path and no longer silently falls back to an XDG global world.
 - **SPEC-003.C2:** `strand weaver repl` preloads `skein.repl`, calls `connect!` for the selected weaver world, and presents the prompt.
 - **SPEC-003.C3:** `strand weaver repl --stdin` uses the same preloaded, connected helper context, reads forms from stdin, evaluates them in order, prints one direct normal Clojure result per top-level form, and exits. Callers that want one machine-readable payload should wrap work in one top-level `do` or `let`.
 - **SPEC-003.C4:** Helpers that need a weaver fail before connection with remediation that points to `strand weaver repl` or `connect!`; weaver/transport failures surface loudly as Clojure exceptions.

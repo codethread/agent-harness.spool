@@ -219,16 +219,12 @@
                                  "options" {}})))
 
 (deftest weaver-world-resolution
-  (let [home (System/getProperty "user.home")
-        config-home (or (System/getenv "XDG_CONFIG_HOME") (str home "/.config"))
-        state-home (or (System/getenv "XDG_STATE_HOME") (str home "/.local/state"))
-        data-home (or (System/getenv "XDG_DATA_HOME") (str home "/.local/share"))]
-    (is (= {:config-dir (str config-home "/skein")
-            :state-dir (str state-home "/skein")
-            :data-dir (str data-home "/skein")
-            :config-file (str config-home "/skein/config.json")
-            :db-path (str data-home "/skein/skein.sqlite")}
-           (weaver-config/world))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                        #"No Skein config dir selected"
+                        (weaver-config/world)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                        #"No Skein config dir selected"
+                        (weaver-config/world nil)))
   (let [dir (.getCanonicalPath (.toFile (java.nio.file.Files/createTempDirectory "tdx" (make-array java.nio.file.attribute.FileAttribute 0))))]
     (is (= {:config-dir dir
             :state-dir (str dir "/state")

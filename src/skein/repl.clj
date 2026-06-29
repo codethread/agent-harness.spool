@@ -13,20 +13,18 @@
             [skein.query :as query]))
 
 (def ^:private no-connection ::no-connection)
-(def ^:private default-world ::default-world)
 (defonce ^:private active-config-dir (atom no-connection))
 
 (defn connected-config-dir
   "Return the selected weaver config directory for connected helper routing.
 
-  Returns nil when connected to the default world. Throws with remediation when
-  no helper connection has been selected. Alpha helper namespaces use this to
-  route calls from connected REPL clients to the active weaver."
+  Throws with remediation when no helper connection has been selected. Alpha
+  helper namespaces use this to route calls from connected REPL clients to the
+  active weaver selected by config dir."
   []
   (case @active-config-dir
-    ::no-connection (throw (ex-info "No Skein weaver world is connected. Start a connected helper REPL with `strand weaver repl`, or call (connect!) / (connect! \"/path/to/config-dir\") before using skein.repl helpers."
+    ::no-connection (throw (ex-info "No Skein weaver world is connected. Start a connected helper REPL with `strand weaver repl`, or call (connect! \"/path/to/config-dir\") before using skein.repl helpers."
                                    {:helper 'connect!}))
-    ::default-world nil
     @active-config-dir))
 
 (defn- config-dir []
@@ -35,24 +33,20 @@
 (defn connect!
   "Select the active weaver world for helper calls.
 
-  With no arguments, connects to the default world. With `config-dir`, connects
-  to that explicit daemon config directory. Fails loudly if given a database file
-  or if the selected weaver world is not reachable. Returns the normalized config
-  directory path for the selected world."
+  Requires `config-dir`, the selected daemon config directory supplied by the CLI
+  or chosen explicitly in standalone/test workflows. Fails loudly if given no
+  selected world, a database file, or an unreachable weaver. Returns the
+  normalized config directory path for the selected world."
   ([]
-   (connect! nil))
+   (throw (ex-info "connect! requires an explicit config-dir; use `strand weaver repl` from a repo world or call (connect! \"/path/to/config-dir\")"
+                   {:helper 'connect! :code :skein.repl/no-selected-world})))
   ([config-dir]
    (reset! active-config-dir no-connection)
    (when (and config-dir (.isFile (java.io.File. config-dir)))
      (throw (ex-info "connect! expects a daemon config directory, not a database file" {:config-dir config-dir})))
    (let [world (daemon-config/world config-dir)]
-     (if config-dir
-       (do
-         (client/status-world (:config-dir world))
-         (reset! active-config-dir (:config-dir world)))
-       (do
-         (client/status-world nil)
-         (reset! active-config-dir default-world)))
+     (client/status-world (:config-dir world))
+     (reset! active-config-dir (:config-dir world))
      (:config-dir world))))
 
 (declare call-daemon)

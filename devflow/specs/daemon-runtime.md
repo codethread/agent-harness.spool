@@ -15,12 +15,12 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C1:** A weaver owns exactly one active SQLite datasource, one in-memory named-query registry, one in-memory read-only view registry, one in-memory weave-pattern registry, one in-memory CLI operation registry, one in-memory lifecycle hook registry, one in-memory event handler registry with asynchronous dispatch state, one in-memory approved-library sync state, and one in-memory module-use registry for its lifetime.
 - **SPEC-004.C2:** A weaver exposes two local transports: nREPL for Clojure REPL/client workflows and a JSON Unix domain socket for the public Go CLI.
 - **SPEC-004.C3:** Transports are local-only by default: nREPL binds to loopback, and the JSON CLI transport uses a Unix domain socket under the selected runtime state directory.
-- **SPEC-004.C4:** A weaver world is selected by config-dir. The default config-dir is `$XDG_CONFIG_HOME/skein` or `~/.config/skein`; an explicit config-dir override selects a separate world.
-- **SPEC-004.C5:** The default world uses `$XDG_STATE_HOME/skein` or `~/.local/state/skein` for runtime state and `$XDG_DATA_HOME/skein` or `~/.local/share/skein` for weaver-owned data.
+- **SPEC-004.C4:** A weaver world is selected by config-dir. The CLI supplies this selected config-dir after explicit `--config-dir` handling or repo-first `.skein` discovery; Clojure entry points fail loudly when no selected config-dir is provided.
+- **SPEC-004.C5:** Runtime state for a selected world lives in `state` below the selected config-dir, and weaver-owned data lives in `data` below the selected config-dir.
 - **SPEC-004.C6:** An explicit config-dir selects a self-contained experimental world: config files live in the selected directory, runtime state lives in `state`, and weaver data lives in `data`.
 - **SPEC-004.C7:** The weaver owns storage selection. By default it uses `skein.sqlite` under the selected data world. Public clients do not choose storage paths.
 - **SPEC-004.C8:** A selected config-dir may have at most one running weaver. Starting another weaver for the same selected config-dir fails loudly unless stale socket/metadata can be proven dead and cleaned.
-- **SPEC-004.C9:** Multi-weaver use is explicit world selection: different config-dir overrides create separate weaver/socket/metadata/data/init worlds. No client command implicitly switches worlds based on cwd or storage path.
+- **SPEC-004.C9:** Multi-weaver use is explicit world selection: different selected config dirs create separate weaver/socket/metadata/data/init worlds. Public request payloads do not carry cwd, repo metadata, or storage paths as world identity.
 
 ## SPEC-004.P3 Runtime metadata and discovery
 

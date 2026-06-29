@@ -33,13 +33,15 @@
                         #"No Skein weaver world is connected"
                         (repl/load-queries! "/path/does/not/matter.edn"))))
 
-(deftest connect-without-arg-checks-default-world-not-explicit-config-dir
+(deftest connect-without-arg-fails-loudly-without-selected-world
   (let [calls (atom [])]
     (with-redefs [skein.client/status-world (fn [config-dir]
                                              (swap! calls conj config-dir)
                                              {:ok true})]
-      (is (= (:config-dir (daemon-config/world)) (repl/connect!)))
-      (is (= [nil] @calls)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"connect! requires an explicit config-dir"
+                            (repl/connect!)))
+      (is (= [] @calls)))
     (reset-open-state!)))
 
 (deftest connect-fails-without-selecting-a-daemon
