@@ -68,8 +68,8 @@
 (defn- config-dir [runtime]
   (get-in runtime [:metadata :config-dir]))
 
-(defn- libs-file [runtime]
-  (io/file (config-dir runtime) "libs.edn"))
+(defn- libs-file [runtime name]
+  (io/file (config-dir runtime) name))
 
 (defn- expand-user-home [path]
   (cond
@@ -85,55 +85,71 @@
                    (io/file (config-dir runtime) expanded-path))]
     (.getCanonicalPath resolved)))
 
-(defn- validate-approved-lib-entry! [lib entry]
+(defn- validate-approved-lib-entry! [source lib entry]
   (when-not (symbol? lib)
-    (throw (ex-info "Library coordinate must be a symbol" {:lib lib})))
+    (throw (ex-info "Library coordinate must be a symbol" (assoc source :lib lib))))
   (when-not (map? entry)
-    (throw (ex-info "Library entry must be a map" {:lib lib :entry entry})))
+    (throw (ex-info "Library entry must be a map" (assoc source :lib lib :entry entry))))
   (when-let [unknown (seq (remove #{:local/root} (keys entry)))]
-    (throw (ex-info "Library entry contains unknown keys" {:lib lib :keys (vec unknown)})))
+    (throw (ex-info "Library entry contains unknown keys" (assoc source :lib lib :keys (vec unknown)))))
   (when-not (and (string? (:local/root entry)) (not (str/blank? (:local/root entry))))
-    (throw (ex-info "Library entry requires non-blank string :local/root" {:lib lib :local/root (:local/root entry)}))))
+    (throw (ex-info "Library entry requires non-blank string :local/root"
+                    (assoc source :lib lib :local/root (:local/root entry))))))
 
-(defn- normalize-approved-libs
-  "Validate libs.edn data and resolve approved local roots for this runtime."
-  [runtime config]
+(defn- normalize-approved-libs-file
+  "Validate one approved-library config file and resolve roots for this runtime."
+  [runtime name source config]
   (when-not (map? config)
-    (throw (ex-info "libs.edn must contain a map" {:config config})))
+    (throw (ex-info (str name " must contain a map") (assoc source :config config))))
   (when-let [unknown (seq (remove #{:libs} (keys config)))]
-    (throw (ex-info "libs.edn contains unknown top-level keys" {:keys (vec unknown)})))
+    (throw (ex-info (str name " contains unknown top-level keys") (assoc source :keys (vec unknown)))))
   (when-not (map? (:libs config))
-    (throw (ex-info "libs.edn requires :libs map" {:libs (:libs config)})))
+    (throw (ex-info (str name " requires :libs map") (assoc source :libs (:libs config)))))
   {:libs (into {}
                (map (fn [[lib entry]]
-                      (validate-approved-lib-entry! lib entry)
+                      (validate-approved-lib-entry! source lib entry)
                       [lib {:local/root (:local/root entry)
-                            :root (canonical-root runtime (:local/root entry))}]))
+                            :root (canonical-root runtime (:local/root entry))
+                            :source source}]))
                (:libs config))})
 
-(defn approved-libs
-  "Read and validate the runtime libs.edn allowlist."
-  [runtime]
-  (let [file (libs-file runtime)]
+(defn- approved-libs-file [runtime name kind]
+  (let [file (libs-file runtime name)
+        source {:kind kind
+                :file (.getPath file)}]
     (cond
-      (not (.exists file))
+      (and (not (.exists file))
+           (not (java.nio.file.Files/isSymbolicLink (.toPath file))))
       {:libs {}}
 
       (not (.isFile file))
-      (throw (ex-info "libs.edn is malformed or unreadable" {:file (.getPath file)}))
+      (throw (ex-info (str name " is malformed or unreadable") source))
 
       :else
-      (normalize-approved-libs
+      (normalize-approved-libs-file
        runtime
+       name
+       source
        (try
          (query/read-edn-file file)
          (catch Throwable t
-           (throw (ex-info "libs.edn is malformed or unreadable" {:file (.getPath file)} t))))))))
+           (throw (ex-info (str name " is malformed or unreadable") source t))))))))
+
+(defn approved-libs
+  "Read and validate the effective runtime library allowlist.
+
+  The effective allowlist is `libs.edn` overlaid by `libs.local.edn`; local
+  entries replace shared entries with the same coordinate. Missing files
+  contribute no libraries, while malformed present files fail loudly."
+  [runtime]
+  {:libs (merge (:libs (approved-libs-file runtime "libs.edn" :shared))
+                (:libs (approved-libs-file runtime "libs.local.edn" :local)))})
 
 (defn- sync-failed [lib entry reason data]
   [lib (merge {:lib lib
                :local/root (:local/root entry)
                :root (:root entry)
+               :source (:source entry)
                :status :failed
                :reason reason}
               data)])
@@ -177,6 +193,7 @@
           [lib {:lib lib
                 :local/root (:local/root entry)
                 :root (:root entry)
+                :source (:source entry)
                 :status (if (seq added) :loaded :already-available)}])
         (catch Throwable t
           (sync-failed lib entry :runtime-add-failed {:message (ex-message t)

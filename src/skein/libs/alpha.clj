@@ -18,8 +18,9 @@
 (defn approved
   "Return the normalized library allowlist for the selected weaver config dir.
 
-  Reads `libs.edn` through the active runtime and returns `{:libs ...}` with
-  canonical local roots. Malformed allowlists fail loudly with ExceptionInfo."
+  Reads the effective `libs.edn` plus `libs.local.edn` overlay through the
+  active runtime and returns `{:libs ...}` with canonical local roots and source
+  metadata. Malformed allowlists fail loudly with ExceptionInfo."
   []
   (call-daemon :approved-libs))
 
@@ -38,10 +39,10 @@
   (call-daemon :approved-lib-syncs))
 
 (defn reload!
-  "Reload `init.clj` from the selected config dir in the active weaver.
+  "Reload startup files from the selected config dir in the active weaver.
 
-  Clears runtime extension registries before loading and returns the load result
-  map. Throws when the selected config dir has no reloadable init file."
+  Clears runtime extension registries before loading `init.clj` then
+  `init.local.clj` when present and returns the load result map."
   []
   (call-daemon :reload-config!))
 

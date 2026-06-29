@@ -44,6 +44,17 @@
 (defn- write-libs! [config-dir content]
   (spit (io/file config-dir "libs.edn") content))
 
+(defn- write-local-libs! [config-dir content]
+  (spit (io/file config-dir "libs.local.edn") content))
+
+(defn- shared-source [config-dir]
+  {:kind :shared
+   :file (.getPath (io/file (.getCanonicalPath config-dir) "libs.edn"))})
+
+(defn- local-source [config-dir]
+  {:kind :local
+   :file (.getPath (io/file (.getCanonicalPath config-dir) "libs.local.edn"))})
+
 (defn- write-local-lib! [config-dir lib-name ns-sym]
   (let [root (io/file config-dir "libs" lib-name)
         ns-path (-> (str ns-sym)
@@ -55,10 +66,47 @@
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     root))
 
-(deftest approved-returns-empty-libs-when-file-is-missing
+(deftest approved-returns-empty-libs-when-files-are-missing
   (with-runtime
     (fn [_ _]
       (is (= {:libs {}} (libs/approved))))))
+
+(deftest approved-fails-loudly-when-local-libs-edn-is-malformed
+  (with-runtime
+    (fn [_ config-dir]
+      (write-local-libs! config-dir "{:libs")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"libs.local.edn is malformed or unreadable"
+                            (libs/approved))))))
+
+(deftest approved-includes-shared-only-and-local-only-libraries
+  (with-runtime
+    (fn [_ config-dir]
+      (let [shared-root (io/file config-dir "libs" "shared")
+            local-root (io/file config-dir "libs" "local")]
+        (write-libs! config-dir (pr-str {:libs {'demo/shared {:local/root "libs/shared"}}}))
+        (write-local-libs! config-dir (pr-str {:libs {'demo/local {:local/root "libs/local"}}}))
+        (is (= {:libs {'demo/shared {:local/root "libs/shared"
+                                     :root (.getCanonicalPath shared-root)
+                                     :source (shared-source config-dir)}
+                       'demo/local {:local/root "libs/local"
+                                    :root (.getCanonicalPath local-root)
+                                    :source (local-source config-dir)}}}
+               (libs/approved)))))))
+
+(deftest approved-local-libs-override-shared-by-coordinate
+  (with-runtime
+    (fn [_ config-dir]
+      (let [shared-root (io/file config-dir "libs" "shared")
+            local-root (io/file config-dir "libs" "local")]
+        (write-libs! config-dir (pr-str {:libs {'demo/override {:local/root "libs/shared"}}}))
+        (write-local-libs! config-dir (pr-str {:libs {'demo/override {:local/root "libs/local"}}}))
+        (is (= {:local/root "libs/local"
+                :root (.getCanonicalPath local-root)
+                :source (local-source config-dir)}
+               (get-in (libs/approved) [:libs 'demo/override])))
+        (is (not= (.getCanonicalPath shared-root)
+                  (get-in (libs/approved) [:libs 'demo/override :root])))))))
 
 (deftest approved-fails-when-libs-edn-is-not-a-file
   (with-runtime
@@ -79,9 +127,11 @@
                      (pr-str {:libs {'demo/relative {:local/root "libs/demo"}
                                      'demo/absolute {:local/root (.getAbsolutePath absolute-root)}}}))
         (is (= {:libs {'demo/absolute {:local/root (.getAbsolutePath absolute-root)
-                                       :root (.getCanonicalPath absolute-root)}
+                                       :root (.getCanonicalPath absolute-root)
+                                       :source (shared-source config-dir)}
                        'demo/relative {:local/root "libs/demo"
-                                       :root (.getCanonicalPath relative-root)}}}
+                                       :root (.getCanonicalPath relative-root)
+                                       :source (shared-source config-dir)}}}
                (libs/approved)))))))
 
 (deftest approved-expands-home-relative-roots
@@ -91,7 +141,8 @@
             home-root (io/file home "dev" "projects" "my-lib")]
         (write-libs! config-dir (pr-str {:libs {'demo/home {:local/root "~/dev/projects/my-lib"}}}))
         (is (= {:libs {'demo/home {:local/root "~/dev/projects/my-lib"
-                                   :root (.getCanonicalPath home-root)}}}
+                                   :root (.getCanonicalPath home-root)
+                                   :source (shared-source config-dir)}}}
                (libs/approved)))))))
 
 (deftest approved-canonicalizes-symlink-roots
@@ -104,7 +155,8 @@
                                                 (make-array java.nio.file.attribute.FileAttribute 0))
         (write-libs! config-dir (pr-str {:libs {'demo/link {:local/root "libs/link"}}}))
         (is (= {:libs {'demo/link {:local/root "libs/link"
-                                   :root (.getCanonicalPath target)}}}
+                                   :root (.getCanonicalPath target)
+                                   :source (shared-source config-dir)}}}
                (libs/approved)))))))
 
 (deftest approved-does-not-reject-missing-local-roots
@@ -113,7 +165,8 @@
       (let [missing (io/file config-dir "libs" "missing")]
         (write-libs! config-dir (pr-str {:libs {'demo/missing {:local/root "libs/missing"}}}))
         (is (= {:libs {'demo/missing {:local/root "libs/missing"
-                                      :root (.getCanonicalPath missing)}}}
+                                      :root (.getCanonicalPath missing)
+                                      :source (shared-source config-dir)}}}
                (libs/approved)))))))
 
 (deftest approved-routes-through-connected-helper-context
@@ -243,6 +296,28 @@
           (write-libs! config-dir content)
           (is (thrown-with-msg? clojure.lang.ExceptionInfo pattern (libs/approved))))))))
 
+(deftest approved-applies-structural-validation-to-local-libs
+  (with-runtime
+    (fn [_ config-dir]
+      (write-local-libs! config-dir (pr-str {:libs {'demo/lib {:local/root " "}}}))
+      (try
+        (libs/approved)
+        (is false "expected libs.local.edn structural validation to fail")
+        (catch clojure.lang.ExceptionInfo e
+          (is (re-find #"requires non-blank string" (ex-message e)))
+          (is (= (local-source config-dir) (select-keys (ex-data e) [:kind :file]))))))))
+
+(deftest approved-fails-loudly-on-broken-local-libs-symlink
+  (with-runtime
+    (fn [_ config-dir]
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file config-dir "libs.local.edn"))
+       (.toPath (io/file config-dir "missing-target.edn"))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"libs.local.edn is malformed or unreadable"
+                            (libs/approved))))))
+
 (deftest sync-loads-approved-local-root-and-exposes-state
   (with-runtime
     (fn [_ config-dir]
@@ -254,16 +329,19 @@
         (is (= {:libs {lib {:lib lib
                             :local/root "libs/demo"
                             :root (.getCanonicalPath root)
+                            :source (shared-source config-dir)
                             :status :loaded}}}
                (libs/sync!)))
         (is (= {:libs {lib {:lib lib
                             :local/root "libs/demo"
                             :root (.getCanonicalPath root)
+                            :source (shared-source config-dir)
                             :status :loaded}}}
                (libs/syncs)))
         (is (= {:libs {lib {:lib lib
                             :local/root "libs/demo"
                             :root (.getCanonicalPath root)
+                            :source (shared-source config-dir)
                             :status :already-available}}}
                (libs/sync!)))))))
 
@@ -303,6 +381,7 @@
         (is (= {:libs {'demo/missing {:lib 'demo/missing
                                       :local/root "libs/missing"
                                       :root (.getCanonicalPath missing)
+                                      :source (shared-source config-dir)
                                       :status :failed
                                       :reason :missing-root}}}
                (libs/sync!)))
@@ -321,9 +400,10 @@
           (is (= {:lib 'demo/bad-deps
                   :local/root "libs/bad-deps"
                   :root (.getCanonicalPath root)
+                  :source (shared-source config-dir)
                   :status :failed
                   :reason :runtime-add-failed}
-                 (select-keys result [:lib :local/root :root :status :reason])))
+                 (select-keys result [:lib :local/root :root :source :status :reason])))
           (is (string? (:message result)))
           (is (string? (:class result))))))))
 
@@ -338,11 +418,13 @@
         (is (= {:libs {'demo/missing {:lib 'demo/missing
                                       :local/root "libs/missing"
                                       :root (.getCanonicalPath (io/file config-dir "libs" "missing"))
+                                      :source (shared-source config-dir)
                                       :status :failed
                                       :reason :missing-root}
                        'demo/not-dir {:lib 'demo/not-dir
                                       :local/root "libs/not-dir"
                                       :root (.getCanonicalPath not-dir)
+                                      :source (shared-source config-dir)
                                       :status :failed
                                       :reason :unreadable-root}}}
                (libs/sync!)))))))
@@ -477,6 +559,22 @@
           (is (= {:fn (symbol (str ns-sym "/install!"))
                   :return {:installed true}}
                  (:call result))))))))
+
+(deftest use-lib-gates-observe-local-overrides
+  (with-runtime
+    (fn [_ config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.override_gated_" suffix))
+            lib (symbol (str "demo/override-gated-" suffix))
+            root (write-local-lib! config-dir "override-gated-local" ns-sym)]
+        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/missing-shared"}}}))
+        (write-local-libs! config-dir (pr-str {:libs {lib {:local/root "libs/override-gated-local"}}}))
+        (is (= :loaded (get-in (libs/sync!) [:libs lib :status])))
+        (is (= (local-source config-dir) (get-in (libs/syncs) [:libs lib :source])))
+        (let [result (libs/use! :override/gated {:ns ns-sym :libs [lib]})]
+          (is (= :loaded (:status result)))
+          (is (= (.getCanonicalPath (io/file root "src" "demo" (str "override_gated_" suffix ".clj")))
+                 (get-in result [:loaded :file]))))))))
 
 (deftest use-skips-on-lib-gates-before-loading
   (with-runtime

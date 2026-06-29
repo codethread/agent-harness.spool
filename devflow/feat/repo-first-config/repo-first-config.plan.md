@@ -123,3 +123,7 @@ Outcome: Clojure and Go tests cover repo discovery/init/layering/overrides, smok
 ### PLAN-RepoFirstConfig-001.DN7 Task 3 completed — 2026-06-29
 
 - Weaver startup and runtime reload now share ordered startup-file loading for `init.clj` then `init.local.clj`. Missing files are skipped, present failing files throw with selected config-dir and file path context, and reload returns loaded file metadata plus final return values. Reload clears query/view/pattern/op/hook/library/module/event state before loading the layered config and keeps event dispatch stopped until both layers succeed; failed reloads clear partial shared-only registrations and fail loudly.
+
+### PLAN-RepoFirstConfig-001.DN8 Task 4 completed — 2026-06-29
+
+- Approved library config now reads `libs.edn` and `libs.local.edn` as one effective overlay, with local coordinates replacing shared coordinates. Normalized approved entries and sync outcomes include data-first `:source` metadata naming shared vs local and the contributing file. Existing path normalization and sync failure behavior remains over the effective config.
