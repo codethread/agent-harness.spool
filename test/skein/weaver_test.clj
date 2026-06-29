@@ -109,6 +109,12 @@
   (swap! hook-contexts conj ctx)
   (throw (ex-info "mutation rejected" {:code "policy/rejected" :ctx ctx})))
 
+(defn non-json-rejecting-hook [_ctx]
+  (throw (ex-info "non-json rejected" {:code "policy/non-json"
+                                        :hook-stage :strand/add-before-commit
+                                        :nested {:reason :policy/non-json}
+                                        :opaque (Object.)})))
+
 (defn parse-story-points-hook [ctx]
   (swap! hook-contexts conj ctx)
   (let [attrs (:hook/value ctx)
@@ -834,6 +840,8 @@
             add-event (first (wait-for-events 1))
             add-context (first @hook-contexts)]
         (is (= :strand/add-before-commit (:hook/type add-context)))
+        (is (= :capture-add (:hook/key add-context)))
+        (is (= 'skein.weaver-test/capture-hook (:hook/fn add-context)))
         (is (= :weaver-api (:request/source add-context)))
         (is (= :add (:request/operation add-context)))
         (is (= :strand/add (:mutation/operation add-context)))
@@ -871,6 +879,8 @@
                 update-event (first (wait-for-events 1))
                 update-context (first @hook-contexts)]
             (is (= :strand/update-before-commit (:hook/type update-context)))
+            (is (= :capture-update (:hook/key update-context)))
+            (is (= 'skein.weaver-test/capture-hook (:hook/fn update-context)))
             (is (= :update (:request/operation update-context)))
             (is (= :strand/update (:mutation/operation update-context)))
             (is (= (:id created) (:strand/id update-context)))
@@ -908,6 +918,8 @@
               burn-context (first @hook-contexts)]
           (is (= {:burned [(:id created)] :count 1} burn-result))
           (is (= :strand/burn-before-commit (:hook/type burn-context)))
+          (is (= :capture-burn (:hook/key burn-context)))
+          (is (= 'skein.weaver-test/capture-hook (:hook/fn burn-context)))
           (is (= :burn (:request/operation burn-context)))
           (is (= :strand/burn (:mutation/operation burn-context)))
           (is (= requested (:strand/requested-ids burn-context)))
@@ -1258,6 +1270,8 @@
         (let [add-context (first @hook-contexts)
               update-context (second @hook-contexts)]
           (is (= :payload/received (:hook/type add-context)))
+          (is (= :payload (:hook/key add-context)))
+          (is (= 'skein.weaver-test/capture-hook (:hook/fn add-context)))
           (is (= :json-socket (:request/source add-context)))
           (is (= "test-request" (:request/id add-context)))
           (is (= {"title" "Payload add" "state" "active" "attributes" {"owner" "agent"}}
@@ -1310,9 +1324,41 @@
         (is (false? (get response "ok")))
         (is (= "domain" (get-in response ["error" "type"])))
         (is (= "hook/failed" (get-in response ["error" "code"])))
-        (is (= "policy/rejected" (get-in response ["error" "details" "cause-code"])))
-        (is (= "Rejected payload" (get-in response ["error" "details" "data" "ctx" "args" "title"])))
+        (is (= "policy/rejected" (get-in response ["error" "details" "hook/cause-code"])))
+        (is (= "Rejected payload" (get-in response ["error" "details" "exception/data" "ctx" "request/args" "title"])))
         (is (empty? (api/list rt)))))))
+
+(deftest json-socket-semantic-hooks-receive-socket-request-context
+  (with-runtime
+    (fn [rt _]
+      (api/init rt)
+      (reset! hook-contexts [])
+      (api/register-pattern! rt 'dev-task 'skein.weaver-test/test-pattern ::pattern-input)
+      (api/register-hook! rt :normalize #{:attributes/normalize} 'skein.weaver-test/parse-story-points-hook {})
+      (api/register-hook! rt :add #{:strand/add-before-commit} 'skein.weaver-test/capture-hook {})
+      (api/register-hook! rt :batch #{:batch/apply-before-commit} 'skein.weaver-test/capture-hook {})
+      (is (true? (get (socket-request rt "add" {"title" "Socket add" "attributes" {"owner" "agent"}}) "ok")))
+      (is (true? (get (socket-request rt "weave" {"pattern" "dev-task" "input" {"title" "Socket weave"}}) "ok")))
+      (let [contexts @hook-contexts]
+        (is (= #{:json-socket} (set (map :request/source contexts))))
+        (is (= [:add :add :weave :weave :weave]
+               (mapv :request/operation contexts)))
+        (is (= [:normalize :add :normalize :normalize :batch]
+               (mapv :hook/key contexts)))))))
+
+(deftest json-socket-hook-failure-details-are-json-safe
+  (with-runtime
+    (fn [rt _]
+      (api/init rt)
+      (api/register-hook! rt :non-json #{:strand/add-before-commit} 'skein.weaver-test/non-json-rejecting-hook {})
+      (let [response (socket-request rt "add" {"title" "Non JSON" "attributes" {}})]
+        (is (false? (get response "ok")))
+        (is (= "hook/failed" (get-in response ["error" "code"])))
+        (is (= "strand/add-before-commit" (get-in response ["error" "details" "hook/type"])))
+        (is (= "policy/non-json" (get-in response ["error" "details" "hook/cause-code"])))
+        (is (= "strand/add-before-commit" (get-in response ["error" "details" "exception/data" "hook-stage"])))
+        (is (= "policy/non-json" (get-in response ["error" "details" "exception/data" "nested" "reason"])))
+        (is (string? (get-in response ["error" "details" "exception/data" "opaque"])))))))
 
 (deftest weaver-query-registry-fails-clearly
   (with-runtime

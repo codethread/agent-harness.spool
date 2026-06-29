@@ -30,6 +30,16 @@
 (defn client-test-view [{:keys [params]}]
   {:client-view params})
 
+(def client-hook-contexts (atom []))
+
+(defn client-capture-hook [ctx]
+  (swap! client-hook-contexts conj ctx)
+  :ok)
+
+(defn client-normalize-hook [ctx]
+  (swap! client-hook-contexts conj ctx)
+  {:hook/value (:hook/value ctx)})
+
 (defn with-runtime [f]
   (let [db-file (db-test/temp-db-file)
         world (temp-world)]
@@ -84,6 +94,22 @@
         (is (= {"done" [:= :state "closed"]
                 "mine" query-def}
                (client/queries db-file)))))))
+
+(deftest client-mutations-thread-nrepl-request-context-to-hooks
+  (with-runtime
+    (fn [rt db-file]
+      (client/init db-file)
+      (reset! client-hook-contexts [])
+      (api/register-hook! rt :client-normalize #{:attributes/normalize} 'skein.client-test/client-normalize-hook {})
+      (api/register-hook! rt :client-add #{:strand/add-before-commit} 'skein.client-test/client-capture-hook {})
+      (api/register-hook! rt :client-update #{:strand/update-before-commit} 'skein.client-test/client-capture-hook {})
+      (let [created (client/add db-file {:title "Hooked client" :attributes {:owner "agent"}})]
+        (client/update db-file (:id created) {:attributes {:owner "agent" :phase "updated"}}))
+      (is (= [:client-normalize :client-add :client-normalize :client-update]
+             (mapv :hook/key @client-hook-contexts)))
+      (is (= #{:nrepl} (set (map :request/source @client-hook-contexts))))
+      (is (= [:add :add :update :update]
+             (mapv :request/operation @client-hook-contexts))))))
 
 (deftest client-routes-runtime-transformation-operations
   (with-runtime

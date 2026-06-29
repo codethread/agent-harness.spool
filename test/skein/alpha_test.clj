@@ -30,8 +30,18 @@
 (defn test-view [{:keys [params]}]
   {:alpha-view params})
 
+(def alpha-hook-contexts (atom []))
+
 (defn test-hook [_ctx]
   :ok)
+
+(defn capture-alpha-hook [ctx]
+  (swap! alpha-hook-contexts conj ctx)
+  :ok)
+
+(defn normalize-alpha-hook [ctx]
+  (swap! alpha-hook-contexts conj ctx)
+  {:hook/value (:hook/value ctx)})
 
 (deftest alpha-helpers-route-directly-inside-daemon-runtime
   (with-runtime
@@ -95,6 +105,9 @@
       ;; The helper must see no in-process runtime on the caller thread so it takes
       ;; the connected-client path, while the same-JVM nREPL server still needs the
       ;; active runtime to service that client request.
+      (reset! alpha-hook-contexts [])
+      (api/register-hook! rt :connected-normalize #{:attributes/normalize} 'skein.alpha-test/normalize-alpha-hook {})
+      (api/register-hook! rt :connected-batch #{:batch/apply-before-commit} 'skein.alpha-test/capture-alpha-hook {})
       (let [caller-thread (Thread/currentThread)
             runtime-cell (reify clojure.lang.IDeref
                            (deref [_]
@@ -109,6 +122,13 @@
             (is (= {:title "Connected task" :state "active" :attributes {:owner "connected"}}
                    (select-keys created [:title :state :attributes])))
             (is (= [(:id created)] (mapv :id (api/list rt))))
+            (is (= [:connected-normalize :connected-batch]
+                   (mapv :hook/key @alpha-hook-contexts)))
+            (is (= #{:nrepl} (set (map :request/source @alpha-hook-contexts))))
+            (is (= [:apply-batch :apply-batch]
+                   (mapv :request/operation @alpha-hook-contexts)))
+            (api/unregister-hook! rt :connected-normalize)
+            (api/unregister-hook! rt :connected-batch)
             (is (= {:key :connected-policy
                     :types #{:payload/received}
                     :fn 'skein.alpha-test/test-hook

@@ -106,15 +106,27 @@
                                                     :metadata meta}))
     meta))
 
+(def ^:private hooked-operation-request-contexts
+  {:add {:request/source :nrepl :request/operation :add}
+   :update {:request/source :nrepl :request/operation :update}
+   :supersede {:request/source :nrepl :request/operation :supersede}
+   :burn-by-id {:request/source :nrepl :request/operation :burn}
+   :burn-by-ids {:request/source :nrepl :request/operation :burn}
+   :weave! {:request/source :nrepl :request/operation :weave}
+   :apply-batch {:request/source :nrepl :request/operation :apply-batch}})
+
 (defn- fixed-form
   "Return an nREPL form that invokes a known weaver API operation with args."
   [op args]
   (let [api-symbol (or (api-symbols op)
                        (fail "Unknown weaver API operation" {:type :skein.client/unknown-operation
-                                                              :operation op}))]
+                                                              :operation op}))
+        call-args (cond-> (vec args)
+                    (contains? hooked-operation-request-contexts op)
+                    (conj (hooked-operation-request-contexts op)))]
     (str "(do "
          "(require '[skein.weaver.api] '[skein.weaver.runtime]) "
-         "(let [args '" (pr-str (vec args)) "] "
+         "(let [args '" (pr-str call-args) "] "
          "(try {:ok true :value (apply " api-symbol " @skein.weaver.runtime/current-runtime args)} "
          "(catch Throwable t {:ok false :class (str (class t)) :message (ex-message t) :data (ex-data t)})))"
          ")")))

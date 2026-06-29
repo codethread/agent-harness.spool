@@ -98,7 +98,7 @@ Helpers include:
 - `(libs/approved)` returns normalized approved config.
 - `(libs/sync!)` uses Clojure runtime dependency tooling to add approved local roots and returns structured results for loaded, already-available, and failed libraries.
 - `(libs/syncs)` returns weaver-lifetime approved-library sync state.
-- `(libs/reload!)` clears weaver-lifetime approved-library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then reloads selected config-dir `init.clj` inside the active weaver and returns its file, status, and final form result. Missing `init.clj` fails loudly. Reload does not unload already-loaded Clojure namespaces or vars.
+- `(libs/reload!)` clears weaver-lifetime approved-library sync state, module-use state, named queries, views, patterns, lifecycle hooks, event handlers, queued events, and recent event failures, then reloads selected config-dir `init.clj` inside the active weaver and returns its file, status, and final form result. Missing `init.clj` fails loudly. Reload does not unload already-loaded Clojure namespaces or vars.
 - `(libs/use! key opts)` records one weaver-lifetime module-use attempt under keyword `key`; duplicate keys replace prior state for reload workflows.
 - `(libs/uses)` and `(libs/use key)` expose weaver-lifetime module-use state.
 

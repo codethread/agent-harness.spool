@@ -473,6 +473,12 @@
       data (assoc :exception/data data)
       code (assoc :hook/cause-code code))))
 
+(defn- hook-context [hook-type hook ctx]
+  (assoc ctx
+         :hook/type hook-type
+         :hook/key (:key hook)
+         :hook/fn (:fn hook)))
+
 (defn- invoke-hook! [runtime hook-type hook ctx]
   (try
     (with-library-classloader runtime #((:fn-value hook) ctx))
@@ -483,7 +489,7 @@
 
 (defn- run-validation-hooks! [runtime hook-type ctx]
   (doseq [hook (hooks-for-type runtime hook-type)]
-    (invoke-hook! runtime hook-type hook (assoc ctx :hook/type hook-type)))
+    (invoke-hook! runtime hook-type hook (hook-context hook-type hook ctx)))
   nil)
 
 (defn run-payload-received-hooks!
@@ -520,36 +526,40 @@
 
 (defn- run-transform-hooks [runtime hook-type ctx]
   (reduce (fn [value hook]
-            (invoke-transform-hook! runtime hook-type hook (assoc ctx :hook/type hook-type :hook/value value)))
+            (invoke-transform-hook! runtime hook-type hook (assoc (hook-context hook-type hook ctx) :hook/value value)))
           (require-json-attributes! (:hook/value ctx))
           (hooks-for-type runtime hook-type)))
 
+(defn- request-context [operation]
+  {:request/source :weaver-api
+   :request/operation operation})
+
 (defn add
   "Create a strand, enqueue a creation event, and return the normalized strand."
-  [runtime strand]
-  (let [created (jdbc/with-transaction [tx (ds runtime)]
-                  (let [strand (if (some? (:attributes strand))
-                                 (assoc strand :attributes (run-transform-hooks runtime
-                                                                                 :attributes/normalize
-                                                                                 {:hook/value (:attributes strand)
-                                                                                  :request/source :weaver-api
-                                                                                  :request/operation :add
-                                                                                  :mutation/operation :strand/add
-                                                                                  :strand/patch strand}))
-                                 strand)
-                        created (normalize (db/add-strand! tx strand))]
-                    (run-validation-hooks! runtime
-                                           :strand/add-before-commit
-                                           {:request/source :weaver-api
-                                            :request/operation :add
-                                            :mutation/operation :strand/add
-                                            :strand/before nil
-                                            :strand/after created})
-                    created))]
-    (enqueue-event! runtime (assoc (event-base :strand/added)
-                                   :strand/id (:id created)
-                                   :strand created))
-    created))
+  ([runtime strand]
+   (add runtime strand (request-context :add)))
+  ([runtime strand req-ctx]
+   (let [created (jdbc/with-transaction [tx (ds runtime)]
+                   (let [strand (if (some? (:attributes strand))
+                                  (assoc strand :attributes (run-transform-hooks runtime
+                                                                                  :attributes/normalize
+                                                                                  (merge req-ctx
+                                                                                         {:hook/value (:attributes strand)
+                                                                                          :mutation/operation :strand/add
+                                                                                          :strand/patch strand})))
+                                  strand)
+                         created (normalize (db/add-strand! tx strand))]
+                     (run-validation-hooks! runtime
+                                            :strand/add-before-commit
+                                            (merge req-ctx
+                                                   {:mutation/operation :strand/add
+                                                    :strand/before nil
+                                                    :strand/after created}))
+                     created))]
+     (enqueue-event! runtime (assoc (event-base :strand/added)
+                                    :strand/id (:id created)
+                                    :strand created))
+     created)))
 
 (defn- strand-patch-for-ref [payload ref]
   (some (fn [strand]
@@ -577,7 +587,7 @@
                                    :strand/burned-ids (mapv :id (:burned result))
                                    :strand/before (mapv :before (:burned result))))))
 
-(defn- normalize-batch-strand-attributes [runtime payload]
+(defn- normalize-batch-strand-attributes [runtime req-ctx payload]
   (clojure.core/update payload :strands
                        (fn [strands]
                          (mapv (fn [{:keys [ref attributes] :as strand}]
@@ -586,36 +596,36 @@
                                    (assoc strand :attributes
                                           (run-transform-hooks runtime
                                                                :attributes/normalize
-                                                               {:hook/value attributes
-                                                                :request/source :weaver-api
-                                                                :request/operation :apply-batch
-                                                                :mutation/operation :batch/apply
-                                                                :batch/ref ref
-                                                                :strand/patch strand}))))
+                                                               (merge req-ctx
+                                                                      {:hook/value attributes
+                                                                       :mutation/operation :batch/apply
+                                                                       :batch/ref ref
+                                                                       :strand/patch strand})))))
                                strands))))
 
-(defn- batch-apply-context [payload result]
-  {:request/source :weaver-api
-   :request/operation :apply-batch
-   :mutation/operation :batch/apply
-   :batch/source :apply
-   :batch/payload payload
-   :batch/refs (:refs result)
-   :batch/created (:created result)
-   :batch/updated (:updated result)
-   :batch/burned (:burned result)
-   :batch/edge-ops (:edges result)})
+(defn- batch-apply-context [req-ctx payload result]
+  (merge req-ctx
+         {:mutation/operation :batch/apply
+          :batch/source :apply
+          :batch/payload payload
+          :batch/refs (:refs result)
+          :batch/created (:created result)
+          :batch/updated (:updated result)
+          :batch/burned (:burned result)
+          :batch/edge-ops (:edges result)}))
 
 (defn apply-batch
   "Apply a graph batch atomically and enqueue batch plus strand fanout events."
-  [runtime payload]
+  ([runtime payload]
+   (apply-batch runtime payload (request-context :apply-batch)))
+  ([runtime payload req-ctx]
   (let [submitted-payload payload
-        normalized-payload (normalize-batch-strand-attributes runtime (db/normalize-batch-payload! payload))
+        normalized-payload (normalize-batch-strand-attributes runtime req-ctx (db/normalize-batch-payload! payload))
         result (jdbc/with-transaction [tx (ds runtime)]
                  (let [result (normalize (db/apply-batch-in-transaction! tx normalized-payload))]
                    (run-validation-hooks! runtime
                                           :batch/apply-before-commit
-                                          (batch-apply-context submitted-payload result))
+                                          (batch-apply-context req-ctx submitted-payload result))
                    result))
         batch-id (str (UUID/randomUUID))]
     (enqueue-event! runtime (assoc (event-base :batch/applied)
@@ -626,7 +636,7 @@
                                    :batch/burned (:burned result)
                                    :batch/edges (:edges result)))
     (enqueue-batch-fanout! runtime batch-id normalized-payload result)
-    result))
+    result)))
 
 (defn- apply-edges! [tx id edges]
   (doseq [{:keys [to type attributes]} edges]
@@ -643,7 +653,9 @@
 
 (defn update
   "Update a strand and/or add edges atomically, then enqueue an update event."
-  [runtime id patch]
+  ([runtime id patch]
+   (update runtime id patch (request-context :update)))
+  ([runtime id patch req-ctx]
   (reject-unknown-update-keys! patch)
   (let [{:keys [title state edges]} patch
         result (jdbc/with-transaction [tx (ds runtime)]
@@ -652,13 +664,12 @@
                        patch (if (some? (:attributes patch))
                                (assoc patch :attributes (run-transform-hooks runtime
                                                                               :attributes/normalize
-                                                                              {:hook/value (:attributes patch)
-                                                                               :request/source :weaver-api
-                                                                               :request/operation :update
-                                                                               :mutation/operation :strand/update
-                                                                               :strand/id id
-                                                                               :strand/before before
-                                                                               :strand/patch patch}))
+                                                                              (merge req-ctx
+                                                                                     {:hook/value (:attributes patch)
+                                                                                      :mutation/operation :strand/update
+                                                                                      :strand/id id
+                                                                                      :strand/before before
+                                                                                      :strand/patch patch})))
                                patch)
                        attributes (:attributes patch)]
                    (apply-edges! tx id edges)
@@ -668,21 +679,20 @@
                                                                      (contains? patch :attributes) (assoc :attributes attributes))))]
                      (run-validation-hooks! runtime
                                             :strand/update-before-commit
-                                            {:request/source :weaver-api
-                                             :request/operation :update
-                                             :mutation/operation :strand/update
-                                             :strand/id id
-                                             :strand/patch patch
-                                             :strand/before before
-                                             :strand/after after
-                                             :strand/edge-ops (vec edges)})
+                                            (merge req-ctx
+                                                   {:mutation/operation :strand/update
+                                                    :strand/id id
+                                                    :strand/patch patch
+                                                    :strand/before before
+                                                    :strand/after after
+                                                    :strand/edge-ops (vec edges)}))
                      {:before before :after after :patch patch})))]
     (enqueue-event! runtime (assoc (event-base :strand/updated)
                                    :strand/id id
                                    :strand/patch (:patch result)
                                    :strand/before (:before result)
                                    :strand/after (:after result)))
-    (:after result)))
+    (:after result))))
 
 (defn- supersede-context [old-id replacement-id result]
   {:strand/id old-id
@@ -695,19 +705,20 @@
 
 (defn supersede
   "Replace one strand with another and enqueue a supersession event."
-  [runtime old-id replacement-id]
+  ([runtime old-id replacement-id]
+   (supersede runtime old-id replacement-id (request-context :supersede)))
+  ([runtime old-id replacement-id req-ctx]
   (let [result (jdbc/with-transaction [tx (ds runtime)]
                  (let [result (normalize (db/supersede-strand-in-transaction! tx old-id replacement-id))]
                    (run-validation-hooks! runtime
                                           :strand/supersede-before-commit
-                                          (merge {:request/source :weaver-api
-                                                  :request/operation :supersede
-                                                  :mutation/operation :strand/supersede}
+                                          (merge req-ctx
+                                                 {:mutation/operation :strand/supersede}
                                                  (supersede-context old-id replacement-id result)))
                    result))]
     (enqueue-event! runtime (merge (event-base :strand/superseded)
                                    (supersede-context old-id replacement-id result)))
-    result))
+    result)))
 
 (defn declare-acyclic-relation!
   "Declare an edge relation as acyclic for future graph writes."
@@ -726,29 +737,32 @@
 
 (defn burn-by-ids
   "Delete strands by id and enqueue burn events for removed rows."
-  [runtime ids]
+  ([runtime ids]
+   (burn-by-ids runtime ids (request-context :burn)))
+  ([runtime ids req-ctx]
   (let [requested-ids (vec ids)
         {:keys [before result]} (jdbc/with-transaction [tx (ds runtime)]
                                   (let [before (normalize (db/strands-by-ids tx requested-ids))]
                                     (run-validation-hooks! runtime
                                                            :strand/burn-before-commit
-                                                           {:request/source :weaver-api
-                                                            :request/operation :burn
-                                                            :mutation/operation :strand/burn
-                                                            :strand/requested-ids requested-ids
-                                                            :strand/before before})
+                                                           (merge req-ctx
+                                                                  {:mutation/operation :strand/burn
+                                                                   :strand/requested-ids requested-ids
+                                                                   :strand/before before}))
                                     {:before before
                                      :result (db/burn-by-ids! tx requested-ids)}))]
     (enqueue-event! runtime (assoc (event-base :strand/burned)
                                    :strand/requested-ids requested-ids
                                    :strand/burned-ids (:burned result)
                                    :strand/before before))
-    result))
+    result)))
 
 (defn burn-by-id
   "Delete one strand by id and return burn metadata."
-  [runtime id]
-  (burn-by-ids runtime [id]))
+  ([runtime id]
+   (burn-by-ids runtime [id]))
+  ([runtime id req-ctx]
+   (burn-by-ids runtime [id] req-ctx)))
 
 (defn list
   "Return strands visible to `runtime`, optionally filtered by a query definition."
@@ -1035,21 +1049,20 @@
     (throw (ex-info "Pattern must return a batch strand vector" {:value batch})))
   batch)
 
-(defn- normalize-weave-strand-attributes [runtime pattern-name input batch]
+(defn- normalize-weave-strand-attributes [runtime req-ctx pattern-name input batch]
   (mapv (fn [{:keys [ref attributes] :as strand}]
           (if (nil? attributes)
             strand
             (assoc strand :attributes
                    (run-transform-hooks runtime
                                         :attributes/normalize
-                                        {:hook/value attributes
-                                         :request/source :weaver-api
-                                         :request/operation :weave
-                                         :mutation/operation :batch/apply
-                                         :batch/ref ref
-                                         :strand/patch strand
-                                         :pattern/name pattern-name
-                                         :pattern/input input}))))
+                                        (merge req-ctx
+                                               {:hook/value attributes
+                                                :mutation/operation :batch/apply
+                                                :batch/ref ref
+                                                :strand/patch strand
+                                                :pattern/name pattern-name
+                                                :pattern/input input})))))
         (require-pattern-batch-vector! batch)))
 
 (defn- weave-payload [strands]
@@ -1067,23 +1080,24 @@
                 strands)
    :burn []})
 
-(defn- weave-batch-context [pattern-name input payload result]
-  {:request/source :weaver-api
-   :request/operation :weave
-   :mutation/operation :batch/apply
-   :batch/source :weave
-   :batch/payload payload
-   :batch/refs (:refs result)
-   :batch/created (:created result)
-   :batch/updated []
-   :batch/burned []
-   :batch/edge-ops (:edges result)
-   :pattern/name pattern-name
-   :pattern/input input})
+(defn- weave-batch-context [req-ctx pattern-name input payload result]
+  (merge req-ctx
+         {:mutation/operation :batch/apply
+          :batch/source :weave
+          :batch/payload payload
+          :batch/refs (:refs result)
+          :batch/created (:created result)
+          :batch/updated []
+          :batch/burned []
+          :batch/edge-ops (:edges result)
+          :pattern/name pattern-name
+          :pattern/input input}))
 
 (defn weave!
   "Validate pattern input, invoke the pattern, and apply its create-only batch."
-  [runtime pattern-name input]
+  ([runtime pattern-name input]
+   (weave! runtime pattern-name input (request-context :weave)))
+  ([runtime pattern-name input req-ctx]
   (let [{fn-sym :fn input-spec :input-spec} (resolve-pattern runtime pattern-name)
         canonical-name (canonical-pattern-name pattern-name)]
     (spec-form input-spec)
@@ -1100,15 +1114,15 @@
     (let [batch (with-library-classloader
                   runtime
                   #((requiring-resolve fn-sym) {:input input}))
-          normalized-batch (normalize-weave-strand-attributes runtime canonical-name input batch)
+          normalized-batch (normalize-weave-strand-attributes runtime req-ctx canonical-name input batch)
           normalized-payload (weave-payload normalized-batch)
           result (jdbc/with-transaction [tx (ds runtime)]
                    (let [result (normalize (db/add-strand-batch-in-transaction! tx normalized-batch))]
                      (run-validation-hooks! runtime
                                             :batch/apply-before-commit
-                                            (weave-batch-context canonical-name input normalized-payload result))
+                                            (weave-batch-context req-ctx canonical-name input normalized-payload result))
                      result))]
-      (select-keys result [:created :refs]))))
+      (select-keys result [:created :refs])))))
 
 (declare data-first-value?)
 

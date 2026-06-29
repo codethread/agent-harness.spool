@@ -26,6 +26,17 @@
 (defn- success [request-id result]
   {"protocol_version" 1 "request_id" request-id "ok" true "result" result "error" nil})
 
+(defn- json-safe-value [value]
+  (cond
+    (nil? value) nil
+    (or (string? value) (number? value) (boolean? value)) value
+    (keyword? value) (subs (str value) 1)
+    (symbol? value) (str value)
+    (map? value) (into {} (map (fn [[k v]] [(json-safe-value k) (json-safe-value v)])) value)
+    (sequential? value) (mapv json-safe-value value)
+    (set? value) (mapv json-safe-value (sort-by pr-str value))
+    :else (pr-str value)))
+
 (defn- domain-error [request-id e]
   (let [message (ex-message e)
         details (or (ex-data e) {})]
@@ -34,7 +45,7 @@
               "code" (or (:code details)
                          (if (and (:canonical-query details) (contains? details :available)) "query/not-found" "domain/error"))
               "message" message
-              "details" (dissoc details :code)}}))
+              "details" (json-safe-value (dissoc details :code))}}))
 
 (defn- uninitialized-db-error? [e]
   (and (instance? SQLiteException e)
@@ -177,12 +188,17 @@
                qdef)]
     ((api op) runtime qdef params)))
 
+(defn- request-context [op]
+  {:request/source :json-socket
+   :request/operation (keyword op)})
+
 (defn- dispatch [runtime op args]
   (case op
     "init" ((api 'init) runtime)
     "add" ((api 'add) runtime (cond-> {:title (get args "title")
                                          :attributes (get args "attributes")}
-                                  (contains? args "state") (assoc :state (get args "state"))))
+                                  (contains? args "state") (assoc :state (get args "state")))
+           (request-context op))
     "update" ((api 'update) runtime (get args "id")
               (cond-> {}
                 (contains? args "edges") (assoc :edges (mapv (fn [edge]
@@ -193,17 +209,18 @@
                                                               (get args "edges")))
                 (some? (get args "title")) (assoc :title (get args "title"))
                 (some? (get args "state")) (assoc :state (get args "state"))
-                (some? (get args "attributes")) (assoc :attributes (get args "attributes"))))
+                (some? (get args "attributes")) (assoc :attributes (get args "attributes")))
+              (request-context op))
     "show" ((api 'show) runtime (get args "id"))
-    "supersede" ((api 'supersede) runtime (get args "old_id") (get args "replacement_id"))
-    "burn" ((api 'burn-by-id) runtime (get args "id"))
+    "supersede" ((api 'supersede) runtime (get args "old_id") (get args "replacement_id") (request-context op))
+    "burn" ((api 'burn-by-ids) runtime [(get args "id")] (request-context op))
     "list" (if (contains? args "state")
              ((api 'list) runtime [:= :state (get args "state")] {})
              ((api 'list) runtime))
     "ready" ((api 'ready) runtime)
     "list-query" (dispatch-query runtime 'list args)
     "ready-query" (dispatch-query runtime 'ready args)
-    "weave" ((api 'weave!) runtime (query-name (get args "pattern")) (walk/keywordize-keys (get args "input")))
+    "weave" ((api 'weave!) runtime (query-name (get args "pattern")) (walk/keywordize-keys (get args "input")) (request-context op))
     "pattern-explain" ((api 'pattern-explain) runtime (query-name (get args "pattern")))
     "op" ((api 'op!) runtime (query-name (get args "name")) (get args "args"))
     "status" (status-result runtime)
