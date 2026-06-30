@@ -16,6 +16,7 @@ Root specs are canonical for shipped behavior:
 ## Active features
 
 - `library-author-testing-support` — proposed library-author testing helpers and weaver storage support.
+- `mill-owned-source` — proposed mill-owned source resolution and repository-scoped default weavers for Git worktree workflows.
 
 ## Archived features
 
