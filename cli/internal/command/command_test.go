@@ -45,7 +45,7 @@ func TestHelpIncludesCommandTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Available Commands:", "init", "add", "update", "show", "supersede", "burn", "list", "ready", "weave", "pattern", "op", "weaver"} {
+	for _, want := range []string{"Available Commands:", "init", "add", "update", "show", "supersede", "burn", "list", "ready", "graph", "weave", "pattern", "op", "weaver"} {
 		if !strings.Contains(root, want) {
 			t.Fatalf("root help missing %q in:\n%s", want, root)
 		}
@@ -131,6 +131,8 @@ func TestRejectsRemovedAndMalformedInputs(t *testing.T) {
 		{"weave", "extra", "--pattern", "x"},
 		{"pattern", "explain"},
 		{"pattern", "explain", "x", "extra"},
+		{"graph", "subgraph"},
+		{"graph", "subgraph", "root", "extra"},
 		{"op"},
 		{"pattern", "list", "extra"},
 	}
@@ -811,6 +813,34 @@ func TestQueryCommandsUseSocketClientPayloads(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != `[]` {
 		t.Fatalf("empty row output = %q", out)
+	}
+}
+
+func TestGraphSubgraphCommandUsesSocketClientPayloads(t *testing.T) {
+	cfg := testConfig(t)
+	orig := newClient
+	fc := &fakeClient{result: map[string]any{"root_ids": []any{"task-1"}, "strands": []any{}, "edges": []any{}}}
+	newClient = func(o Options) Caller { return fc }
+	t.Cleanup(func() { newClient = orig })
+	out, err := run("--config-dir", cfg, "graph", "subgraph", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != `{"edges":[],"root_ids":["task-1"],"strands":[]}` {
+		t.Fatalf("unexpected graph output: %q", out)
+	}
+	_, err = run("--config-dir", cfg, "graph", "subgraph", "task-1", "--relation", "depends-on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.calls) != 2 {
+		t.Fatalf("calls = %#v", fc.calls)
+	}
+	if fc.calls[0].op != "subgraph" || !reflect.DeepEqual(fc.calls[0].args, map[string]any{"root_ids": []string{"task-1"}}) {
+		t.Fatalf("bad default subgraph call: %#v", fc.calls[0])
+	}
+	if fc.calls[1].op != "subgraph" || !reflect.DeepEqual(fc.calls[1].args, map[string]any{"root_ids": []string{"task-1"}, "type": "depends-on"}) {
+		t.Fatalf("bad relation subgraph call: %#v", fc.calls[1])
 	}
 }
 

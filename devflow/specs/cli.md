@@ -35,6 +35,7 @@ supersede <old-id> <replacement-id>
 burn <id>
 list [--state active|closed|replaced] [--query name] [--param key=value ...]
 ready [--query name] [--param key=value ...]
+graph subgraph <root-id> [--relation type]
 weave --pattern <name>
 pattern list
 pattern explain <name>
@@ -68,6 +69,7 @@ weaver status
 - **SPEC-002.C11:** `list` and `ready` accept an optional named query from weaver memory with `--query` and repeated string-valued `--param key=value` runtime parameters. `list` also accepts optional `--state active|closed|replaced`; callers that care about lifecycle should pass it explicitly.
 - **SPEC-002.C12:** `--where`, `--status`, and `--format` are not part of the public Go CLI. Rich EDN query authoring belongs in trusted weaver config and REPL workflows.
 - **SPEC-002.C13:** The CLI has no query registry mutation/listing commands and does not accept `--query-file`; query loading is a trusted weaver config or REPL workflow, and registry contents last only for the weaver lifetime.
+- **SPEC-002.C11a:** `graph subgraph <root-id> [--relation type]` returns a relation-scoped graph shape from the weaver as JSON with `root_ids`, `strands`, and `edges`. It traverses downward from the root over the declared acyclic relation named by `--relation`, defaulting in the weaver to `parent-of` when omitted. The CLI does not render ASCII graphs or inspect SQLite directly.
 - **SPEC-002.C13a:** `weave --pattern <name>` reads exactly one JSON value from stdin, sends it to an already registered weaver-side pattern, and returns the pattern-created batch result as JSON with `created` rows and `refs`. Empty stdin, malformed JSON, trailing JSON values, missing/blank pattern names, and positional args fail before mutation.
 - **SPEC-002.C13b:** `pattern list` sends no arguments to the weaver and returns registered pattern metadata ordered by name. `pattern explain <name>` sends only the pattern name to the weaver and returns JSON caller guidance for the registered input spec, including pattern name, optional doc string, function symbol, input spec name, spec form, a short summary, and expanded required/optional key specs when the input spec is a `clojure.spec.alpha/keys` form. Pattern registration is not exposed through the public CLI.
 - **SPEC-002.C13c:** `op <name> [args...]` sends a non-blank registered operation name and raw string argv to the weaver-side operation registry. The Go CLI does not parse userland flags after `op`; operation registration and handler code are trusted config/REPL workflows. `op help` is a built-in registered operation that returns JSON guidance for custom invocation usage and currently registered operations.

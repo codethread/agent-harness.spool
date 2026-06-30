@@ -215,6 +215,10 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(a.queryCommand(&o, "list", "List strands"))
 	root.AddCommand(a.queryCommand(&o, "ready", "List ready strands"))
 
+	graph := &cobra.Command{Use: "graph", Short: "Inspect strand graph topology"}
+	graph.AddCommand(a.graphSubgraphCommand(&o))
+	root.AddCommand(graph)
+
 	weave := &cobra.Command{Use: "weave --pattern <name>", Short: "Create strands through a weaver-registered pattern", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		pattern, _ := cmd.Flags().GetString("pattern")
 		if strings.TrimSpace(pattern) == "" {
@@ -275,6 +279,19 @@ func (a *App) rootCommand() *cobra.Command {
 	weaver.AddCommand(repl)
 	root.AddCommand(weaver)
 	return root
+}
+
+func (a *App) graphSubgraphCommand(o *Options) *cobra.Command {
+	cmd := &cobra.Command{Use: "subgraph <root-id>", Short: "Return a relation-scoped subgraph for a root strand", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		relation, _ := cmd.Flags().GetString("relation")
+		payload := map[string]any{"root_ids": []string{args[0]}}
+		if cmd.Flags().Changed("relation") {
+			payload["type"] = relation
+		}
+		return a.withConfig(*o, func(r Options) error { return a.call(r, "subgraph", payload) })
+	}}
+	cmd.Flags().String("relation", "", "declared acyclic relation type (defaults to parent-of)")
+	return cmd
 }
 
 func (a *App) queryCommand(o *Options, name, short string) *cobra.Command {

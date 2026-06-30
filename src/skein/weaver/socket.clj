@@ -11,7 +11,7 @@
            [org.sqlite SQLiteException]))
 
 (def ^:private allowed-operations
-  #{"add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-list" "pattern-explain" "op" "status" "stop"})
+  #{"add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-list" "pattern-explain" "op" "subgraph" "status" "stop"})
 
 (def ^:private required-request-keys
   #{"protocol_version" "request_id" "weaver_id" "operation" "arguments" "options"})
@@ -110,6 +110,12 @@
         "pattern-list" (= {} args)
         "pattern-explain" (and (= #{"pattern"} (set (keys args)))
                                (string? (get args "pattern")))
+        "subgraph" (and (every? #{"root_ids" "type"} (keys args))
+                        (contains? args "root_ids")
+                        (vector? (get args "root_ids"))
+                        (every? string? (get args "root_ids"))
+                        (or (not (contains? args "type"))
+                            (string? (get args "type"))))
         "op" (and (= #{"name" "args"} (set (keys args)))
                   (string? (get args "name"))
                   (not (str/blank? (get args "name")))
@@ -230,6 +236,13 @@
     "weave" ((api 'weave!) runtime (query-name (get args "pattern")) (walk/keywordize-keys (get args "input")) (request-context op))
     "pattern-list" ((api 'patterns) runtime)
     "pattern-explain" ((api 'pattern-explain) runtime (query-name (get args "pattern")))
+    "subgraph" (let [{:keys [root-ids strands edges]}
+                     ((api 'subgraph) runtime (get args "root_ids") (cond-> {}
+                                                                        (contains? args "type")
+                                                                        (assoc :type (get args "type"))))]
+                 {"root_ids" root-ids
+                  "strands" strands
+                  "edges" edges})
     "op" ((api 'op!) runtime (query-name (get args "name")) (get args "args"))
     "status" (status-result runtime)
     "stop" {"stopping" true "pid" (get-in runtime [:metadata :pid]) "weaver_id" (get-in runtime [:metadata :nonce])}))

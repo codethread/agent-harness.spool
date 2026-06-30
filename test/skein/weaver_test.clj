@@ -1671,7 +1671,18 @@
                (mapv #(update % :attributes db/<-json)
                      (db/execute! (:datasource rt)
                                   ["SELECT to_strand_id, edge_type, attributes FROM strand_edges WHERE from_strand_id = ?"
-                                   (get-in source ["result" "id"])])))))
+                                   (get-in source ["result" "id"])]))))
+        (let [subgraph (socket-request rt "subgraph" {"root_ids" [(get-in source ["result" "id"])]
+                                                       "type" "depends-on"})]
+          (is (true? (get subgraph "ok")))
+          (is (= [(get-in source ["result" "id"])] (get-in subgraph ["result" "root_ids"])))
+          (is (= #{(get-in source ["result" "id"]) (get-in target ["result" "id"])}
+                 (set (map #(get % "id") (get-in subgraph ["result" "strands"])))))
+          (is (= [{"from_strand_id" (get-in source ["result" "id"])
+                   "to_strand_id" (get-in target ["result" "id"])
+                   "edge_type" "depends-on"
+                   "attributes" {"reason" "socket"}}]
+                 (get-in subgraph ["result" "edges"])))))
       (let [missing (socket-request rt "update" {"id" "missing" "title" nil "state" nil "attributes" nil "edges" []})]
         (is (false? (get missing "ok")))
         (is (= "domain" (get-in missing ["error" "type"]))))
