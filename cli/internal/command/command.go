@@ -230,6 +230,9 @@ func (a *App) rootCommand() *cobra.Command {
 	root.AddCommand(weave)
 
 	pattern := &cobra.Command{Use: "pattern", Short: "Inspect weaver-registered patterns"}
+	pattern.AddCommand(&cobra.Command{Use: "list", Short: "List registered patterns", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		return a.withConfig(o, func(r Options) error { return a.call(r, "pattern-list", map[string]any{}) })
+	}})
 	pattern.AddCommand(&cobra.Command{Use: "explain <name>", Short: "Explain a pattern input contract", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(args[0]) == "" {
 			return errors.New("pattern explain requires a non-empty name")

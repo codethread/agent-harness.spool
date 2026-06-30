@@ -11,7 +11,7 @@
            [org.sqlite SQLiteException]))
 
 (def ^:private allowed-operations
-  #{"add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-explain" "op" "status" "stop"})
+  #{"add" "update" "supersede" "show" "burn" "list" "ready" "list-query" "ready-query" "weave" "pattern-list" "pattern-explain" "op" "status" "stop"})
 
 (def ^:private required-request-keys
   #{"protocol_version" "request_id" "weaver_id" "operation" "arguments" "options"})
@@ -107,6 +107,7 @@
                            (string-map? (get args "params")))
         "weave" (and (= #{"pattern" "input"} (set (keys args)))
                      (string? (get args "pattern")))
+        "pattern-list" (= {} args)
         "pattern-explain" (and (= #{"pattern"} (set (keys args)))
                                (string? (get args "pattern")))
         "op" (and (= #{"name" "args"} (set (keys args)))
@@ -227,6 +228,7 @@
     "list-query" (dispatch-query runtime 'list args)
     "ready-query" (dispatch-query runtime 'ready args)
     "weave" ((api 'weave!) runtime (query-name (get args "pattern")) (walk/keywordize-keys (get args "input")) (request-context op))
+    "pattern-list" ((api 'patterns) runtime)
     "pattern-explain" ((api 'pattern-explain) runtime (query-name (get args "pattern")))
     "op" ((api 'op!) runtime (query-name (get args "name")) (get args "args"))
     "status" (status-result runtime)

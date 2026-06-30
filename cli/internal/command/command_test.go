@@ -132,11 +132,30 @@ func TestRejectsRemovedAndMalformedInputs(t *testing.T) {
 		{"pattern", "explain"},
 		{"pattern", "explain", "x", "extra"},
 		{"op"},
+		{"pattern", "list", "extra"},
 	}
 	for _, c := range cases {
 		if _, err := run(c...); err == nil {
 			t.Fatalf("expected error for %v", c)
 		}
+	}
+}
+
+func TestPatternListCommandPassesThroughToSocketClientPayloads(t *testing.T) {
+	cfg := testConfig(t)
+	orig := newClient
+	fc := &fakeClient{result: []any{}}
+	newClient = func(o Options) Caller { return fc }
+	t.Cleanup(func() { newClient = orig })
+	out, err := run("--config-dir", cfg, "pattern", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Fatalf("expected empty pattern list output: %q", out)
+	}
+	if len(fc.calls) != 1 || fc.calls[0].op != "pattern-list" || !reflect.DeepEqual(fc.calls[0].args, map[string]any{}) {
+		t.Fatalf("bad pattern-list call: %#v", fc.calls)
 	}
 }
 

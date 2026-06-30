@@ -208,6 +208,7 @@
   (let [root (run-process! "Go CLI root help succeeds" [strand-bin "--help"])
         add (run-process! "Go CLI add help succeeds" [strand-bin "add" "--help"])
         op (run-process! "Go CLI op help succeeds" [strand-bin "op" "--help"])
+        pattern (run-process! "Go CLI pattern help succeeds" [strand-bin "pattern" "--help"])
         weaver (run-process! "Go CLI weaver help succeeds" [strand-bin "weaver" "--help"])
         start (run-process! "Go CLI weaver start help succeeds" [strand-bin "weaver" "start" "--help"])]
     (doseq [needle ["Available Commands:" "add" "list" "weaver"]]
@@ -216,6 +217,8 @@
       (assert-contains add needle "Go CLI command help shows flags"))
     (doseq [needle ["op <name> [args...]" "weaver-registered operation"]]
       (assert-contains op needle "Go CLI op help shows argv passthrough surface"))
+    (doseq [needle ["list" "explain"]]
+      (assert-contains pattern needle "Go CLI pattern help shows children"))
     (doseq [needle ["start" "status" "stop"]]
       (assert-contains weaver needle "Go CLI subcommand help shows children"))
     (assert-contains start "--config-dir" "Go CLI nested subcommand help shows selected world flag")))
@@ -321,8 +324,10 @@
                    (:views payload)
                    "startup registered view is introspectable")
           (assert= "Startup transformed strand" (slurp event-marker) "startup event handler observes async strand add event")
-          (let [explanation (parse-json (run-cli-config! config-dir "pattern" "explain" "review-task"))
+          (let [patterns (parse-json (run-cli-config! config-dir "pattern" "list"))
+                explanation (parse-json (run-cli-config! config-dir "pattern" "explain" "review-task"))
                 woven (parse-json (run-cli-config-stdin! config-dir "{\"title\":\"Patterned smoke\"}\n" "weave" "--pattern" "review-task"))]
+            (assert= ["review-task"] (mapv :name patterns) "pattern list exposes registered patterns")
             (assert= "review-task" (:name explanation) "pattern explain exposes registered pattern")
             (assert= ["Patterned smoke" "Review: Patterned smoke"]
                      (titles (:created woven))

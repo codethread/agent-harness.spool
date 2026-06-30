@@ -2,6 +2,8 @@
 
 Always read `./devflow/TENETS.md` and `./devflow/PHILOSOPHY.md` before all work.
 
+Always load the local strand skill at `./.agents/skills/strand/SKILL.md` when planning or tracking multi-step work with `strand`.
+
 Skein is daemon-core-first behind a small Go router: `mill` is the local entrypoint/supervisor, the long-lived weaver owns storage and runtime state, and the `strand` CLI stays a thin JSON control surface. Runtime customization belongs in trusted config and REPL workflows.
 
 Canonical shipped contracts live in root specs:

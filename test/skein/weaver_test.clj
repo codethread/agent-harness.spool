@@ -1386,11 +1386,14 @@
                               #"Pattern not found"
                               (api/resolve-pattern rt 'dev-task)))))))
 
-(deftest json-socket-weave-and-pattern-explain
+(deftest json-socket-weave-and-pattern-list-and-explain
   (with-runtime
     (fn [rt _]
       (api/init rt)
       (api/register-pattern! rt 'dev-task 'skein.weaver-test/test-pattern ::pattern-input)
+      (let [listed (socket-request rt "pattern-list" {})]
+        (is (true? (get listed "ok")))
+        (is (= ["dev-task"] (mapv #(get % "name") (get listed "result")))))
       (let [explained (socket-request rt "pattern-explain" {"pattern" "dev-task"})]
         (is (true? (get explained "ok")))
         (is (= "dev-task" (get-in explained ["result" "name"]))))
@@ -1461,6 +1464,7 @@
                            ["ready" {}]
                            ["list-query" {"query" "all" "params" {}}]
                            ["ready-query" {"query" "all" "params" {}}]
+                           ["pattern-list" {}]
                            ["pattern-explain" {"pattern" "dev-task"}]]]
           (is (true? (get (socket-request rt op args) "ok")) op))
         (is (empty? @hook-contexts))
