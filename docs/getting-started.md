@@ -1,6 +1,6 @@
 # Getting started with Skein
 
-This guide walks through installing the `strand` CLI, starting the weaver, and
+This guide walks through installing `strand` and `mill`, starting a mill-routed weaver, and
 working with strands, the REPL, and runtime config.
 
 ## Core ideas
@@ -24,10 +24,10 @@ On top of that model you get two ways to work:
 The CLI stays thin on purpose; runtime customization belongs in trusted config
 and the REPL. See [PHILOSOPHY.md](../devflow/PHILOSOPHY.md) for the reasoning.
 
-Install the CLI:
+Install the CLIs:
 
 ```sh
-go install ./cli/cmd/strand
+go install ./cli/cmd/strand ./cli/cmd/mill
 ```
 
 ## Table of contents
@@ -35,7 +35,6 @@ go install ./cli/cmd/strand
 - [Core ideas](#core-ideas)
 - [Choosing a world](#choosing-a-world)
 - [Start the weaver](#start-the-weaver)
-- [Initialize the store](#initialize-the-store)
 - [Add and inspect strands](#add-and-inspect-strands)
 - [Close and delete strands](#close-and-delete-strands)
 - [REPL workflow](#repl-workflow)
@@ -46,12 +45,8 @@ go install ./cli/cmd/strand
 
 ## Choosing a world
 
-By default `strand` is repo-first: without `--config-dir`, it searches upward
-from the current directory for the nearest `.skein` directory and uses that as
-the selected config world. Repo `.skein` is trusted config only; mill-owned
-runtime state, metadata, sockets, and data live under Skein's XDG state root. If
-no `.skein` is found, non-init commands fail with remediation instead of falling
-back to a global personal world.
+By default `strand` is repo-first: without `--config-dir`, `mill` resolves the current Git worktree root and uses that repo's `.skein` directory as the selected config world. Repo `.skein` is trusted config only; mill-owned
+runtime state, metadata, sockets, and data live under Skein's XDG state root. Outside Git, no-flag commands fail with remediation instead of creating an accidental cwd world or falling back to a global personal world.
 
 Initialize a repo world from the Skein checkout:
 
@@ -83,8 +78,7 @@ examples below omit the flag; add it back when targeting a custom world.
 
 ## Start the weaver
 
-Start mill once, then ask it to start the selected world's weaver. Weaver startup
-prepares storage; there is no separate post-start `strand init` step.
+Start mill once in a durable terminal, then ask it to start the selected world's weaver. Weaver startup prepares storage; there is no separate post-start `strand init` or database init step.
 
 ```sh
 mill start
@@ -233,12 +227,10 @@ Fresh `strand init` creates missing workspace files without overwriting existing
   config.json      # gitignored: local Skein source checkout path
   init.local.clj   # gitignored: personal startup overlay
   libs.local.edn   # gitignored: personal approved-library overlay
-  state/           # gitignored: weaver metadata/socket
-  data/            # gitignored: SQLite data
 ```
 
 Generated `.skein/.gitignore` ignores `config.json`, `init.local.clj`,
-`libs.local.edn`, `state/`, `data/`, `weaver.*`, and SQLite/runtime artifacts.
+`libs.local.edn`, and accidental `state/`, `data/`, `weaver.*`, and SQLite/runtime artifacts. Normal runtime metadata, sockets, and SQLite data live under mill-owned XDG state paths, not in `.skein`.
 `init.clj` and `libs.edn` are suitable to commit when the repo wants shared
 Skein behavior. The generated `init.clj` is a small resilient bootstrap:
 

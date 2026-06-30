@@ -3,8 +3,8 @@
 **Document ID:** `DELTA-MillRouterRuntime-DaemonRuntime-001`
 **Root spec:** [daemon-runtime.md](../../../specs/daemon-runtime.md)
 **Feature:** [../proposal.md](../proposal.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-29
+**Status:** Merged
+**Last Updated:** 2026-06-30
 
 ## DELTA-MillRouterRuntime-DaemonRuntime-001.P1 Summary
 

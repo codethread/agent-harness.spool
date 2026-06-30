@@ -39,11 +39,11 @@ weave!
 
 ## SPEC-003.P3 Contracts
 
-- **SPEC-003.C1:** `connect!` selects one active weaver connection by Skein world. It requires an explicit selected config-dir, either passed by `strand weaver repl` after CLI world resolution or supplied directly by standalone Clojure/test helpers. It never accepts a database path and no longer silently falls back to an XDG global world.
-- **SPEC-003.C2:** `strand weaver repl` preloads `skein.repl`, calls `connect!` for the selected weaver world, and presents the prompt.
+- **SPEC-003.C1:** `connect!` selects one active weaver connection by Skein world. It requires an explicit selected config-dir and state metadata, either passed by `strand weaver repl` after mill world resolution or supplied directly by standalone Clojure/test helpers. It never accepts a database path and no longer silently falls back to an XDG global world.
+- **SPEC-003.C2:** `strand weaver repl` requires a running `mill`, asks it to resolve the selected world and verify that world's weaver is running, preloads `skein.repl`, calls `connect!` for the selected weaver world, and presents the prompt. Mill does not proxy nREPL; the helper JVM connects directly to the selected weaver nREPL endpoint using mill-provided runtime metadata.
 - **SPEC-003.C3:** `strand weaver repl --stdin` uses the same preloaded, connected helper context, reads forms from stdin, evaluates them in order, prints one direct normal Clojure result per top-level form, and exits. Callers that want one machine-readable payload should wrap work in one top-level `do` or `let`.
 - **SPEC-003.C4:** Helpers that need a weaver fail before connection with remediation that points to `strand weaver repl` or `connect!`; weaver/transport failures surface loudly as Clojure exceptions.
-- **SPEC-003.C5:** `init!` initializes the active weaver store schema.
+- **SPEC-003.C5:** `init!` is a trusted idempotent helper for explicit schema initialization/testing. Normal CLI setup does not require calling it because weaver startup prepares empty stores.
 - **SPEC-003.C6:** `strand!` creates a strand and returns the created row. Supported arities include a title alone, title with attributes, and title with options containing optional `:state` and `:attributes`.
 - **SPEC-003.C7:** `update!` accepts a strand id and patch map with optional `:title`, `:state`, `:attributes`, and `:edges`. Generic update accepts `active|closed`; `replaced` is reserved for supersession. Other lifecycle keys are not core strand fields.
 - **SPEC-003.C8:** `:edges` are maps with `:type`, `:to`, and optional `:attributes`; each edge is written from the updated strand to `:to`. Edge `:type` values are open relation names matching `[a-z0-9][a-z0-9._/-]*`.

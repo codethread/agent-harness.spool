@@ -53,8 +53,10 @@
 
 (defn delete-built-cli! []
   (let [strand-file (java.io.File. strand-bin)
+        mill-file (java.io.File. mill-bin)
         bin-dir (.getParentFile strand-file)]
     (.delete strand-file)
+    (.delete mill-file)
     (when (and bin-dir (.isDirectory bin-dir) (empty? (seq (.list bin-dir))))
       (.delete bin-dir))))
 
@@ -353,7 +355,37 @@
           (stop-cli-daemon-config! config-dir daemon)
           (delete-tree! (smoke-config-dir-named (str db-file ".startup-transform"))))))))
 
+(defn wait-for-repo-weaver! [repo]
+  (loop [attempts 50]
+    (when (zero? attempts)
+      (throw (ex-info "repo weaver did not become ready" {})))
+    (let [running? (try
+                     (= "running" (:state (parse-json (run-process! "repo weaver status succeeds" repo nil [strand-bin "weaver" "status"]))))
+                     (catch AssertionError _ false))]
+      (when-not running?
+        (Thread/sleep 200)
+        (recur (dec attempts))))))
+
+(defn smoke-git-repo-world! []
+  (let [repo (java.io.File. smoke-run-root "git-repo-world")]
+    (delete-tree! (.toPath repo))
+    (.mkdirs repo)
+    (run-process! "smoke repo git init succeeds" repo nil ["git" "init"])
+    (run-process! "repo bootstrap initializes .skein through mill" repo nil [strand-bin "init" "--source" checkout-root])
+    (run-process! "repo weaver start succeeds" repo nil [strand-bin "weaver" "start"])
+    (wait-for-repo-weaver! repo)
+    (try
+      (let [strand-id (:id (parse-json (run-process! "repo add strand succeeds" repo nil [strand-bin "add" "Repo smoke strand" "--attr" "owner=smoke"])))
+            listed (parse-json (run-process! "repo list succeeds" repo nil [strand-bin "list"]))
+            repl-listed (edn/read-string (run-process! "repo stdin repl succeeds" repo "(strands)\n" [strand-bin "weaver" "repl" "--stdin"]))]
+        (assert= ["Repo smoke strand"] (titles listed) "repo world list sees CLI-created strand")
+        (assert= strand-id (:id (first repl-listed)) "repo world stdin REPL attaches through mill"))
+      (finally
+        (run-process! "repo weaver stop succeeds" repo nil [strand-bin "weaver" "stop"])
+        (delete-tree! (.toPath repo))))))
+
 (defn smoke-bootstrap! [db-file]
+  (smoke-git-repo-world!)
   (smoke-bootstrap-clean-config! db-file)
   (smoke-bootstrap-dirty-config! db-file)
   (smoke-startup-transformations! db-file))

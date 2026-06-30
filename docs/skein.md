@@ -14,7 +14,7 @@ This guide is written for Skein users and for agents working inside a user's Ske
 
 ## Mental model
 
-Skein is daemon-core-first. You start a weaver for a selected world, then clients talk to that weaver.
+Skein is daemon-core-first behind a small router. You start `mill` once, ask it to start a weaver for a selected world, then clients send requests through `mill` to that weaver.
 
 ```text
 selected config-dir (normally repo .skein)
@@ -34,15 +34,15 @@ running weaver
   owns synced library state
 
 clients
-  strand CLI       -> JSON socket, small safe command set
-  weaver REPL      -> connected Clojure helper context
+  strand CLI       -> mill -> weaver JSON socket, small safe command set
+  weaver REPL      -> mill resolution -> connected Clojure helper context
 ```
 
 Different config dirs are different worlds. Use `--config-dir <dir>` when you want an isolated world for experiments, agent work, or tests.
 
 ## Worlds and config dirs
 
-The ordinary world is repo-local. Without `--config-dir`, `strand` searches upward from cwd for the nearest `.skein` directory and uses it as the selected config-dir. If none is found, non-init commands fail loudly. `strand init` creates or completes `.skein` at the Git root and fails loudly outside Git:
+The ordinary world is repo-local. Without `--config-dir`, `mill` resolves the current Git worktree root and uses that repo's `.skein` directory as the selected config-dir. Outside Git, no-flag commands fail loudly. `strand init` creates or completes `.skein` at the Git root and fails loudly outside Git:
 
 ```sh
 strand init --source /path/to/skein-src
@@ -75,17 +75,16 @@ The important file is `config.json`:
 
 From a Skein source checkout, `strand init --source "$PWD"` is the normal repo bootstrap path. It creates or completes the repo `.skein` world, writes local `config.json` when source resolution succeeds, and leaves shared config files ready to commit.
 
-`make bootstrap` remains a convenience setup path for explicit make-driven config targets (`SKEIN_CONFIG=...` if passed to make). It:
+`make bootstrap` remains a convenience setup path after `mill start` is already running. It can target an explicit disposable config dir with `BOOTSTRAP_CONFIG_DIR=...`. It:
 
-- runs `go install ./cli/cmd/strand`;
-- creates the configured directory;
-- writes `config.json` pointing `source` at the current checkout;
+- runs `go install ./cli/cmd/strand` and `go install ./cli/cmd/mill`;
+- runs config-only `strand init --source` for the repo or explicit config target;
 - creates `AGENTS.md` only if absent;
 - creates `CLAUDE.md` as a symlink to `AGENTS.md` only if absent.
 
 `AGENTS.md` tells coding agents to read this canonical guide from the configured Skein source checkout. `CLAUDE.md` exists for Claude-oriented tooling.
 
-`make bootstrap` does not overwrite existing `AGENTS.md` or `CLAUDE.md`, so you can customize them after initial setup. It does rewrite `config.json` for the selected make config target. User-facing Skein documentation lives in the source checkout under `docs/`; the canonical user reference is `docs/skein.md`.
+`make bootstrap` does not overwrite existing Skein config, `AGENTS.md`, or `CLAUDE.md`, so you can customize them after initial setup. It does not run `git init` or initialize database storage; weaver startup prepares storage. User-facing Skein documentation lives in the source checkout under `docs/`; the canonical user reference is `docs/skein.md`.
 
 ## Weaver
 
@@ -544,11 +543,13 @@ This is by design: the system is flexible because attributes and user code are o
 
 ## Practical bootstrap
 
-Install from a checkout and create a repo-local world:
+Install from a checkout, start mill, and create a repo-local world:
 
 ```sh
-go install ./cli/cmd/strand
+go install ./cli/cmd/strand ./cli/cmd/mill
+mill start
 strand init --source "$PWD"
+strand weaver start
 ```
 
 For experiments, use a disposable world:
@@ -562,7 +563,6 @@ strand --config-dir "$world" weaver start
 In another terminal:
 
 ```sh
-strand --config-dir "$world" init
 strand --config-dir "$world" add "Sketch workflow" --attr owner=agent
 strand --config-dir "$world" ready
 ```

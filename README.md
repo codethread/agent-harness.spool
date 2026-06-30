@@ -11,25 +11,20 @@ Use it to:
 
 ## Quick start
 
-Install the `strand` command from this checkout, then initialize a repo-local `.skein` world in the repository you want to work in:
+Install the `strand` and `mill` commands from this checkout, start `mill`, then initialize a repo-local `.skein` world in the Git repository you want to work in:
 
 ```sh
-go install ./cli/cmd/strand
-strand init --source "$PWD"
-```
-
-Without `--config-dir`, `strand` searches upward from the current directory for the nearest `.skein`. Outside a repo-local world, non-init commands fail loudly instead of using a global default.
-
-Start the weaver in one terminal:
-
-```sh
+go install ./cli/cmd/strand ./cli/cmd/mill
+mill start
+strand init --source /path/to/skein-src
 strand weaver start
 ```
+
+Without `--config-dir`, `strand` selects the current Git repository root. Outside Git, no-flag commands fail loudly instead of creating an accidental cwd world or using a global default.
 
 Then use it from another terminal:
 
 ```sh
-strand init
 strand add "Sketch strand model" --state closed --attr example_outcome=sketched
 strand add "Write docs" --attr owner=agent
 strand list
@@ -57,20 +52,20 @@ world=$(mktemp -d)
 printf '{"configFormat":"alpha","source":"%s"}\n' "$PWD" | jq . > "$world/config.json"
 ```
 
-Start the weaver in one terminal:
+Start mill and the weaver:
 
 ```sh
+mill start
 strand --config-dir "$world" weaver start
 ```
 
 Then use it from another terminal:
 
 ```sh
-strand --config-dir "$world" init
 strand --config-dir "$world" add "Sketch strand model" --state closed --attr example_outcome=sketched
 ```
 
-Explicit `--config-dir <dir>` worlds keep config in `<dir>/config.json`, runtime state in `<dir>/state`, and strand data in `<dir>/data/skein.sqlite`.
+Explicit `--config-dir <dir>` worlds keep trusted config in that directory. Runtime metadata, sockets, and SQLite data live under mill-owned XDG state paths keyed by the selected config identity.
 
 ## Data model
 

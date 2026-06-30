@@ -3,8 +3,8 @@
 **Document ID:** `DELTA-MillRouterRuntime-Cli-001`
 **Root spec:** [cli.md](../../../specs/cli.md)
 **Feature:** [../proposal.md](../proposal.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-29
+**Status:** Merged
+**Last Updated:** 2026-06-30
 
 ## DELTA-MillRouterRuntime-Cli-001.P1 Summary
 

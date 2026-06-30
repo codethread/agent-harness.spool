@@ -1,10 +1,11 @@
 .PHONY: all build install bootstrap open-config
 
-all: build install bootstrap
+all: build install
 
 GO_CLI := ./cli/cmd/strand
 MILL_CLI := ./cli/cmd/mill
 BIN := ./cli/bin/strand
+MILL_BIN := ./cli/bin/mill
 
 # Optional explicit disposable world; leave empty to use repo-local bootstrap via `strand init`.
 BOOTSTRAP_CONFIG_DIR ?=
@@ -17,16 +18,18 @@ CLAUDE_FILE := $(CONFIG_DIR)/CLAUDE.md
 
 build:
 	go build -o $(BIN) $(GO_CLI)
+	go build -o $(MILL_BIN) $(MILL_CLI)
 
 install:
 	go install $(GO_CLI)
 	go install $(MILL_CLI)
 
-# Bootstrap matching repo-first CLI flow: install strand and run repo-local `strand init`.
+# Bootstrap matching mill-routed repo-first CLI flow: install strand/mill and run config-only `strand init`.
+# Requires a running `mill start` in the current XDG state world.
 bootstrap:
 	go install $(GO_CLI)
 	go install $(MILL_CLI)
-	mkdir -p "$(CONFIG_DIR)"
+	@mill status >/dev/null 2>&1 || { echo "make bootstrap requires a running mill; start one with: mill start" >&2; exit 1; }
 	@if [ -n "$(BOOTSTRAP_CONFIG_DIR)" ]; then \
 		strand --config-dir "$(BOOTSTRAP_CONFIG_DIR)" init --source "$(CURDIR)"; \
 	else \

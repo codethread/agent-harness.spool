@@ -3,8 +3,8 @@
 **Document ID:** `DELTA-MillRouterRuntime-ReplApi-001`
 **Root spec:** [repl-api.md](../../../specs/repl-api.md)
 **Feature:** [../proposal.md](../proposal.md)
-**Status:** Reviewed
-**Last Updated:** 2026-06-29
+**Status:** Merged
+**Last Updated:** 2026-06-30
 
 ## DELTA-MillRouterRuntime-ReplApi-001.P1 Summary
 

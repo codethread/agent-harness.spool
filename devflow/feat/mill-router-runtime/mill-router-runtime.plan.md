@@ -147,3 +147,9 @@ Outcome: Go, Clojure, integration, smoke, README, getting-started, Makefile, and
 - Normal strand operations now use `strand -> mill -> selected-world weaver` forwarding. CLI parsing remains in `strand`; mill resolves the selected world, requires running selected-world metadata, forwards only the operation payload to the weaver socket, and preserves weaver result/error envelopes for callers.
 - Added Go coverage for forwarded `add`, `list`, `ready`, and `op`, missing mill, missing selected-world weaver, and weaver domain error propagation. Added an isolated integration path for `mill`, repo `strand init`, `strand weaver start`, `strand add`, and `strand list`.
 - Review follow-up removed strand-side implicit world/config pre-resolution from ordinary forwarded commands; mill now receives cwd plus only raw explicit `--config-dir`, while REPL/lifecycle paths retain source-aware config loading. Forwarding now reports stale selected-world metadata separately from missing-weaver remediation.
+
+### PLAN-MillRouterRuntime-001.DN12 Task 7 implementation notes — 2026-06-30
+
+- Smoke now includes a Git repo implicit-world path through a disposable XDG mill: `strand init`, `strand weaver start`, CLI add/update/list/ready, `weaver repl --stdin`, and `weaver stop`, with repo cleanup after the run.
+- README, getting-started, user reference, Makefile, and root specs now describe the mill-first flow, config-only `strand init`, XDG runtime/data ownership, and `init!` as a trusted REPL/testing helper rather than normal setup.
+- Feature-local CLI, daemon runtime, and REPL deltas were marked `Merged`. Validation left only intentional source/doc/devflow changes in `git status --short`.
