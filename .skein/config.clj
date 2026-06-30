@@ -378,6 +378,81 @@
      :active (mapv summarize-strand active)
      :ready (mapv summarize-strand ready)}))
 
+(defn- active-devflow-task?
+  "Return true when strand is active devflow task/review work."
+  [{:keys [state attributes]}]
+  (and (= "active" state)
+       (= "devflow" (:workflow attributes))
+       (#{"task" "review"} (:kind attributes))))
+
+(defn- strands-by-existing-id
+  "Return the strand matching id, or an empty vector when id does not exist."
+  [rt strand-id]
+  (try
+    (api/strands-by-ids rt [strand-id])
+    (catch clojure.lang.ExceptionInfo ex
+      (if (= :strands-by-ids (:context (ex-data ex)))
+        []
+        (throw ex)))))
+
+(defn- task-candidates
+  "Return active devflow task/review candidates for a strand id or task key.
+
+  Exact active strand id matches take precedence. Task-key lookup is only used
+  when the supplied reference does not identify an active devflow task/review."
+  [rt task-ref]
+  (let [by-id (filterv active-devflow-task? (strands-by-existing-id rt task-ref))]
+    (if (seq by-id)
+      by-id
+      (api/list rt [:and devflow-work-query
+                    [:= [:attr :task_key] [:param :task]]]
+                {:task task-ref}))))
+
+(defn- require-one-task!
+  "Return the unique task candidate or fail loudly."
+  [task-ref candidates]
+  (case (count candidates)
+    0 (throw (ex-info "No active devflow task matched root lookup" {:task task-ref}))
+    1 (first candidates)
+    (throw (ex-info "Multiple active devflow tasks matched root lookup"
+                    {:task task-ref
+                     :matches (mapv summarize-work-item candidates)}))))
+
+(defn- owning-feature-roots
+  "Return devflow plan roots that own task through parent-of ancestors."
+  [rt task-id]
+  (let [root-ids (api/ancestor-root-ids rt [task-id] {:type "parent-of"
+                                                      :where devflow-feature-query})]
+    (api/strands-by-ids rt root-ids)))
+
+(defn task-root-op
+  "Return the devflow feature/plan roots that own one active task or review.
+
+  Usage: `strand op task-root <strand-id-or-task-key>`. The lookup accepts a
+  strand id or an active devflow task_key. Task-key lookup must match exactly
+  one active devflow task/review. Roots are discovered with ancestor-root-ids
+  over the declared parent-of relation and filtered to active devflow plan
+  strands."
+  [ctx]
+  (let [rt @runtime/current-runtime
+        task-ref (or (require-zero-or-one-arg! "task-root" (:op/argv ctx) "strand op task-root <strand-id-or-task-key>")
+                     (throw (ex-info "task-root requires a strand id or task_key"
+                                     {:usage "strand op task-root <strand-id-or-task-key>"})))
+        task (require-one-task! task-ref (task-candidates rt task-ref))
+        roots (owning-feature-roots rt (:id task))]
+    {:operation "task-root"
+     :task (summarize-work-item task)
+     :root_count (count roots)
+     :roots (mapv summarize-work-item roots)}))
+
+(defn task-root-view
+  "Return a read-only projection of devflow feature/plan roots for a task.
+
+  Params: `{:task \"<strand-id-or-task-key>\"}`. This view mirrors `task-root-op`
+  for coordinator dashboards and other trusted config consumers."
+  [{:keys [params]}]
+  (task-root-op {:op/argv [(:task params)]}))
+
 (defn devflow-conventions-op
   "Return the blessed devflow strand conventions installed by this config."
   [_ctx]
@@ -402,7 +477,10 @@
               :usage "strand ready --query devflow-work"}]
    :views [{:name "devflow-dashboard"
             :usage "(skein.views.alpha/view! 'devflow-dashboard {}) or {:feature \"<feature>\"}"
-            :purpose "Read-only feature dashboard with active features, ready work, blocked work, counts, and coordination metadata."}]
+            :purpose "Read-only feature dashboard with active features, ready work, blocked work, counts, and coordination metadata."}
+           {:name "task-root"
+            :usage "(skein.views.alpha/view! 'task-root {:task \"<strand-id-or-task-key>\"})"
+            :purpose "Read-only lookup for the devflow feature/plan root that owns one task or review."}]
    :attributes [{:name "workflow" :values ["devflow" "agent-plan"]}
                 {:name "feature" :meaning "Feature slug for feature-scoped queries."}
                 {:name "kind" :values ["plan" "task" "review"]}
@@ -446,7 +524,10 @@
    :queries (register-query-map!)
    :views [(views/register-view!
             'devflow-dashboard
-            'config/devflow-dashboard-view)]
+            'config/devflow-dashboard-view)
+           (views/register-view!
+            'task-root
+            'config/task-root-view)]
    :ops [(api/register-op!
           'current-dags
           "Show active parent-of work DAGs with active depends-on edges"
@@ -458,7 +539,11 @@
          (api/register-op!
           'devflow-conventions
           "Show repo-local devflow strand patterns, queries, and attributes"
-          'config/devflow-conventions-op)]
+          'config/devflow-conventions-op)
+         (api/register-op!
+          'task-root
+          "Show the devflow feature/plan root that owns one task or review"
+          'config/task-root-op)]
    :ephemeral {:namespace 'skein.libs.ephemeral
                :creator 'skein.libs.ephemeral/ephemeral!
                :burner 'skein.libs.ephemeral/burn-ephemeral!

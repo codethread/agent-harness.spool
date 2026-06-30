@@ -67,7 +67,9 @@
   (is (contains? (api/queries rt) "devflow-work"))
   (is (contains? (api/queries rt) "devflow-features"))
   (is (some #(= "devflow-dashboard" (:name %)) (views/views)))
-  (is (some #(= "devflow-status" (:name %)) (api/ops rt))))
+  (is (some #(= "task-root" (:name %)) (views/views)))
+  (is (some #(= "devflow-status" (:name %)) (api/ops rt)))
+  (is (some #(= "task-root" (:name %)) (api/ops rt))))
 
 (deftest devflow-status-unscoped-ready-excludes-plan-strands
   (with-config-runtime
@@ -108,6 +110,49 @@
                               :owner "outside"}
                    :attributes {}}]
                  (:blocked_by blocked))))))))
+
+(deftest task-root-op-and-view-return-owning-devflow-plan
+  (with-config-runtime
+    (fn [rt]
+      (let [feature (add-devflow! rt "Feature" "plan" "root-lookup" {} [])
+            task (add-devflow! rt "Implement root lookup" "task" "root-lookup"
+                               {:task_key "root-lookup" :owner "agent"}
+                               [])]
+        (api/update rt (:id feature) {:edges [{:type "parent-of" :to (:id task)}]})
+        (let [by-key ((requiring-resolve 'config/task-root-op) {:op/argv ["root-lookup"]})
+              by-id (views/view! 'task-root {:task (str (:id task))})]
+          (is (= "task-root" (:operation by-key)))
+          (is (= {:feature "root-lookup" :kind "task" :task_key "root-lookup" :owner "agent"}
+                 (get-in by-key [:task :metadata])))
+          (is (= 1 (:root_count by-key)))
+          (is (= [(:id feature)] (mapv :id (:roots by-key))))
+          (is (= [(:id feature)] (mapv :id (:roots by-id)))))))))
+
+(deftest task-root-op-prefers-strand-id-over-colliding-task-key
+  (with-config-runtime
+    (fn [rt]
+      (let [feature-by-id (add-devflow! rt "Feature by id" "plan" "root-by-id" {} [])
+            task-by-id (add-devflow! rt "Task by id" "task" "root-by-id"
+                                     {:task_key "original-key"}
+                                     [])
+            feature-by-key (add-devflow! rt "Feature by key" "plan" "root-by-key" {} [])
+            task-by-key (add-devflow! rt "Task by key" "task" "root-by-key"
+                                      {:task_key (:id task-by-id)}
+                                      [])]
+        (api/update rt (:id feature-by-id) {:edges [{:type "parent-of" :to (:id task-by-id)}]})
+        (api/update rt (:id feature-by-key) {:edges [{:type "parent-of" :to (:id task-by-key)}]})
+        (let [result ((requiring-resolve 'config/task-root-op) {:op/argv [(:id task-by-id)]})]
+          (is (= (:id task-by-id) (get-in result [:task :id])))
+          (is (= [(:id feature-by-id)] (mapv :id (:roots result)))))))))
+
+(deftest task-root-op-fails-on-ambiguous-task-key
+  (with-config-runtime
+    (fn [rt]
+      (add-devflow! rt "Task A" "task" "root-lookup-a" {:task_key "duplicate"} [])
+      (add-devflow! rt "Task B" "review" "root-lookup-b" {:task_key "duplicate"} [])
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Multiple active devflow tasks matched root lookup"
+                            ((requiring-resolve 'config/task-root-op) {:op/argv ["duplicate"]}))))))
 
 (deftest repo-local-startup-and-reload-preserve-dashboard-registrations
   (with-startup-config-runtime
