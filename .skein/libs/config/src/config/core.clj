@@ -1,6 +1,7 @@
 (ns config.core
   "Repo-local Skein runtime configuration for skein-src."
   (:require [config.agent-patterns :as agent-patterns]
+            [config.work-dags :as work-dags]
             [skein.libs.ephemeral :as ephemeral]))
 
 (defn install!
@@ -13,6 +14,7 @@
   {:installed true
    :namespace 'config.core
    :agent-patterns (agent-patterns/install!)
+   :work-dags (work-dags/install!)
    :ephemeral {:namespace 'skein.libs.ephemeral
                :creator 'skein.libs.ephemeral/ephemeral!
                :burner 'skein.libs.ephemeral/burn-ephemeral!
