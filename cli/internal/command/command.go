@@ -34,9 +34,23 @@ type Caller interface {
 	Call(string, map[string]any) (any, error)
 }
 
-var newClient = func(o Options) Caller {
-	return client.New(client.Config{ConfigDir: o.ConfigDir, StateDir: o.StateDir})
+type millForwardingClient struct{ world client.MillWorldRequest }
+
+func (c millForwardingClient) Call(operation string, payload map[string]any) (any, error) {
+	return client.MillCallPayload(operation, c.world, payload)
 }
+
+var newClient = func(o Options) Caller {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return errorCaller{err: err}
+	}
+	return millForwardingClient{world: client.MillWorldRequest{CWD: cwd, ConfigDir: o.ConfigDir}}
+}
+
+type errorCaller struct{ err error }
+
+func (c errorCaller) Call(string, map[string]any) (any, error) { return nil, c.err }
 
 func New(out, err io.Writer) *App { return &App{Stdout: out, Stderr: err} }
 
@@ -249,7 +263,7 @@ func (a *App) rootCommand() *cobra.Command {
 	}})
 	repl := &cobra.Command{Use: "repl", Short: "Start a connected Clojure helper REPL", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		stdin, _ := cmd.Flags().GetBool("stdin")
-		return a.withConfig(o, func(r Options) error { return a.launchRepl(r, stdin) })
+		return a.withResolvedConfig(o, func(r Options) error { return a.launchRepl(r, stdin) })
 	}}
 	repl.Flags().Bool("stdin", false, "read Clojure forms from stdin, print one result per top-level form, then exit")
 	weaver.AddCommand(repl)
@@ -301,6 +315,10 @@ func (a *App) queryCommand(o *Options, name, short string) *cobra.Command {
 }
 
 func (a *App) withConfig(o Options, f func(Options) error) error {
+	return f(o)
+}
+
+func (a *App) withResolvedConfig(o Options, f func(Options) error) error {
 	opts, err := resolveOptions(o)
 	if err != nil {
 		return err

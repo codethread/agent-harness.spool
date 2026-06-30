@@ -31,6 +31,7 @@ type MillRequest struct {
 	MillID          string           `json:"mill_id"`
 	Operation       string           `json:"operation"`
 	World           MillWorldRequest `json:"world,omitempty"`
+	Payload         map[string]any   `json:"payload"`
 }
 
 type MillWorldRequest struct {
@@ -50,12 +51,19 @@ type MillResponse struct {
 func MillStatus() (any, error) { return MillCall("status", MillWorldRequest{}) }
 
 func MillCall(operation string, world MillWorldRequest) (any, error) {
+	return MillCallPayload(operation, world, nil)
+}
+
+func MillCallPayload(operation string, world MillWorldRequest, payload map[string]any) (any, error) {
+	if payload == nil {
+		payload = map[string]any{}
+	}
 	meta, err := ReadMillMetadata()
 	if err != nil {
 		return nil, err
 	}
 	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
-	req := MillRequest{ProtocolVersion: MillProtocolVersion, RequestID: requestID, MillID: meta.MillID, Operation: operation, World: world}
+	req := MillRequest{ProtocolVersion: MillProtocolVersion, RequestID: requestID, MillID: meta.MillID, Operation: operation, World: world, Payload: payload}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", meta.SocketPath)

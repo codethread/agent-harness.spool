@@ -155,8 +155,35 @@ func TestRepoLocalDiscoveryAndInitLocalOverlay(t *testing.T) {
 	}
 }
 
-func TestRepoLocalOverlayCommandsAwaitMillRouting(t *testing.T) {
-	t.Skip("weaver and ordinary command routing move to mill in later slices")
+func TestMillRoutedStrandAddAndList(t *testing.T) {
+	repo := shortTempDir(t)
+	if err := exec.Command("git", "init", repo).Run(); err != nil {
+		t.Fatalf("git init repo: %v", err)
+	}
+	source, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := buildStrand(t)
+	startMill(t)
+	if out, err := outputStrand(bin, "", repo, "init", "--source", source); err != nil {
+		t.Fatalf("init failed: %v\n%s", err, out)
+	}
+	if out, err := outputStrand(bin, "", repo, "weaver", "start"); err != nil {
+		t.Fatalf("weaver start failed: %v\n%s", err, out)
+	}
+	waitForStatus(t, bin, "", repo, &bytes.Buffer{})
+	out, err := outputStrand(bin, "", repo, "add", "hello")
+	if err != nil || !strings.Contains(out, `"title":"hello"`) {
+		t.Fatalf("add output/error = %q/%v", out, err)
+	}
+	out, err = outputStrand(bin, "", repo, "list")
+	if err != nil || !strings.Contains(out, `"title":"hello"`) {
+		t.Fatalf("list output/error = %q/%v", out, err)
+	}
+	if out, err := outputStrand(bin, "", repo, "weaver", "stop"); err != nil {
+		t.Fatalf("weaver stop failed: %v\n%s", err, out)
+	}
 }
 
 func TestTaskAndQueryCommandsRunOutsideCheckoutWithoutSource(t *testing.T) {

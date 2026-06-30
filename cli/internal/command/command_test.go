@@ -155,72 +155,15 @@ func TestConfigDirPrecedenceAndValidation(t *testing.T) {
 	if _, err := run("--config-dir", dir, "list"); err != nil {
 		t.Fatal(err)
 	}
-	realDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if captured.Source != "/tmp/source" || captured.ConfigDir != realDir {
-		t.Fatalf("unexpected resolved options: %#v", captured)
+	if captured.Source != "" || captured.ConfigDir != dir || !captured.ConfigDirExplicit {
+		t.Fatalf("unexpected forwarding options: %#v", captured)
 	}
 
 	if _, err := run("--config-path", dir, "list"); err == nil || !strings.Contains(err.Error(), "unknown flag: --config-path") {
 		t.Fatalf("expected removed config-path error, got %v", err)
 	}
 
-	badDir := filepath.Join(t.TempDir(), "bad")
-	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(badDir, "config.json"), []byte(`{"configFormat":"alpha","where":"nope"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("--config-dir", badDir, "list"); err == nil || !strings.Contains(err.Error(), "unsupported client config key: where") {
-		t.Fatalf("expected unsupported key error, got %v", err)
-	}
 
-	oldDBDir := filepath.Join(t.TempDir(), "old-db")
-	if err := os.MkdirAll(oldDBDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(oldDBDir, "config.json"), []byte(`{"configFormat":"alpha","db":"old.sqlite"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("--config-dir", oldDBDir, "list"); err == nil || !strings.Contains(err.Error(), "unsupported client config key: db") {
-		t.Fatalf("expected db unsupported error, got %v", err)
-	}
-
-	missingFormat := filepath.Join(t.TempDir(), "missing-format")
-	if err := os.MkdirAll(missingFormat, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(missingFormat, "config.json"), []byte(`{"source":"/tmp/source"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("--config-dir", missingFormat, "list"); err == nil || !strings.Contains(err.Error(), "configFormat is required") {
-		t.Fatalf("expected configFormat required error, got %v", err)
-	}
-
-	malformedDir := filepath.Join(t.TempDir(), "malformed")
-	if err := os.MkdirAll(malformedDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(malformedDir, "config.json"), []byte(`{"configFormat":"alpha","source":`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("--config-dir", malformedDir, "list"); err == nil || !strings.Contains(err.Error(), "malformed client config") {
-		t.Fatalf("expected malformed config error, got %v", err)
-	}
-
-	wrongTypeDir := filepath.Join(t.TempDir(), "wrong-type")
-	if err := os.MkdirAll(wrongTypeDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wrongTypeDir, "config.json"), []byte(`{"configFormat":"alpha","source":123}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run("--config-dir", wrongTypeDir, "list"); err == nil || !strings.Contains(err.Error(), "client config source must be a string") {
-		t.Fatalf("expected source type error, got %v", err)
-	}
 }
 
 func TestInitBootstrapsWorkspaceWhenMissingWithoutWeaverInit(t *testing.T) {
@@ -489,6 +432,14 @@ func TestWeaverReplStatusFailureBlocksLaunch(t *testing.T) {
 	}
 }
 
+func TestOrdinaryCommandsRequireMill(t *testing.T) {
+	cfg := testConfig(t)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	if _, err := run("--config-dir", cfg, "list"); err == nil || !strings.Contains(err.Error(), "start one with: mill start") {
+		t.Fatalf("expected mill remediation, got %v", err)
+	}
+}
+
 func TestWeaverStartRequiresMill(t *testing.T) {
 	cfg := t.TempDir()
 	if _, err := run("--config-dir", cfg, "weaver", "start"); err == nil || !strings.Contains(err.Error(), "start one with: mill start") {
@@ -533,19 +484,16 @@ func TestRepoWorldDiscoveryFromSubdirectory(t *testing.T) {
 	if _, err := run("list"); err != nil {
 		t.Fatal(err)
 	}
-	realCfg, err := filepath.EvalSymlinks(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if captured.ConfigDir != realCfg || captured.Source != "/tmp/source" || captured.ConfigDirExplicit {
+	if captured.ConfigDir != "" || captured.Source != "" || captured.ConfigDirExplicit {
 		t.Fatalf("unexpected discovered options: %#v", captured)
 	}
 }
 
-func TestNoConfigDirFailsWithoutRepoWorld(t *testing.T) {
+func TestNoConfigDirOrdinaryCommandRequiresMillFirst(t *testing.T) {
 	withChdir(t, t.TempDir())
-	if _, err := run("list"); err == nil || !strings.Contains(err.Error(), "no .skein directory found") || !strings.Contains(err.Error(), "strand init") || !strings.Contains(err.Error(), "--config-dir") {
-		t.Fatalf("expected no .skein remediation failure, got %v", err)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	if _, err := run("list"); err == nil || !strings.Contains(err.Error(), "start one with: mill start") {
+		t.Fatalf("expected mill remediation failure, got %v", err)
 	}
 }
 
@@ -561,15 +509,16 @@ func TestDiscoveredWeaverLifecycleRequiresMill(t *testing.T) {
 	}
 }
 
-func TestDiscoveredIncompleteWorldRemediatesQueryCommand(t *testing.T) {
+func TestDiscoveredIncompleteWorldOrdinaryCommandRequiresMill(t *testing.T) {
 	repo := t.TempDir()
 	cfg := filepath.Join(repo, ".skein")
 	if err := os.MkdirAll(cfg, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	withChdir(t, repo)
-	if _, err := run("list"); err == nil || !strings.Contains(err.Error(), cfg) || !strings.Contains(err.Error(), "strand init --source <skein-source>") {
-		t.Fatalf("expected ordinary command remediation, got %v", err)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	if _, err := run("list"); err == nil || !strings.Contains(err.Error(), "start one with: mill start") {
+		t.Fatalf("expected mill remediation, got %v", err)
 	}
 }
 

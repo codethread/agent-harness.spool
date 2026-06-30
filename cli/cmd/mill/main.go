@@ -147,6 +147,17 @@ func (s *server) handle(conn net.Conn) {
 			return
 		}
 		_ = json.NewEncoder(conn).Encode(client.MillResponse{ProtocolVersion: client.MillProtocolVersion, RequestID: req.RequestID, OK: true, Result: result})
+	case "add", "update", "show", "supersede", "burn", "list", "ready", "list-query", "ready-query", "weave", "pattern-explain", "op":
+		result, err := s.forwardToWeaver(req.World, req.Operation, req.Payload)
+		if err != nil {
+			if re, ok := err.(*client.ResponseError); ok {
+				_ = json.NewEncoder(conn).Encode(client.MillResponse{ProtocolVersion: client.MillProtocolVersion, RequestID: req.RequestID, OK: false, Error: re})
+				return
+			}
+			_ = json.NewEncoder(conn).Encode(errorResponse(req.RequestID, "transport", "mill/weaver-forward-failed", "weaver forwarding failed", err.Error()))
+			return
+		}
+		_ = json.NewEncoder(conn).Encode(client.MillResponse{ProtocolVersion: client.MillProtocolVersion, RequestID: req.RequestID, OK: true, Result: result})
 	default:
 		_ = json.NewEncoder(conn).Encode(errorResponse(req.RequestID, "protocol", "mill/unknown-operation", "unknown mill operation", req.Operation))
 	}

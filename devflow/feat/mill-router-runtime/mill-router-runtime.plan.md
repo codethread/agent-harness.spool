@@ -141,3 +141,9 @@ Outcome: Go, Clojure, integration, smoke, README, getting-started, Makefile, and
 
 - Revalidated the existing mill-owned `strand weaver start/status/stop` implementation after Task 6 landed. Full validation now passes, including connected `strand weaver repl --stdin` smoke against XDG metadata.
 - Lifecycle coverage includes fake child launchers and isolated XDG state: explicit Clojure launch args, idempotent same-world start with metadata identity verification, distinct per-world runtime dirs, selected-world-only stop, post-stop artifact cleanup, stale metadata classification, and running status identity/path/endpoint fields.
+
+### PLAN-MillRouterRuntime-001.DN11 Task 5 implementation notes — 2026-06-30
+
+- Normal strand operations now use `strand -> mill -> selected-world weaver` forwarding. CLI parsing remains in `strand`; mill resolves the selected world, requires running selected-world metadata, forwards only the operation payload to the weaver socket, and preserves weaver result/error envelopes for callers.
+- Added Go coverage for forwarded `add`, `list`, `ready`, and `op`, missing mill, missing selected-world weaver, and weaver domain error propagation. Added an isolated integration path for `mill`, repo `strand init`, `strand weaver start`, `strand add`, and `strand list`.
+- Review follow-up removed strand-side implicit world/config pre-resolution from ordinary forwarded commands; mill now receives cwd plus only raw explicit `--config-dir`, while REPL/lifecycle paths retain source-aware config loading. Forwarding now reports stale selected-world metadata separately from missing-weaver remediation.
