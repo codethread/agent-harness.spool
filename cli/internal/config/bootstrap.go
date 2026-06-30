@@ -87,13 +87,20 @@ func GitRoot(cwd string) (string, error) {
 			return "", err
 		}
 	}
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
 	cmd.Dir = cwd
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("strand init requires cwd inside a Git worktree; run `git init` or pass --config-dir: %w", err)
+		return "", fmt.Errorf("default Skein world requires cwd inside a supported non-bare Git worktree; run `git init` or pass --config-dir: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	commonDir := filepath.Clean(strings.TrimSpace(string(out)))
+	if !filepath.IsAbs(commonDir) {
+		return "", fmt.Errorf("Git returned non-absolute common dir for default Skein world: %s", commonDir)
+	}
+	if filepath.Base(commonDir) != ".git" {
+		return "", fmt.Errorf("unsupported Git layout for default Skein world: common Git dir must be a repository .git directory, got %s", commonDir)
+	}
+	return filepath.Dir(commonDir), nil
 }
 
 func writeMissing(path, content string) error {

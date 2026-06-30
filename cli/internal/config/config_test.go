@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -154,5 +155,57 @@ func TestBootstrapTargetWorldResolvesRelativeConfigDirAgainstCallerCWD(t *testin
 	want = filepath.Join(want, ".skein")
 	if world.ConfigDir != want {
 		t.Fatalf("relative config dir resolved against wrong cwd: got %q want %q", world.ConfigDir, want)
+	}
+}
+
+func TestDefaultRepoWorldCanonicalAcrossLinkedWorktrees(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.invalid")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "init")
+
+	linked := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repo, "worktree", "add", linked)
+
+	mainWorld, err := BootstrapTargetWorld(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedWorld, err := BootstrapTargetWorld(linked, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	realRepo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realRepo, ".skein")
+	if mainWorld.ConfigDir != want || linkedWorld.ConfigDir != want {
+		t.Fatalf("default worlds did not use canonical repo .skein: main=%q linked=%q want=%q", mainWorld.ConfigDir, linkedWorld.ConfigDir, want)
+	}
+	if mainWorld.StateDir != linkedWorld.StateDir || mainWorld.DataDir != linkedWorld.DataDir || mainWorld.DBPath != linkedWorld.DBPath {
+		t.Fatalf("linked worktree did not share runtime identity: main=%#v linked=%#v", mainWorld, linkedWorld)
+	}
+}
+
+func TestDefaultRepoWorldRejectsNoGit(t *testing.T) {
+	_, err := BootstrapTargetWorld(t.TempDir(), "")
+	if err == nil || !strings.Contains(err.Error(), "requires cwd inside a supported non-bare Git worktree") {
+		t.Fatalf("expected no-Git default world error, got %v", err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }

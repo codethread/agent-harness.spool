@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -28,23 +27,11 @@ type Config struct {
 }
 
 func RepoWorld() (World, error) {
-	cwd, err := os.Getwd()
+	root, err := GitRoot("")
 	if err != nil {
 		return World{}, err
 	}
-	for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
-		candidate := filepath.Join(dir, ".skein")
-		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
-			return isolatedWorld(candidate)
-		} else if err != nil && !os.IsNotExist(err) {
-			return World{}, err
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-	}
-	return World{}, fmt.Errorf("no .skein directory found from current directory upward; run `strand init` or pass --config-dir")
+	return isolatedWorld(filepath.Join(root, ".skein"))
 }
 
 func SelectedWorld(configDir string) (World, error) {
@@ -58,19 +45,7 @@ func InitWorld(configDir string) (World, error) {
 	if configDir != "" {
 		return isolatedWorld(configDir)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return World{}, err
-	}
-	root := cwd
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = cwd
-	if out, err := cmd.CombinedOutput(); err == nil {
-		root = strings.TrimSpace(string(out))
-	} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 128 || !strings.Contains(string(out), "not a git repository") {
-		return World{}, fmt.Errorf("failed to discover Git root for init: %w", err)
-	}
-	return isolatedWorld(filepath.Join(root, ".skein"))
+	return RepoWorld()
 }
 
 func isolatedWorld(configDir string) (World, error) {
