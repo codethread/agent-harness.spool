@@ -68,7 +68,9 @@ strand --config-dir "$world" init
 
 `--config-dir` is not sticky: pass the same path on **every** command that should
 target that world (for example `strand --config-dir "$world" weaver start`). The
-examples below omit the flag; add it back when targeting a custom world.
+basic repo-world examples below omit the flag for readability, but examples that
+reload config or create demo data use an explicit disposable `$world` so you do
+not casually mutate or reload the default repo world.
 
 ## Start the weaver
 
@@ -334,7 +336,8 @@ The `op` surface is intentionally generic: Skein only routes argv to a trusted
 weaver-side handler. Workflow behavior such as a kanban board belongs in your
 config or library code, not in core Skein.
 
-Append this demo handler to the selected world's `init.clj`:
+For a safe demo, use a disposable world and append this handler to
+`$world/init.clj` rather than the default repo `.skein/init.clj`:
 
 ```clojure
 (require '[clojure.string :as str])
@@ -392,18 +395,20 @@ Append this demo handler to the selected world's `init.clj`:
 (api/register-op! 'kanban "Show strands grouped by :attr kanban" 'user/kanban-op)
 ```
 
-Reload the config so the running weaver installs the handler:
+Reload that disposable world's config so its running weaver installs the
+handler. Do not run reload examples against the default repo world unless you
+intend to reload its shared `.skein` config:
 
 ```sh
 printf '(do (require '\''[skein.libs.alpha :as libs]) (libs/reload!))\n' \
-  | strand weaver repl --stdin
+  | strand --config-dir "$world" weaver repl --stdin
 ```
 
 Create a few demo strands with one batch call. Batch entries use temporary
 `:ref` values so the result can report generated ids:
 
 ```sh
-cat <<'EOF' | strand weaver repl --stdin
+cat <<'EOF' | strand --config-dir "$world" weaver repl --stdin
 (do
   (require '[skein.batch.alpha :as batch])
   (batch/apply!
@@ -427,17 +432,18 @@ cat <<'EOF' | strand weaver repl --stdin
 EOF
 ```
 
-Invoke the custom operation. `--max` is optional and defaults to 5 rows:
+Invoke the custom operation in that disposable world. `--max` is optional and
+defaults to 5 rows:
 
 ```sh
-strand op kanban --max 15
+strand --config-dir "$world" op kanban --max 15
 ```
 
 `strand` keeps public command output JSON-only, so render the table field when
 you want terminal-friendly ASCII:
 
 ```sh
-strand op kanban --max 15 | jq -r .table
+strand --config-dir "$world" op kanban --max 15 | jq -r .table
 ```
 
 Produces something like:
@@ -481,10 +487,11 @@ Hot-reload the selected config-dir `init.clj` from a connected REPL:
 
 Reload clears weaver-lifetime library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
 
-Use the connected stdin REPL for scripts:
+Use the connected stdin REPL for scripts. Include `--config-dir` when scripting
+against a disposable or test world:
 
 ```sh
-printf '(ready)\n' | strand weaver repl --stdin
+printf '(ready)\n' | strand --config-dir "$world" weaver repl --stdin
 ```
 
 ## Stop the weaver

@@ -871,13 +871,15 @@
              {:name "feature-owner-work"
               :usage "strand ready --query feature-owner-work --param feature=<feature> --param owner=<owner>"}
              {:name "feature-task-scope"
-              :usage "strand ready --query feature-task-scope --param feature=<feature> --param task=<task-key-or-task-file>"}
+              :usage "strand ready --query feature-task-scope --param feature=<feature> --param task=<task-key-or-task-id-or-task-file>"}
              {:name "devflow-active"
               :usage "strand list --query devflow-active"}
              {:name "devflow-features"
               :usage "strand list --query devflow-features"}
              {:name "devflow-work"
-              :usage "strand ready --query devflow-work"}]
+              :usage "strand ready --query devflow-work"}
+             {:name "current-dag-roots"
+              :usage "strand list --query current-dag-roots"}]
    :views [{:name "devflow-dashboard"
             :usage "(skein.views.alpha/view! 'devflow-dashboard {}) or {:feature \"<feature>\"}"
             :purpose "Read-only feature dashboard with active features, ready work, blocked work, counts, and coordination metadata."}
@@ -887,7 +889,19 @@
            {:name "devflow-summaries"
             :usage "(skein.views.alpha/view! 'devflow-summaries {})"
             :purpose "Read-only in-memory summaries recorded when a devflow feature has no active task/review children."}]
-   :ops [{:name "devflow-assign"
+   :ops [{:name "current-dags"
+          :usage "strand op current-dags"
+          :purpose "Show active parent-of work DAGs with active depends-on edges."}
+         {:name "devflow-status"
+          :usage "strand op devflow-status [feature]"
+          :purpose "Show active and ready devflow coordination status, optionally scoped by feature."}
+         {:name "devflow-conventions"
+          :usage "strand op devflow-conventions"
+          :purpose "Show repo-local devflow strand patterns, queries, views, ops, and attributes."}
+         {:name "task-root"
+          :usage "strand op task-root <strand-id-or-task-key>"
+          :purpose "Show the devflow feature/plan root that owns one task or review."}
+         {:name "devflow-assign"
           :usage "strand op devflow-assign <feature> <task_key> <owner> <branch>"
           :purpose "Atomically assign owner and branch metadata to one active devflow task/review."}
          {:name "devflow-close-feature"

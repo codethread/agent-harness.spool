@@ -78,6 +78,13 @@ From a Skein source checkout, `make install` installs the Go CLIs (`strand` and 
 
 User-facing Skein documentation lives in the source checkout under `docs/`; the canonical user reference is `docs/skein.md`.
 
+When working in this repository, also read [`.skein/AGENTS.md`](../.skein/AGENTS.md).
+This repo-local guidance documents the installed devflow coordination conventions
+loaded from `.skein/config.clj`, including the `devflow-plan` and `agent-plan`
+patterns, feature-scoped ready queries, views, custom ops, and
+owner/branch/task attributes that agents should use for coordinated feature
+work.
+
 ## Weaver
 
 The weaver is the application core. It is a long-lived local Clojure process that owns:
