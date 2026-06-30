@@ -6,7 +6,7 @@
 
 Type: AFK
 
-Implement mill-owned weaver lifecycle for `strand weaver start/status/stop` at the Go process boundary. This task depends on the Clojure runtime already accepting explicit config/state/data dirs, and must launch weavers using that contract.
+Implement mill-owned weaver lifecycle for `strand weaver start/status/stop` at the Go process boundary. This task depends on the Clojure runtime already accepting explicit config/state/data dirs and on the minimum REPL metadata attachment fix in Task 6 so required full smoke validation is not blocked by stale/missing XDG metadata.
 
 ## TASK-MillRouterRuntime-003.P2 Must implement exactly
 
@@ -27,12 +27,14 @@ Implement mill-owned weaver lifecycle for `strand weaver start/status/stop` at t
 - **TASK-MillRouterRuntime-003.DW4:** `strand weaver stop` stops only the selected world's child in tests.
 - **TASK-MillRouterRuntime-003.DW5:** `strand weaver status` tests assert the required running-status identity/path/endpoint fields.
 - **TASK-MillRouterRuntime-003.DW6:** `(cd cli && go test ./...)` passes.
+- **TASK-MillRouterRuntime-003.DW7:** After Task 6 is complete, full validation no longer fails at `strand weaver repl --stdin` because of stale/missing XDG weaver metadata.
 
 ## TASK-MillRouterRuntime-003.P4 Out of scope
 
 - **TASK-MillRouterRuntime-003.OS1:** Making ordinary `strand add/list` forward through mill.
 - **TASK-MillRouterRuntime-003.OS2:** Clojure runtime argument parsing or schema initialization behavior; that is owned by Task 4.
 - **TASK-MillRouterRuntime-003.OS3:** Active-weaver listing commands.
+- **TASK-MillRouterRuntime-003.OS4:** Implementing the REPL metadata attachment fix itself; that is owned by Task 6 and is a prerequisite only because smoke validation exercises REPL attachment.
 
 ## TASK-MillRouterRuntime-003.P5 References
 

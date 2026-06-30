@@ -6,7 +6,7 @@
 
 Type: AFK
 
-Update `strand weaver repl` and `strand weaver repl --stdin` so mill resolves and verifies the selected weaver, then the helper JVM attaches directly to nREPL using explicit XDG metadata/state references.
+Update `strand weaver repl` and `strand weaver repl --stdin` so mill resolves and verifies the selected weaver, then the helper JVM attaches directly to nREPL using explicit XDG metadata/state references. This task is now an unblocker for closing Task 3 because full smoke validation exercises `strand weaver repl --stdin` after XDG/mill-routed weaver startup.
 
 ## TASK-MillRouterRuntime-006.P2 Must implement exactly
 
@@ -25,6 +25,7 @@ Update `strand weaver repl` and `strand weaver repl --stdin` so mill resolves an
 - **TASK-MillRouterRuntime-006.DW3:** Clojure client tests cover metadata lookup with config-dir separate from state-dir.
 - **TASK-MillRouterRuntime-006.DW4:** No Go code implements nREPL protocol parsing or byte tunneling.
 - **TASK-MillRouterRuntime-006.DW5:** Relevant Go and Clojure tests pass: `(cd cli && go test ./...)` and `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test`.
+- **TASK-MillRouterRuntime-006.DW6:** `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke` no longer fails at `strand weaver repl --stdin` with stale/missing weaver metadata; if a later unrelated smoke failure remains, record it in the plan Developer Notes with the failing command/output summary.
 
 ## TASK-MillRouterRuntime-006.P4 Out of scope
 

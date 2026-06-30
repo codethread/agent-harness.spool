@@ -127,3 +127,7 @@ Outcome: Go, Clojure, integration, smoke, README, getting-started, Makefile, and
 ### PLAN-MillRouterRuntime-001.DN7 Task 3 blocked — 2026-06-30
 
 - Implemented mill-owned `weaver start/status/stop` routing and focused Go lifecycle coverage; `clojure -M:test` and `(cd cli && go test ./...)` pass. Full smoke still fails at `strand weaver repl --stdin` with stale/missing metadata, which is the known Task 6 REPL attachment scope and outside Task 3's published lifecycle contract.
+
+### PLAN-MillRouterRuntime-001.DN8 Task dependency repair — 2026-06-30
+
+- Reworked the queue so Task 6 is no longer blocked by Task 3. Task 6 now depends only on Task 4's XDG weaver metadata/storage work and is a prerequisite for closing Task 3, because required full smoke validation for Task 3 exercises `strand weaver repl --stdin`. Task 3 remains responsible for lifecycle routing, while Task 6 owns the stale/missing metadata fix.

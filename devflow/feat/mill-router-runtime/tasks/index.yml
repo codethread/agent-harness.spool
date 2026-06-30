@@ -12,8 +12,8 @@ tasks:
   - id: 3
     description: Start weavers through mill
     task_file: tasks/003-start-weavers-through-mill.md
-    status: blocked
-    blocked_by: [1, 4]
+    status: pending
+    blocked_by: [1, 4, 6]
   - id: 4
     description: Move weaver storage to XDG state
     task_file: tasks/004-move-weaver-storage-to-xdg-state.md
@@ -28,7 +28,7 @@ tasks:
     description: Attach REPL using mill metadata
     task_file: tasks/006-attach-repl-using-mill-metadata.md
     status: pending
-    blocked_by: [3]
+    blocked_by: [4]
   - id: 7
     description: Update smoke docs and specs
     task_file: tasks/007-update-smoke-docs-and-specs.md
