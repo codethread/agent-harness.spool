@@ -12,7 +12,7 @@ tasks:
   - id: 3
     description: Start weavers through mill
     task_file: tasks/003-start-weavers-through-mill.md
-    status: pending
+    status: complete
     blocked_by: [1, 4, 6]
   - id: 4
     description: Move weaver storage to XDG state

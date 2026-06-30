@@ -136,3 +136,8 @@ Outcome: Go, Clojure, integration, smoke, README, getting-started, Makefile, and
 
 - `strand weaver repl` now asks mill for selected-world `weaver-status`, requires `state=running`, and launches the Clojure helper with the XDG state-dir from mill metadata. Helper namespaces now preserve that state-dir for nested nREPL calls, which fixed `skein.graph.alpha`, `skein.libs.alpha`, patterns, views, hooks, events, and batch helpers under mill-routed REPL sessions.
 - Added isolated Go integration coverage for `(strands)` through `strand weaver repl --stdin` against a mill-started weaver, Clojure client coverage for config-dir/state-dir separation, and smoke cleanup for stale mill metadata between runs.
+
+### PLAN-MillRouterRuntime-001.DN10 Task 3 completion — 2026-06-30
+
+- Revalidated the existing mill-owned `strand weaver start/status/stop` implementation after Task 6 landed. Full validation now passes, including connected `strand weaver repl --stdin` smoke against XDG metadata.
+- Lifecycle coverage includes fake child launchers and isolated XDG state: explicit Clojure launch args, idempotent same-world start with metadata identity verification, distinct per-world runtime dirs, selected-world-only stop, post-stop artifact cleanup, stale metadata classification, and running status identity/path/endpoint fields.

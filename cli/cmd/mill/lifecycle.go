@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"skein-strand-cli/internal/client"
 	"skein-strand-cli/internal/config"
@@ -35,12 +36,21 @@ func (s *server) startWeaver(req client.MillWorldRequest) (map[string]any, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if child := s.children[world.ConfigDir]; child != nil && child.cmd.Process != nil && processAlive(child.cmd.Process.Pid) {
-		status, _ := readStatus(world)
+		status, stale := readStatus(world)
+		if status != nil && !stale {
+			return status, nil
+		}
 		if status == nil {
 			status = baseStatus(world, "starting")
 			status["pid"] = child.cmd.Process.Pid
 		}
 		return status, nil
+	}
+	if status, stale := readStatus(world); status != nil {
+		if !stale {
+			return status, nil
+		}
+		return nil, fmt.Errorf("stale weaver metadata for selected world: %v", status["stale_reason"])
 	}
 	source, err := config.ResolveSource(cfg.Source)
 	if err != nil {
@@ -56,8 +66,9 @@ func (s *server) startWeaver(req client.MillWorldRequest) (map[string]any, error
 	if err != nil {
 		return nil, err
 	}
-	s.children[world.ConfigDir] = &weaverChild{cmd: cmd, world: world}
-	go func() { _ = cmd.Wait() }()
+	done := make(chan error, 1)
+	s.children[world.ConfigDir] = &weaverChild{cmd: cmd, world: world, done: done}
+	go func() { done <- cmd.Wait() }()
 	status, _ := readStatus(world)
 	if status == nil {
 		status = baseStatus(world, "starting")
@@ -101,11 +112,23 @@ func (s *server) stopWeaver(req client.MillWorldRequest) (map[string]any, error)
 	child := s.children[world.ConfigDir]
 	if child == nil || child.cmd.Process == nil || !processAlive(child.cmd.Process.Pid) {
 		delete(s.children, world.ConfigDir)
+		if status, stale := readStatus(world); status != nil {
+			if !stale {
+				return nil, fmt.Errorf("selected-world weaver is not supervised by this mill")
+			}
+			cleanupWorldArtifacts(world)
+		}
 		return baseStatus(world, "stopped"), nil
 	}
 	pid := child.cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	_ = child.cmd.Process.Kill()
+	terminateProcess(child.cmd.Process)
+	select {
+	case <-child.done:
+	case <-time.After(5 * time.Second):
+		_ = child.cmd.Process.Kill()
+		<-child.done
+	}
+	cleanupWorldArtifacts(world)
 	delete(s.children, world.ConfigDir)
 	status := baseStatus(world, "stopped")
 	status["pid"] = pid
@@ -117,9 +140,14 @@ func (s *server) stopAll() {
 	defer s.mu.Unlock()
 	for _, child := range s.children {
 		if child.cmd != nil && child.cmd.Process != nil && processAlive(child.cmd.Process.Pid) {
-			pid := child.cmd.Process.Pid
-			_ = syscall.Kill(-pid, syscall.SIGTERM)
-			_ = child.cmd.Process.Kill()
+			terminateProcess(child.cmd.Process)
+			select {
+			case <-child.done:
+			case <-time.After(5 * time.Second):
+				_ = child.cmd.Process.Kill()
+				<-child.done
+			}
+			cleanupWorldArtifacts(child.world)
 		}
 	}
 }
@@ -136,6 +164,11 @@ func readStatus(world config.World) (map[string]any, bool) {
 		st["stale_reason"] = fmt.Sprintf("malformed weaver metadata: %v", err)
 		return st, true
 	}
+	if staleReason := validateMetadata(world, m); staleReason != "" {
+		st := baseStatus(world, "stale")
+		st["stale_reason"] = staleReason
+		return st, true
+	}
 	st := baseStatus(world, "running")
 	st["pid"] = m.PID
 	st["weaver_id"] = m.DaemonID
@@ -143,11 +176,41 @@ func readStatus(world config.World) (map[string]any, bool) {
 	st["nrepl"] = m.NREPL
 	st["started_at"] = m.StartedAt
 	st["database_path"] = m.DatabasePath
-	if !processAlive(m.PID) {
-		st["stale_reason"] = fmt.Sprintf("pid %d is not alive", m.PID)
-		return st, true
-	}
 	return st, false
+}
+
+func validateMetadata(world config.World, m client.Metadata) string {
+	if m.ProtocolVersion != 1 || m.PID == 0 || m.DatabasePath == "" || m.DaemonID == "" || m.ConfigDir == "" || m.DataDir == "" || m.SocketPath == "" || m.StartedAt == "" || m.NREPL.Host == "" || m.NREPL.Port == 0 {
+		return "malformed weaver metadata: missing required fields"
+	}
+	if !samePath(m.ConfigDir, world.ConfigDir) || !samePath(m.DataDir, world.DataDir) || !samePath(m.DatabasePath, world.DBPath) || !samePath(m.SocketPath, filepath.Join(world.StateDir, "weaver.sock")) {
+		return "weaver metadata identity mismatch"
+	}
+	if !processAlive(m.PID) {
+		return fmt.Sprintf("pid %d is not alive", m.PID)
+	}
+	return ""
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	realA, errA := filepath.EvalSymlinks(a)
+	if errA != nil {
+		realA = filepath.Clean(a)
+	}
+	realB, errB := filepath.EvalSymlinks(b)
+	if errB != nil {
+		realB = filepath.Clean(b)
+	}
+	return realA == realB
+}
+
+func cleanupWorldArtifacts(world config.World) {
+	_ = os.Remove(filepath.Join(world.StateDir, "weaver.json"))
+	_ = os.Remove(filepath.Join(world.StateDir, "weaver.edn"))
+	_ = os.Remove(filepath.Join(world.StateDir, "weaver.sock"))
 }
 
 func baseStatus(world config.World, state string) map[string]any {
@@ -157,6 +220,23 @@ func baseStatus(world config.World, state string) map[string]any {
 		"state_dir":     world.StateDir,
 		"data_dir":      world.DataDir,
 		"database_path": world.DBPath,
+	}
+}
+
+func terminateProcess(p *os.Process) {
+	if p == nil {
+		return
+	}
+	terminatePID(p.Pid)
+	_ = p.Signal(syscall.SIGTERM)
+}
+
+func terminatePID(pid int) {
+	if pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Signal(syscall.SIGTERM)
+		}
 	}
 }
 

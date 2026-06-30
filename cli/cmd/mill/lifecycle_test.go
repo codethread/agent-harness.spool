@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,8 +23,12 @@ func TestWeaverLifecycleWithFakeLauncher(t *testing.T) {
 
 	orig := launchWeaver
 	var launches int
+	var launchedSource string
+	var launchedArgs []string
 	launchWeaver = func(source string, args []string, out, errOut io.Writer) (*exec.Cmd, error) {
 		launches++
+		launchedSource = source
+		launchedArgs = append([]string(nil), args...)
 		cmd := exec.Command("sleep", "60")
 		if err := cmd.Start(); err != nil {
 			return nil, err
@@ -41,6 +47,13 @@ func TestWeaverLifecycleWithFakeLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	world, err := config.RuntimeWorld(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launchedSource != source || !reflect.DeepEqual(launchedArgs, weaverArgs(world)) {
+		t.Fatalf("unexpected launch source/args: source=%q args=%#v", launchedSource, launchedArgs)
+	}
 	if status["state"] != "running" || status["pid"] == nil || status["weaver_id"] != "weaver-one" || status["socket_path"] == nil || status["nrepl"] == nil {
 		t.Fatalf("running status missing required fields: %#v", status)
 	}
@@ -58,10 +71,111 @@ func TestWeaverLifecycleWithFakeLauncher(t *testing.T) {
 	if err != nil || status["state"] != "running" {
 		t.Fatalf("bad status %#v err=%v", status, err)
 	}
+	stoppedPID := status["pid"].(int)
 	status, err = s.stopWeaver(req)
 	if err != nil || status["state"] != "stopped" {
 		t.Fatalf("bad stop %#v err=%v", status, err)
 	}
+	if processAlive(stoppedPID) {
+		t.Fatalf("stop should terminate selected child pid %d", stoppedPID)
+	}
+	status, err = s.weaverStatus(req)
+	if err != nil || status["state"] == "running" || status["state"] == "stale" {
+		t.Fatalf("bad post-stop status %#v err=%v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(world.StateDir, "weaver.json")); !os.IsNotExist(err) {
+		t.Fatalf("stop should remove weaver.json, stat err=%v", err)
+	}
+}
+
+func TestWeaverStatusDistinguishesStaleMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	source := tempSource(t)
+	cfg := tempConfig(t, source)
+	req := client.MillWorldRequest{CWD: t.TempDir(), ConfigDir: cfg}
+	world, err := config.RuntimeWorld(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(world.StateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(world.StateDir, "weaver.json"), []byte(`{bad`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := server{children: map[string]*weaverChild{}}
+	status, err := s.weaverStatus(req)
+	if err != nil || status["state"] != "stale" || status["stale_reason"] == nil {
+		t.Fatalf("expected malformed stale status, got %#v err=%v", status, err)
+	}
+	if err := os.WriteFile(filepath.Join(world.StateDir, "weaver.json"), []byte(`{"protocol_version":1,"pid":1,"database_path":"/wrong","weaver_id":"wrong","config_dir":"/wrong","data_dir":"/wrong","socket_path":"/wrong","started_at":"now","nrepl":{"host":"127.0.0.1","port":1}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.weaverStatus(req)
+	if err != nil || status["state"] != "stale" || status["stale_reason"] != "weaver metadata identity mismatch" {
+		t.Fatalf("expected identity stale status, got %#v err=%v", status, err)
+	}
+	writeWeaverMetadata(t, world, 999999, "dead-weaver")
+	status, err = s.weaverStatus(req)
+	if err != nil || status["state"] != "stale" || !strings.Contains(status["stale_reason"].(string), "not alive") {
+		t.Fatalf("expected dead-pid stale status, got %#v err=%v", status, err)
+	}
+}
+
+func TestStartFailsLoudlyOnStaleMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	source := tempSource(t)
+	cfg := tempConfig(t, source)
+	world, err := config.RuntimeWorld(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(world.StateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(world.StateDir, "weaver.json"), []byte(`{bad`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := launchWeaver
+	launched := false
+	launchWeaver = func(source string, args []string, out, errOut io.Writer) (*exec.Cmd, error) {
+		launched = true
+		return orig(source, args, out, errOut)
+	}
+	t.Cleanup(func() { launchWeaver = orig })
+	s := server{children: map[string]*weaverChild{}}
+	if _, err := s.startWeaver(client.MillWorldRequest{CWD: t.TempDir(), ConfigDir: cfg}); err == nil || !strings.Contains(err.Error(), "stale weaver metadata") {
+		t.Fatalf("expected stale metadata start failure, got %v", err)
+	}
+	if launched {
+		t.Fatal("start should not launch through stale metadata")
+	}
+}
+
+func TestStopCleansStaleMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	source := tempSource(t)
+	cfg := tempConfig(t, source)
+	req := client.MillWorldRequest{CWD: t.TempDir(), ConfigDir: cfg}
+	world, err := config.RuntimeWorld(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(world.StateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(world.StateDir, "weaver.json"), []byte(`{bad`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := server{children: map[string]*weaverChild{}}
+	status, err := s.stopWeaver(req)
+	if err != nil || status["state"] != "stopped" {
+		t.Fatalf("bad stale stop %#v err=%v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(world.StateDir, "weaver.json")); !os.IsNotExist(err) {
+		t.Fatalf("stale stop should remove weaver.json, stat err=%v", err)
+	}
+
 }
 
 func TestDifferentReposHaveDistinctRuntimeDirsAndStopSelectedOnly(t *testing.T) {

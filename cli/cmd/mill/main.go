@@ -28,6 +28,7 @@ type server struct {
 type weaverChild struct {
 	cmd   *exec.Cmd
 	world config.World
+	done  chan error
 }
 
 var launchWeaver = func(source string, args []string, out, errOut io.Writer) (*exec.Cmd, error) {
@@ -104,7 +105,7 @@ func start() error {
 	}
 }
 
-func (s server) handle(conn net.Conn) {
+func (s *server) handle(conn net.Conn) {
 	defer conn.Close()
 	var req client.MillRequest
 	if err := json.NewDecoder(conn).Decode(&req); err != nil {
