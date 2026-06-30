@@ -71,6 +71,9 @@ func start() error {
 	}
 	socketPath := filepath.Join(root, config.MillSocketFileName)
 	metadataPath := filepath.Join(root, config.MillMetadataFileName)
+	if err := cleanupPreviousMillState(root, socketPath, metadataPath); err != nil {
+		return err
+	}
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return err
@@ -161,6 +164,36 @@ func (s *server) handle(conn net.Conn) {
 	default:
 		_ = json.NewEncoder(conn).Encode(errorResponse(req.RequestID, "protocol", "mill/unknown-operation", "unknown mill operation", req.Operation))
 	}
+}
+
+func cleanupPreviousMillState(root, socketPath, metadataPath string) error {
+	if b, err := os.ReadFile(metadataPath); err == nil {
+		var meta client.MillMetadata
+		if err := json.Unmarshal(b, &meta); err == nil && meta.PID != 0 && processAlive(meta.PID) {
+			return fmt.Errorf("mill is already running with pid %d", meta.PID)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, pattern := range []string{filepath.Join(root, "weavers", "*", "weaver.json")} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return err
+		}
+		for _, path := range matches {
+			if b, err := os.ReadFile(path); err == nil {
+				var meta client.Metadata
+				if err := json.Unmarshal(b, &meta); err == nil && meta.PID != 0 && processAlive(meta.PID) {
+					terminatePID(meta.PID)
+				}
+			}
+			stateDir := filepath.Dir(path)
+			cleanupWorldArtifacts(config.World{StateDir: stateDir})
+		}
+	}
+	_ = os.Remove(socketPath)
+	_ = os.Remove(metadataPath)
+	return nil
 }
 
 func errorResponse(requestID, typ, code, message, detail string) client.MillResponse {

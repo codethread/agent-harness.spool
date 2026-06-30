@@ -69,10 +69,16 @@ func (s *server) startWeaver(req client.MillWorldRequest) (map[string]any, error
 	done := make(chan error, 1)
 	s.children[world.ConfigDir] = &weaverChild{cmd: cmd, world: world, done: done}
 	go func() { done <- cmd.Wait() }()
-	status, _ := readStatus(world)
-	if status == nil {
-		status = baseStatus(world, "starting")
-		status["pid"] = cmd.Process.Pid
+	status, err := waitForReadyStatus(world, cmd.Process.Pid, done, 15*time.Second)
+	if err != nil {
+		terminateProcess(cmd.Process)
+		select {
+		case <-done:
+		default:
+		}
+		cleanupWorldArtifacts(world)
+		delete(s.children, world.ConfigDir)
+		return nil, err
 	}
 	return status, nil
 }
@@ -205,6 +211,32 @@ func samePath(a, b string) bool {
 		realB = filepath.Clean(b)
 	}
 	return realA == realB
+}
+
+func waitForReadyStatus(world config.World, pid int, done <-chan error, timeout time.Duration) (map[string]any, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		status, stale := readStatus(world)
+		if status != nil && !stale {
+			return status, nil
+		}
+		if stale {
+			return nil, fmt.Errorf("weaver published stale metadata during startup: %v", status["stale_reason"])
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				return nil, fmt.Errorf("weaver exited before publishing ready metadata: %w", err)
+			}
+			return nil, fmt.Errorf("weaver exited before publishing ready metadata")
+		default:
+		}
+		if time.Now().After(deadline) {
+			terminatePID(pid)
+			return nil, fmt.Errorf("weaver did not publish ready metadata before timeout")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func cleanupWorldArtifacts(world config.World) {

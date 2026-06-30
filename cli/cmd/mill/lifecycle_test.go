@@ -189,6 +189,11 @@ func TestDifferentReposHaveDistinctRuntimeDirsAndStopSelectedOnly(t *testing.T) 
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
+		world, err := config.RuntimeWorld(configDirArg(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeWeaverMetadata(t, world, cmd.Process.Pid, "weaver-"+filepath.Base(world.ConfigDir))
 		return cmd, nil
 	}
 	t.Cleanup(func() { launchWeaver = orig })
@@ -215,6 +220,72 @@ func TestDifferentReposHaveDistinctRuntimeDirsAndStopSelectedOnly(t *testing.T) 
 		t.Fatalf("stopping A should not stop B: %#v", s.children)
 	}
 	s.stopAll()
+}
+
+func TestCleanupPreviousMillStateRemovesStaleSocketsAndWeaverMetadata(t *testing.T) {
+	root := t.TempDir()
+	socketPath := filepath.Join(root, config.MillSocketFileName)
+	metadataPath := filepath.Join(root, config.MillMetadataFileName)
+	if err := os.WriteFile(socketPath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, []byte(`{"protocol_version":1,"pid":999999,"mill_id":"old","state_root":"`+root+`","socket_path":"`+socketPath+`","started_at":"now"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(root, "weavers", "abc")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "weaver.json"), []byte(`{"protocol_version":1,"pid":999999}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "weaver.sock"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupPreviousMillState(root, socketPath, metadataPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{socketPath, metadataPath, filepath.Join(stateDir, "weaver.json"), filepath.Join(stateDir, "weaver.sock")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected stale artifact removed: %s stat=%v", path, err)
+		}
+	}
+}
+
+func TestStartFailsWhenWeaverExitsBeforeReadyMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	source := tempSource(t)
+	cfg := tempConfig(t, source)
+	orig := launchWeaver
+	launchWeaver = func(source string, args []string, out, errOut io.Writer) (*exec.Cmd, error) {
+		cmd := exec.Command("false")
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
+	t.Cleanup(func() { launchWeaver = orig })
+	s := server{children: map[string]*weaverChild{}}
+	_, err := s.startWeaver(client.MillWorldRequest{CWD: t.TempDir(), ConfigDir: cfg})
+	if err == nil || !strings.Contains(err.Error(), "before publishing ready metadata") {
+		t.Fatalf("expected ready metadata failure, got %v", err)
+	}
+	world, err := config.RuntimeWorld(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child := s.children[world.ConfigDir]; child != nil {
+		t.Fatalf("failed startup should remove child handle: %#v", child)
+	}
+}
+
+func configDirArg(args []string) string {
+	for i, arg := range args {
+		if arg == "--config-dir" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func tempSource(t *testing.T) string {
