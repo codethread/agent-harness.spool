@@ -3,7 +3,7 @@
             [clojure.test :refer [deftest is]]
             [skein.db-test :as db-test]
             [skein.events.alpha :as events]
-            [skein.libs.alpha :as libs]
+            [skein.runtime.alpha :as runtime-alpha]
             [skein.views.alpha :as views]
             [skein.weaver.api :as api]
             [skein.weaver.config :as daemon-config]
@@ -569,7 +569,7 @@
           (is (= {:features 1 :active_work 2 :ready_work 1 :blocked_work 1}
                  (:counts before-dashboard)))
           (is (= "External blocker" (get-in before-dashboard [:features 0 :blocked 0 :blocked_by 0 :title]))))
-        (is (= :loaded (:status (libs/reload!))))
+        (is (= :loaded (:status (runtime-alpha/reload!))))
         (assert-dashboard-registrations rt)
         (let [after-status ((requiring-resolve 'config/devflow-status-op) {:op/argv ["startup-dashboard"]})
               after-dashboard (views/view! 'devflow-dashboard {:feature "startup-dashboard"})]

@@ -41,7 +41,7 @@ func TestInitBootstrapsConfigDirWorkspaceThroughMill(t *testing.T) {
 	if _, err := os.Stat(initPath); err != nil {
 		t.Fatalf("expected init.clj bootstrap: %v", err)
 	}
-	if got := string(mustReadFile(t, initPath)); got != "(require '[skein.runtime.alpha :as runtime])\n\n(runtime/sync!)\n" {
+	if got := string(mustReadFile(t, initPath)); got != "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n" {
 		t.Fatalf("unexpected init.clj bootstrap contents: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(cfg, ".git")); !os.IsNotExist(err) {

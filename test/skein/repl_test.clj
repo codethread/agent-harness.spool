@@ -227,11 +227,11 @@
         (is (fn? (get-in (first @calls) [:options :prompt])))
         (is (not (str/includes? (str out) "15")))))))
 
-(deftest libs-alpha-compatibility-works-from-explicit-connected-stdin-main
+(deftest runtime-alpha-works-from-explicit-connected-stdin-main
   (with-runtime
     (fn [rt _]
       (let [out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(require '[skein.libs.alpha :as libs])\n(libs/approved)\n(libs/syncs)\n(libs/uses)\n")
+        (binding [*in* (java.io.StringReader. "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/approved)\n(runtime-alpha/syncs)\n(runtime-alpha/uses)\n")
                   *out* out
                   *err* (java.io.StringWriter.)
                   *ns* (the-ns 'user)]

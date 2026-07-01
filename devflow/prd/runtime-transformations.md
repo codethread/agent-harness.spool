@@ -18,7 +18,7 @@ SQLite remains the long-term persistence layer for the strand graph. The weaver 
 
 Skein ships source-visible helper namespaces:
 
-- `skein.libs.alpha` for approved local-root sync and module activation.
+- `skein.runtime.alpha` for approved local-root sync and module activation.
 - `skein.graph.alpha` for graph/query helpers such as `query-ids!`, `strands-by-ids`, `ancestor-root-ids`, and `subgraph`.
 - `skein.views.alpha` for `register-view!`, `view!`, and `views`.
 

@@ -121,7 +121,7 @@ Terms to use when discussing Clojure with an agent (or another dev), so requests
 - **function** / **fn** — not "method". `strand!`, `ref-symbol`, `plan-strand` are all functions.
 - **var** — a top-level name created by `def`/`defn`/`defonce`, e.g. "`devflow-workflows` is a var" or "check the `ref-symbol` fn". Say "the `X` var" only when `X` isn't a function.
 - **atom** — mutable state held in a var, e.g. "`devflow-summary-notifications` is a defonce atom"; "reset the atom" / "check the atom".
-- **namespace** — a named group of vars, e.g. `config`, `skein.libs.alpha`.
+- **namespace** — a named group of vars, e.g. `config`, `skein.runtime.alpha`.
 - **keyword** — a `:like-this` token, usually a map key.
 - **symbol** — a bare name like `foo` or `config/foo`, used to refer to a var or namespace.
 - **macro** — code that generates code at compile time, e.g. `defn` itself is a macro (expands to a `def` of a function).

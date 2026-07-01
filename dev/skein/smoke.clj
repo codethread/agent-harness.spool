@@ -136,7 +136,7 @@
     (spit (java.io.File. config-dir "libs.edn")
           "{:libs {smoke/lib {:local/root \"libs/smoke-lib\"}\n        smoke/missing {:local/root \"libs/missing-lib\"}}}\n")
     (spit (java.io.File. config-dir "init.clj")
-          "(require '[skein.runtime.alpha :as runtime])\n(runtime/sync!)\n(runtime/use! :smoke/lib {:ns 'smoke.lib :libs #{'smoke/lib}})\n(runtime/use! :smoke/layer {:ns 'smoke.layer :libs #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(runtime/use! :smoke/optional-missing {:ns 'smoke.missing :libs #{'smoke/missing}})\n")
+          "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n(runtime-alpha/use! :smoke/lib {:ns 'smoke.lib :libs #{'smoke/lib}})\n(runtime-alpha/use! :smoke/layer {:ns 'smoke.layer :libs #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(runtime-alpha/use! :smoke/optional-missing {:ns 'smoke.missing :libs #{'smoke/missing}})\n")
     (.getCanonicalPath marker)))
 
 (defn outside-repo-dir []
@@ -265,7 +265,7 @@
         (run-cli-config! config-dir "weaver" "status")
         (assert (.isFile config-file) "clean bootstrap preserves/creates config.json")
         (assert-file-contents (java.io.File. config-dir "libs.edn") "{:libs {}}\n" "clean bootstrap creates empty libs.edn")
-        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[skein.runtime.alpha :as runtime])\n\n(runtime/sync!)\n" "clean bootstrap creates runtime sync init.clj template")
+        (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n" "clean bootstrap creates runtime sync init.clj template")
         (assert (.isDirectory (java.io.File. config-dir "libs")) "clean bootstrap creates libs directory")
         (assert (not (.exists (java.io.File. config-dir ".git"))) "clean bootstrap does not run git init")
         (let [strand-id (cli-add-config! config-dir "Bootstrap clean strand" "--attr" "owner=ct")]
@@ -321,23 +321,17 @@
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "weaver" "status")
-        (let [loader-compat (edn/read-string
-                             (run-cli-config-stdin!
-                              config-dir
-                              "(do\n  (require '[skein.runtime.alpha :as runtime] '[skein.libs.alpha :as libs])\n  {:runtime-approved (runtime/approved)\n   :libs-approved (libs/approved)\n   :runtime-syncs (runtime/syncs)\n   :libs-syncs (libs/syncs)})\n"
-                              "weaver" "repl" "--stdin"))]
-          (assert= (:runtime-approved loader-compat)
-                   (:libs-approved loader-compat)
-                   "live REPL exposes skein.libs.alpha compatibility over approved config")
-          (assert= (:runtime-syncs loader-compat)
-                   (:libs-syncs loader-compat)
-                   "live REPL exposes skein.libs.alpha compatibility over sync state")
+        (let [loader-state (edn/read-string
+                            (run-cli-config-stdin!
+                             config-dir
+                             "(do\n  (require '[skein.runtime.alpha :as runtime-alpha])\n  {:approved (runtime-alpha/approved)\n   :syncs (runtime-alpha/syncs)})\n"
+                             "weaver" "repl" "--stdin"))]
           (assert= "libs/smoke-runtime-lib"
-                   (get-in loader-compat [:libs-approved :libs 'smoke/runtime-lib :local/root])
-                   "live REPL compatibility reads real approved library config")
+                   (get-in loader-state [:approved :libs 'smoke/runtime-lib :local/root])
+                   "live REPL runtime loader reads real approved library config")
           (assert= :loaded
-                   (get-in loader-compat [:libs-syncs :libs 'smoke/runtime-lib :status])
-                   "live REPL compatibility reads real approved library sync state"))
+                   (get-in loader-state [:syncs :libs 'smoke/runtime-lib :status])
+                   "live REPL runtime loader reads real approved library sync state"))
         (let [strand-id (cli-add-config! config-dir "Startup transformed strand" "--attr" "owner=smoke")
               rejected-output (run-cli-config-fails! config-dir "add" "Hook rejected strand" "--attr" "owner=blocked")
               _ (assert-contains rejected-output "hook/failed" "startup hook rejection reaches CLI as hook/failed")
@@ -380,7 +374,7 @@
           (let [reload-payload (edn/read-string
                                 (run-cli-config-stdin!
                                  config-dir
-                                 "(do\n  (require '[skein.runtime.alpha :as runtime])\n  (runtime/reload!)\n  {:patterns (patterns)\n   :woven (weave! 'reload-review {:title \"Reload patterned smoke\"})})\n"
+                                 "(do\n  (require '[skein.runtime.alpha :as runtime-alpha])\n  (runtime-alpha/reload!)\n  {:patterns (patterns)\n   :woven (weave! 'reload-review {:title \"Reload patterned smoke\"})})\n"
                                  "weaver" "repl" "--stdin"))]
             (assert= ["reload-review" "review-task"]
                      (mapv :name (:patterns reload-payload))

@@ -87,7 +87,7 @@ Event handlers receive one event map and may perform trusted side effects, inclu
 
 ## SPEC-003.P5 Runtime library workspace helpers
 
-`skein.runtime.alpha` is the blessed alpha namespace for trusted config, live weaver REPL, and explicit connected client library workspace workflows. It is explicit and is not preloaded into `skein.repl`. `skein.libs.alpha` remains an alpha compatibility alias for the same loader/config helper functions, but new config and examples use `skein.runtime.alpha`.
+`skein.runtime.alpha` is the blessed alpha namespace for trusted config, live weaver REPL, and explicit connected client library workspace workflows. It is explicit and is not preloaded into `skein.repl`. Loader/config helpers do not live under `skein.libs.*`; that namespace family is reserved for authorable libraries and examples.
 
 Approved library config is the effective overlay of `libs.edn` and `libs.local.edn` in the selected config-dir. Both files use the same MVP EDN grammar: exactly one top-level key, `:libs`, whose value is a map from symbol library coordinates to maps containing exactly one required key, `:local/root`, a non-blank string path. Unknown top-level keys, non-symbol coordinates, missing `:libs` in a present file, non-map entries, unknown per-lib keys, and missing/non-string `:local/root` fail loudly as structural config errors. Missing files contribute no libraries. When both files define the same coordinate, the `libs.local.edn` entry replaces the `libs.edn` entry.
 

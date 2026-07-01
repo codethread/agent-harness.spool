@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const DefaultInitCLJ = "(require '[skein.runtime.alpha :as runtime])\n\n(runtime/sync!)\n"
+const DefaultInitCLJ = "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n"
 const DefaultSkeinGitignore = "config.json\ninit.local.clj\nlibs.local.edn\nstate/\ndata/\nweaver.*\n*.sqlite\n*.sqlite-*\n"
 
 func BootstrapWorld(cwd, configDir, source string) (World, error) {

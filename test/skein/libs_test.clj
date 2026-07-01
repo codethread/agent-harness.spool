@@ -3,7 +3,6 @@
             [clojure.test :refer [deftest is testing]]
             [skein.events.alpha :as events]
             [skein.graph.alpha :as graph]
-            [skein.libs.alpha :as libs]
             [skein.libs.ephemeral :as ephemeral]
             [skein.runtime.alpha :as runtime-alpha]
             [skein.weaver.config :as daemon-config]
@@ -232,25 +231,6 @@
             :args [:demo]}
            (runtime-alpha/use :demo)))))
 
-(deftest libs-alpha-compatibility-shim-retains-loader-surface
-  (with-redefs [runtime/current-runtime (atom nil)
-                repl/connected-config-dir (constantly "/tmp/skein-connected-world")
-                skein.client/call-world (fn [config-dir opts op & args]
-                                         {:config-dir config-dir
-                                          :opts opts
-                                          :op op
-                                          :args args})]
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {}
-            :op :approved-libs
-            :args nil}
-           (libs/approved)))
-    (is (= :sync-approved-libs (:op (libs/sync!))))
-    (is (= :approved-lib-syncs (:op (libs/syncs))))
-    (is (= :reload-config! (:op (libs/reload!))))
-    (is (= :use! (:op (libs/use! :demo {:ns 'demo.core}))))
-    (is (= :uses (:op (libs/uses))))
-    (is (= :use (:op (libs/use :demo))))))
 
 (deftest ephemeral-library-composes-public-helper-surfaces
   (is (= '#{skein.graph.alpha skein.repl}
@@ -518,7 +498,7 @@
   (with-runtime
     (fn [_ config-dir]
       (spit (io/file config-dir "init.clj")
-            "(require '[skein.runtime.alpha :as runtime])\n\n(runtime/sync!)\n")
+            "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n")
       (binding [*ns* (the-ns 'skein.repl)]
         (is (= :loaded (:status (runtime-alpha/reload!))))))))
 

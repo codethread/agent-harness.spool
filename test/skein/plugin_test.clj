@@ -1,6 +1,6 @@
 (ns skein.plugin-test
   (:require [clojure.test :refer [deftest is]]
-            [skein.libs.alpha :as libs]
+            [skein.runtime.alpha :as runtime-alpha]
             [skein.weaver.api]
             [skein.weaver.config :as daemon-config]
             [skein.weaver.runtime :as runtime]
@@ -31,10 +31,10 @@
   (is (nil? (ns-resolve 'skein.weaver.api 'plugins)))
   (is (nil? (ns-resolve 'skein.weaver.api 'plugin))))
 
-(deftest library-workspace-state-is-the-public-path
+(deftest runtime-loader-state-is-the-public-path
   (with-runtime
     (fn []
-      (is (= {:libs {}} (libs/approved)))
-      (is (= {:libs {}} (libs/syncs)))
-      (is (= {} (libs/uses))))))
+      (is (= {:libs {}} (runtime-alpha/approved)))
+      (is (= {:libs {}} (runtime-alpha/syncs)))
+      (is (= {} (runtime-alpha/uses))))))
 

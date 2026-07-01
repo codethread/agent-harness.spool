@@ -1,10 +1,10 @@
-(require '[skein.runtime.alpha :as runtime])
+(require '[skein.runtime.alpha :as runtime-alpha])
 
-(runtime/sync!)
-(runtime/use! :skein/libs-ephemeral
+(runtime-alpha/sync!)
+(runtime-alpha/use! :skein/libs-ephemeral
   {:ns 'skein.libs.ephemeral
    :call 'skein.libs.ephemeral/install!})
-(runtime/use! :config
+(runtime-alpha/use! :config
   {:file "config.clj"
    :after [:skein/libs-ephemeral]
    :call 'config/install!})

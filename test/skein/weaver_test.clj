@@ -1377,7 +1377,7 @@
   (with-runtime
     (fn [rt _]
       (let [init-file (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
-        (spit init-file "(require '[skein.libs.alpha :as libs])\n(libs/sync!)\n")
+        (spit init-file "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n")
         (api/register-pattern! rt 'dev-task 'skein.weaver-test/test-pattern ::pattern-input)
         (is (= 1 (count (api/patterns rt))))
         (api/reload-config! rt)

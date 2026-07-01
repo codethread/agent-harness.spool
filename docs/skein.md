@@ -347,7 +347,7 @@ Use reload during development:
 (runtime/reload!)
 ```
 
-`skein.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community library, and `skein.libs.alpha` remains only as an alpha compatibility alias for existing config. New docs and config should use `skein.runtime.alpha`.
+`skein.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community library, and loader/config helpers do not live under `skein.libs.*`.
 
 Reload clears weaver-lifetime library sync state, module-use state, named queries, weave patterns, views, lifecycle hooks, event handlers, queued events, and recent event failures, then reloads `init.clj` followed by `init.local.clj`. Missing files are skipped; present failures fail loudly.
 
