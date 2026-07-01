@@ -46,8 +46,8 @@
 (defn- hook-registry [runtime]
   (:hook-registry runtime))
 
-(defn- approved-lib-sync-state [runtime]
-  (:approved-lib-sync-state runtime))
+(defn- approved-spool-sync-state [runtime]
+  (:approved-spool-sync-state runtime))
 
 (defn- module-use-state [runtime]
   (:module-use-state runtime))
@@ -55,10 +55,10 @@
 (defn- event-system [runtime]
   (:event-system runtime))
 
-(defn- with-library-classloader [runtime f]
+(defn- with-spool-classloader [runtime f]
   (let [thread (Thread/currentThread)
         previous-loader (.getContextClassLoader thread)
-        loader (:library-classloader runtime)]
+        loader (:spool-classloader runtime)]
     (try
       (.setContextClassLoader thread loader)
       (f)
@@ -68,7 +68,7 @@
 (defn- config-dir [runtime]
   (get-in runtime [:metadata :config-dir]))
 
-(defn- libs-file [runtime name]
+(defn- spools-file [runtime name]
   (io/file (config-dir runtime) name))
 
 (defn- expand-user-home [path]
@@ -85,48 +85,48 @@
                    (io/file (config-dir runtime) expanded-path))]
     (.getCanonicalPath resolved)))
 
-(defn- validate-approved-lib-entry! [source lib entry]
+(defn- validate-approved-spool-entry! [source lib entry]
   (when-not (symbol? lib)
-    (throw (ex-info "Library coordinate must be a symbol" (assoc source :lib lib))))
+    (throw (ex-info "Spool coordinate must be a symbol" (assoc source :lib lib))))
   (when-not (map? entry)
-    (throw (ex-info "Library entry must be a map" (assoc source :lib lib :entry entry))))
+    (throw (ex-info "Spool entry must be a map" (assoc source :lib lib :entry entry))))
   (when-let [unknown (seq (remove #{:local/root} (keys entry)))]
-    (throw (ex-info "Library entry contains unknown keys" (assoc source :lib lib :keys (vec unknown)))))
+    (throw (ex-info "Spool entry contains unknown keys" (assoc source :lib lib :keys (vec unknown)))))
   (when-not (and (string? (:local/root entry)) (not (str/blank? (:local/root entry))))
-    (throw (ex-info "Library entry requires non-blank string :local/root"
+    (throw (ex-info "Spool entry requires non-blank string :local/root"
                     (assoc source :lib lib :local/root (:local/root entry))))))
 
-(defn- normalize-approved-libs-file
-  "Validate one approved-library config file and resolve roots for this runtime."
+(defn- normalize-approved-spools-file
+  "Validate one approved-spool config file and resolve roots for this runtime."
   [runtime name source config]
   (when-not (map? config)
     (throw (ex-info (str name " must contain a map") (assoc source :config config))))
-  (when-let [unknown (seq (remove #{:libs} (keys config)))]
+  (when-let [unknown (seq (remove #{:spools} (keys config)))]
     (throw (ex-info (str name " contains unknown top-level keys") (assoc source :keys (vec unknown)))))
-  (when-not (map? (:libs config))
-    (throw (ex-info (str name " requires :libs map") (assoc source :libs (:libs config)))))
-  {:libs (into {}
+  (when-not (map? (:spools config))
+    (throw (ex-info (str name " requires :spools map") (assoc source :spools (:spools config)))))
+  {:spools (into {}
                (map (fn [[lib entry]]
-                      (validate-approved-lib-entry! source lib entry)
+                      (validate-approved-spool-entry! source lib entry)
                       [lib {:local/root (:local/root entry)
                             :root (canonical-root runtime (:local/root entry))
                             :source source}]))
-               (:libs config))})
+               (:spools config))})
 
-(defn- approved-libs-file [runtime name kind]
-  (let [file (libs-file runtime name)
+(defn- approved-spools-file [runtime name kind]
+  (let [file (spools-file runtime name)
         source {:kind kind
                 :file (.getPath file)}]
     (cond
       (and (not (.exists file))
            (not (java.nio.file.Files/isSymbolicLink (.toPath file))))
-      {:libs {}}
+      {:spools {}}
 
       (not (.isFile file))
       (throw (ex-info (str name " is malformed or unreadable") source))
 
       :else
-      (normalize-approved-libs-file
+      (normalize-approved-spools-file
        runtime
        name
        source
@@ -135,15 +135,27 @@
          (catch Throwable t
            (throw (ex-info (str name " is malformed or unreadable") source t))))))))
 
-(defn approved-libs
-  "Read and validate the effective runtime library allowlist.
+(defn- legacy-config-present? [file]
+  (or (.exists file)
+      (java.nio.file.Files/isSymbolicLink (.toPath file))))
 
-  The effective allowlist is `libs.edn` overlaid by `libs.local.edn`; local
+(defn- reject-legacy-spool-config! [runtime]
+  (let [legacy-files (filter #(legacy-config-present? (spools-file runtime %)) ["libs.edn" "libs.local.edn"])]
+    (when (seq legacy-files)
+      (throw (ex-info "Legacy runtime library config files are no longer supported; rename libs.edn/libs.local.edn to spools.edn/spools.local.edn and change top-level :libs to :spools"
+                      {:legacy-files (vec legacy-files)
+                       :config-dir (config-dir runtime)})))))
+
+(defn approved-spools
+  "Read and validate the effective runtime spool allowlist.
+
+  The effective allowlist is `spools.edn` overlaid by `spools.local.edn`; local
   entries replace shared entries with the same coordinate. Missing files
-  contribute no libraries, while malformed present files fail loudly."
+  contribute no spools, while malformed present files fail loudly."
   [runtime]
-  {:libs (merge (:libs (approved-libs-file runtime "libs.edn" :shared))
-                (:libs (approved-libs-file runtime "libs.local.edn" :local)))})
+  (reject-legacy-spool-config! runtime)
+  {:spools (merge (:spools (approved-spools-file runtime "spools.edn" :shared))
+                  (:spools (approved-spools-file runtime "spools.local.edn" :local)))})
 
 (defn- sync-failed [lib entry reason data]
   [lib (merge {:lib lib
@@ -164,14 +176,14 @@
         (throw (ex-info "Local root deps.edn :paths must be a vector of strings" {:root root :paths paths})))
       (mapv #(.getCanonicalFile (io/file root %)) paths))))
 
-(defn- add-root-paths-to-library-loader! [runtime root]
-  (let [loader (:library-classloader runtime)]
+(defn- add-root-paths-to-spool-loader! [runtime root]
+  (let [loader (:spool-classloader runtime)]
     (doseq [path (root-paths root)]
       (when-not (.isDirectory path)
         (throw (ex-info "Local root classpath entry must be a directory" {:root root :path (.getPath path)})))
       (.addURL ^clojure.lang.DynamicClassLoader loader (.toURL (.toURI path))))))
 
-(defn- sync-approved-lib! [runtime lib entry]
+(defn- sync-approved-spool! [runtime lib entry]
   (let [root-file (io/file (:root entry))]
     (cond
       (not (.exists root-file))
@@ -185,11 +197,11 @@
 
       :else
       (try
-        (let [added (with-library-classloader
+        (let [added (with-spool-classloader
                       runtime
                       #(binding [clojure.core/*repl* true]
                          (repl-deps/add-libs {lib {:local/root (:root entry)}})))]
-          (add-root-paths-to-library-loader! runtime (:root entry))
+          (add-root-paths-to-spool-loader! runtime (:root entry))
           [lib {:lib lib
                 :local/root (:local/root entry)
                 :root (:root entry)
@@ -199,24 +211,24 @@
           (sync-failed lib entry :runtime-add-failed {:message (ex-message t)
                                                       :class (str (class t))}))))))
 
-(defn sync-approved-libs
-  "Load approved local libraries into the runtime classloader and record sync status."
+(defn sync-approved-spools
+  "Load approved local spools into the runtime classloader and record sync status."
   [runtime]
-  (reset! (approved-lib-sync-state runtime) {})
-  (let [approved (approved-libs runtime)
+  (reset! (approved-spool-sync-state runtime) {})
+  (let [approved (approved-spools runtime)
         results (into (sorted-map)
-                      (map (fn [[lib entry]] (sync-approved-lib! runtime lib entry)))
-                      (:libs approved))]
-    (reset! (approved-lib-sync-state runtime) results)
-    {:libs results}))
+                      (map (fn [[lib entry]] (sync-approved-spool! runtime lib entry)))
+                      (:spools approved))]
+    (reset! (approved-spool-sync-state runtime) results)
+    {:spools results}))
 
-(defn approved-lib-syncs
-  "Return the most recent approved library sync results."
+(defn approved-spool-syncs
+  "Return the most recent approved spool sync results."
   [runtime]
-  {:libs (into (sorted-map) @(approved-lib-sync-state runtime))})
+  {:spools (into (sorted-map) @(approved-spool-sync-state runtime))})
 
 (defn- clear-reload-state! [runtime]
-  (reset! (approved-lib-sync-state runtime) {})
+  (reset! (approved-spool-sync-state runtime) {})
   (reset! (module-use-state runtime) {})
   (reset! (query-registry runtime) {})
   (reset! (view-registry runtime) {})
@@ -242,7 +254,7 @@
       (runtime/resume-event-system! runtime)
       (throw t))))
 
-(def ^:private allowed-use-keys #{:ns :file :libs :after :call :required?})
+(def ^:private allowed-use-keys #{:ns :file :spools :after :call :required?})
 
 (defn- validate-use-opts! [key opts]
   (when-not (keyword? key)
@@ -259,12 +271,12 @@
     (throw (ex-info "Module use :file must be a non-blank string" {:key key :file (:file opts)})))
   (when (and (contains? opts :file) (.isAbsolute (io/file (:file opts))))
     (throw (ex-info "Module use :file must be relative to selected config-dir" {:key key :file (:file opts)})))
-  (when (and (contains? opts :libs)
-             (not (or (vector? (:libs opts)) (set? (:libs opts)))))
-    (throw (ex-info "Module use :libs must be a vector or set of symbols" {:key key :libs (:libs opts)})))
-  (doseq [lib (:libs opts)]
+  (when (and (contains? opts :spools)
+             (not (or (vector? (:spools opts)) (set? (:spools opts)))))
+    (throw (ex-info "Module use :spools must be a vector or set of symbols" {:key key :spools (:spools opts)})))
+  (doseq [lib (:spools opts)]
     (when-not (symbol? lib)
-      (throw (ex-info "Module use :libs entries must be symbols" {:key key :lib lib}))))
+      (throw (ex-info "Module use :spools entries must be symbols" {:key key :lib lib}))))
   (when (and (contains? opts :after) (not (vector? (:after opts))))
     (throw (ex-info "Module use :after must be a vector" {:key key :after (:after opts)})))
   (doseq [after (:after opts)]
@@ -284,12 +296,12 @@
 (defn- skip-use [runtime key opts reason data]
   (record-use! runtime key (merge {:key key :opts opts :status :skipped :reason reason} data)))
 
-(defn- use-lib-skip [runtime opts]
-  (let [approved (approved-libs runtime)
-        syncs @(approved-lib-sync-state runtime)]
+(defn- use-spool-skip [runtime opts]
+  (let [approved (approved-spools runtime)
+        syncs @(approved-spool-sync-state runtime)]
     (some (fn [lib]
             (cond
-              (not (contains? (:libs approved) lib))
+              (not (contains? (:spools approved) lib))
               [:not-approved {:lib lib}]
 
               (not (contains? syncs lib))
@@ -297,7 +309,7 @@
 
               (= :failed (:status (get syncs lib)))
               [:sync-failed {:lib lib :sync (get syncs lib)}]))
-          (:libs opts))))
+          (:spools opts))))
 
 (defn- use-after-skip [runtime opts]
   (let [uses @(module-use-state runtime)]
@@ -329,7 +341,7 @@
   (mapcat (fn [[_ {:keys [root status]}]]
             (when (#{:loaded :already-available} status)
               (root-paths root)))
-          @(approved-lib-sync-state runtime)))
+          @(approved-spool-sync-state runtime)))
 
 (defn- locate-synced-namespace-file [runtime ns-sym]
   (let [relative (ns-relative-path ns-sym)
@@ -355,7 +367,7 @@
           (require ns-sym)
           {:ns ns-sym}
           (catch java.io.FileNotFoundException _
-            (throw (ex-info "Could not locate namespace source in synced library roots"
+            (throw (ex-info "Could not locate namespace source in synced spool roots"
                             {:ns ns-sym
                              :relative-path relative-path
                              :searched-roots searched-roots}))))))))
@@ -376,12 +388,12 @@
   (validate-use-opts! key opts)
   (when-let [file (:file opts)]
     (module-file runtime file))
-  (if-let [[reason data] (use-lib-skip runtime opts)]
+  (if-let [[reason data] (use-spool-skip runtime opts)]
     (skip-use runtime key opts reason data)
     (if-let [[reason data] (use-after-skip runtime opts)]
       (skip-use runtime key opts reason data)
       (try
-        (let [load-result (with-library-classloader
+        (let [load-result (with-spool-classloader
                             runtime
                             #(if-let [ns-sym (:ns opts)]
                                (load-synced-namespace! runtime ns-sym)
@@ -389,7 +401,7 @@
                                  (load-file file)
                                  {:file file})))
               call-result (when-let [call-sym (:call opts)]
-                            (with-library-classloader
+                            (with-spool-classloader
                               runtime
                               #((requiring-resolve call-sym))))]
           (record-use! runtime key (cond-> {:key key
@@ -502,7 +514,7 @@
 
 (defn- invoke-hook! [runtime hook-type hook ctx]
   (try
-    (with-library-classloader runtime #((:fn-value hook) ctx))
+    (with-spool-classloader runtime #((:fn-value hook) ctx))
     (catch Throwable t
       (throw (ex-info "Lifecycle hook failed"
                       (hook-failure-data hook-type hook t)
@@ -539,7 +551,7 @@
       (require-transform-wrapper!
        hook-type
        hook
-       (with-library-classloader runtime #((:fn-value hook) ctx)))))
+       (with-spool-classloader runtime #((:fn-value hook) ctx)))))
     (catch Throwable t
       (throw (ex-info "Lifecycle hook failed"
                       (hook-failure-data hook-type hook t)
@@ -884,7 +896,7 @@
   "Invoke a registered view function with params."
   [runtime view-name params]
   (let [{fn-sym :fn} (resolve-view runtime view-name)]
-    (with-library-classloader
+    (with-spool-classloader
       runtime
       #((requiring-resolve fn-sym) {:params params}))))
 
@@ -935,7 +947,7 @@
   "Invoke a registered CLI operation with raw string argv from `strand op`."
   [runtime op-name argv]
   (let [{fn-sym :fn name :name} (resolve-op runtime op-name)]
-    (with-library-classloader
+    (with-spool-classloader
       runtime
       #((requiring-resolve fn-sym) {:op/name name :op/argv (vec argv)}))))
 
@@ -945,7 +957,7 @@
   {:summary "strand op invokes trusted weaver-side operations by name."
    :usage "strand op <name> [args...]"
    :details ["The Go CLI stops parsing after the operation name and forwards the remaining arguments as strings."
-             "Register handlers from trusted init.clj, activated libraries, or the live REPL with skein.weaver.api/register-op!."
+             "Register handlers from trusted init.clj, activated spools, or the live REPL with skein.weaver.api/register-op!."
              "Handlers receive {:op/name <canonical-name> :op/argv [<strings>...]} and return JSON-compatible data."]
    :registered (ops (current-runtime))})
 
@@ -1136,7 +1148,7 @@
                          :contract contract
                          :problems (mapv #(problem-message contract %) (::s/problems explain))
                          :explain explain}))))
-    (let [batch (with-library-classloader
+    (let [batch (with-spool-classloader
                   runtime
                   #((requiring-resolve fn-sym) {:input input}))
           normalized-batch (normalize-weave-strand-attributes runtime req-ctx canonical-name input batch)
@@ -1171,7 +1183,7 @@
 (defn- resolve-hook-fn! [runtime fn-sym]
   (when-not (and (symbol? fn-sym) (namespace fn-sym))
     (throw (ex-info "Hook function must be a fully qualified symbol" {:fn fn-sym})))
-  (let [resolved (with-library-classloader runtime #(requiring-resolve fn-sym))
+  (let [resolved (with-spool-classloader runtime #(requiring-resolve fn-sym))
         value (if (var? resolved) @resolved resolved)]
     (when-not (ifn? value)
       (throw (ex-info "Hook symbol must resolve to a callable value" {:fn fn-sym :resolved-class (str (class value))})))
@@ -1240,7 +1252,7 @@
   (when-not (and (symbol? fn-sym) (namespace fn-sym))
     (throw (ex-info "Event handler function must be a fully qualified symbol" {:fn fn-sym})))
   (let [resolved (try
-                   (with-library-classloader runtime #(requiring-resolve fn-sym))
+                   (with-spool-classloader runtime #(requiring-resolve fn-sym))
                    (catch Throwable t
                      (throw (ex-info "Event handler function could not be resolved" {:fn fn-sym} t))))
         value (if (var? resolved) @resolved resolved)]

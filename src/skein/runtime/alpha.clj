@@ -16,27 +16,27 @@
     (apply client/call-world (repl/connected-config-dir) (repl/connected-opts) op args)))
 
 (defn approved
-  "Return the normalized approved library roots for the selected weaver config dir.
+  "Return the normalized approved spool roots for the selected weaver config dir.
 
-  Reads the effective `libs.edn` plus `libs.local.edn` overlay through the
-  active runtime and returns `{:libs ...}` with canonical local roots and source
+  Reads the effective `spools.edn` plus `spools.local.edn` overlay through the
+  active runtime and returns `{:spools ...}` with canonical local roots and source
   metadata. Malformed allowlists fail loudly with ExceptionInfo."
   []
-  (call-daemon :approved-libs))
+  (call-daemon :approved-spools))
 
 (defn sync!
   "Load approved local roots into the selected weaver runtime.
 
-  Returns `{:libs ...}` with one result per approved library and records the
+  Returns `{:spools ...}` with one result per approved spool and records the
   results in weaver-lifetime sync state. Structural allowlist errors throw;
-  per-library load failures are returned as failed result maps."
+  per-spool load failures are returned as failed result maps."
   []
-  (call-daemon :sync-approved-libs))
+  (call-daemon :sync-approved-spools))
 
 (defn syncs
   "Return the selected weaver runtime's most recent approved-root sync state."
   []
-  (call-daemon :approved-lib-syncs))
+  (call-daemon :approved-spool-syncs))
 
 (defn reload!
   "Reload startup files from the selected config dir in the active weaver.
@@ -50,7 +50,7 @@
   "Activate a weaver-side module and record its use state.
 
   `key` must be a keyword. `opts` selects exactly one module source with `:ns`
-  or `:file`, and may include `:libs`, `:after`, `:call`, and `:required?` gates.
+  or `:file`, and may include `:spools`, `:after`, `:call`, and `:required?` gates.
   Returns a loaded, skipped, or failed module-use result map."
   [key opts]
   (call-daemon :use! key opts))

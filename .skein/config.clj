@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [skein.events.alpha :as events]
             [skein.hooks.alpha :as hooks]
-            [skein.libs.ephemeral :as ephemeral]
+            [skein.spools.ephemeral :as ephemeral]
             [skein.patterns.alpha :as patterns]
             [skein.views.alpha :as views]
             [skein.weaver.api :as api]
@@ -1036,7 +1036,7 @@
              #{:strand/updated}
              'config/record-devflow-summary-event!
              {:doc "Record in-memory summaries when devflow feature work completes."})]
-   :ephemeral {:namespace 'skein.libs.ephemeral
-               :creator 'skein.libs.ephemeral/ephemeral!
-               :burner 'skein.libs.ephemeral/burn-ephemeral!
+   :ephemeral {:namespace 'skein.spools.ephemeral
+               :creator 'skein.spools.ephemeral/ephemeral!
+               :burner 'skein.spools.ephemeral/burn-ephemeral!
                :query ephemeral/ephemeral-query}})

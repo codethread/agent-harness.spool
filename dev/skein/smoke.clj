@@ -121,11 +121,11 @@
     (spit (java.io.File. dir "config.json") (json/write-str {:configFormat "alpha"}))
     (.getCanonicalPath dir)))
 
-(defn write-library-startup-config! [db-file]
+(defn write-spool-startup-config! [db-file]
   (let [config-dir (write-client-config! db-file)
-        lib-dir (java.io.File. config-dir "libs/smoke-lib")
+        lib-dir (java.io.File. config-dir "spools/smoke-lib")
         src-dir (java.io.File. lib-dir "src/smoke")
-        marker (java.io.File. config-dir "library-loaded.txt")]
+        marker (java.io.File. config-dir "spool-loaded.txt")]
     (.mkdirs src-dir)
     (spit (java.io.File. lib-dir "deps.edn") "{:paths [\"src\"]}\n")
     (spit (java.io.File. src-dir "lib.clj")
@@ -133,10 +133,10 @@
     (spit (java.io.File. src-dir "layer.clj")
           (str "(ns smoke.layer\n  (:require [smoke.lib :as base]))\n"
                "(defn install! [] (spit " (pr-str (.getCanonicalPath marker)) " (str (name (base/value)) \" layered\")) :layered)\n"))
-    (spit (java.io.File. config-dir "libs.edn")
-          "{:libs {smoke/lib {:local/root \"libs/smoke-lib\"}\n        smoke/missing {:local/root \"libs/missing-lib\"}}}\n")
+    (spit (java.io.File. config-dir "spools.edn")
+          "{:spools {smoke/lib {:local/root \"spools/smoke-lib\"}\n        smoke/missing {:local/root \"spools/missing-lib\"}}}\n")
     (spit (java.io.File. config-dir "init.clj")
-          "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n(runtime-alpha/use! :smoke/lib {:ns 'smoke.lib :libs #{'smoke/lib}})\n(runtime-alpha/use! :smoke/layer {:ns 'smoke.layer :libs #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(runtime-alpha/use! :smoke/optional-missing {:ns 'smoke.missing :libs #{'smoke/missing}})\n")
+          "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n(runtime-alpha/use! :smoke/lib {:ns 'smoke.lib :spools #{'smoke/lib}})\n(runtime-alpha/use! :smoke/layer {:ns 'smoke.layer :spools #{'smoke/lib} :after [:smoke/lib] :call 'smoke.layer/install!})\n(runtime-alpha/use! :smoke/optional-missing {:ns 'smoke.missing :spools #{'smoke/missing}})\n")
     (.getCanonicalPath marker)))
 
 (defn outside-repo-dir []
@@ -264,9 +264,9 @@
       (try
         (run-cli-config! config-dir "weaver" "status")
         (assert (.isFile config-file) "clean bootstrap preserves/creates config.json")
-        (assert-file-contents (java.io.File. config-dir "libs.edn") "{:libs {}}\n" "clean bootstrap creates empty libs.edn")
+        (assert-file-contents (java.io.File. config-dir "spools.edn") "{:spools {}}\n" "clean bootstrap creates empty spools.edn")
         (assert-file-contents (java.io.File. config-dir "init.clj") "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n" "clean bootstrap creates runtime sync init.clj template")
-        (assert (.isDirectory (java.io.File. config-dir "libs")) "clean bootstrap creates libs directory")
+        (assert (.isDirectory (java.io.File. config-dir "spools")) "clean bootstrap creates spools directory")
         (assert (not (.exists (java.io.File. config-dir ".git"))) "clean bootstrap does not run git init")
         (let [strand-id (cli-add-config! config-dir "Bootstrap clean strand" "--attr" "owner=ct")]
           (assert= "Bootstrap clean strand"
@@ -279,25 +279,25 @@
 (defn smoke-bootstrap-dirty-config! [db-file]
   (let [config-dir (bootstrap-config-dir db-file "bootstrap-dirty")
         config-path (java.io.File. config-dir "config.json")
-        libs-path (java.io.File. config-dir "libs.edn")
+        spools-path (java.io.File. config-dir "spools.edn")
         init-path (java.io.File. config-dir "init.clj")
         original-config "{\"configFormat\":\"alpha\"}\n"
-        original-libs "{:libs {}}\n;; user comment\n"
+        original-spools "{:spools {}}\n;; user comment\n"
         original-init "(require '[skein.weaver.api :as api])\n(api/register-query! 'dirty [:= [:attr :owner] \"dirty\"])\n"]
     (delete-tree! (smoke-config-dir-named (str db-file ".bootstrap-dirty")))
     (.mkdirs (java.io.File. config-dir))
     (.mkdirs (java.io.File. config-dir ".git"))
     (spit config-path original-config)
-    (spit libs-path original-libs)
+    (spit spools-path original-spools)
     (spit init-path original-init)
     (run-cli-config! config-dir "init")
     (let [daemon (start-cli-daemon-config! config-dir)]
       (try
         (run-cli-config! config-dir "weaver" "status")
         (assert-file-contents config-path original-config "dirty bootstrap does not rewrite existing config.json")
-        (assert-file-contents libs-path original-libs "dirty bootstrap does not rewrite existing libs.edn")
+        (assert-file-contents spools-path original-spools "dirty bootstrap does not rewrite existing spools.edn")
         (assert-file-contents init-path original-init "dirty bootstrap does not rewrite existing init.clj")
-        (assert (.isDirectory (java.io.File. config-dir "libs")) "dirty bootstrap fills missing libs directory")
+        (assert (.isDirectory (java.io.File. config-dir "spools")) "dirty bootstrap fills missing spools directory")
         (cli-add-config! config-dir "Dirty owned strand" "--attr" "owner=dirty")
         (assert= ["Dirty owned strand"]
                  (titles (parse-json (run-cli-config! config-dir "list" "--query" "dirty")))
@@ -310,12 +310,12 @@
   (let [config-dir (bootstrap-config-dir db-file "startup-transform")
         init-path (java.io.File. config-dir "init.clj")
         event-marker (java.io.File. config-dir "event-handler.txt")
-        lib-root (java.io.File. config-dir "libs/smoke-runtime-lib")]
+        lib-root (java.io.File. config-dir "spools/smoke-runtime-lib")]
     (delete-tree! (smoke-config-dir-named (str db-file ".startup-transform")))
     (write-client-config-to-dir! config-dir)
     (.mkdirs (java.io.File. lib-root "src"))
     (spit (java.io.File. lib-root "deps.edn") "{:paths [\"src\"]}\n")
-    (spit (java.io.File. config-dir "libs.edn") "{:libs {smoke/runtime-lib {:local/root \"libs/smoke-runtime-lib\"}}}\n")
+    (spit (java.io.File. config-dir "spools.edn") "{:spools {smoke/runtime-lib {:local/root \"spools/smoke-runtime-lib\"}}}\n")
     (spit init-path
           (str "(ns smoke.startup\n  (:require [clojure.spec.alpha :as s]\n            [skein.runtime.alpha :as runtime]\n            [skein.events.alpha :as events]\n            [skein.graph.alpha :as graph]\n            [skein.hooks.alpha :as hooks]\n            [skein.views.alpha :as views]\n            [skein.weaver.api :as api]))\n(runtime/sync!)\n(api/register-query! 'smoke-owned [:= [:attr :owner] \"smoke\"])\n(s/def ::title string?)\n(s/def ::review-input (s/keys :req-un [::title]))\n(defn reject-blocked-owner [ctx]\n  (when (= \"blocked\" (get-in ctx [:strand/after :attributes :owner]))\n    (throw (ex-info \"smoke hook rejected blocked owner\" {:code :smoke/blocked-owner}))))\n(hooks/register! :smoke/reject-blocked-owner #{:strand/add-before-commit} 'smoke.startup/reject-blocked-owner)\n(defn review-pattern [{:keys [input]}]\n  (let [title (:title input)]\n    [{:ref 'impl :title title :attributes {:owner \"smoke\"}}\n     {:ref 'review :title (str \"Review: \" title) :attributes {:kind \"review\"} :edges [{:type \"depends-on\" :to 'impl}]}]))\n(api/register-pattern! 'review-task 'smoke.startup/review-pattern ::review-input)\n(def event-marker " (pr-str (.getCanonicalPath event-marker)) ")\n(defn record-added! [event]\n  (spit event-marker (:title (:strand event))))\n(defn smoke-owned-view [{:keys [params]}]\n  (let [ids (graph/query-ids! 'smoke-owned {})]\n    {:params params\n     :ids ids\n     :strands (graph/strands-by-ids ids)}))\n(views/register-view! 'smoke-owned-view 'smoke.startup/smoke-owned-view)\n(events/register! :smoke/record-added #{:strand/added} 'smoke.startup/record-added! {:source :smoke})\n"))
     (let [daemon (start-cli-daemon-config! config-dir)]
@@ -326,12 +326,12 @@
                              config-dir
                              "(do\n  (require '[skein.runtime.alpha :as runtime-alpha])\n  {:approved (runtime-alpha/approved)\n   :syncs (runtime-alpha/syncs)})\n"
                              "weaver" "repl" "--stdin"))]
-          (assert= "libs/smoke-runtime-lib"
-                   (get-in loader-state [:approved :libs 'smoke/runtime-lib :local/root])
-                   "live REPL runtime loader reads real approved library config")
+          (assert= "spools/smoke-runtime-lib"
+                   (get-in loader-state [:approved :spools 'smoke/runtime-lib :local/root])
+                   "live REPL runtime loader reads real approved spool config")
           (assert= :loaded
-                   (get-in loader-state [:syncs :libs 'smoke/runtime-lib :status])
-                   "live REPL runtime loader reads real approved library sync state"))
+                   (get-in loader-state [:syncs :spools 'smoke/runtime-lib :status])
+                   "live REPL runtime loader reads real approved spool sync state"))
         (let [strand-id (cli-add-config! config-dir "Startup transformed strand" "--attr" "owner=smoke")
               rejected-output (run-cli-config-fails! config-dir "add" "Hook rejected strand" "--attr" "owner=blocked")
               _ (assert-contains rejected-output "hook/failed" "startup hook rejection reaches CLI as hook/failed")

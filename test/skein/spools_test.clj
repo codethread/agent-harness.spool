@@ -1,9 +1,9 @@
-(ns skein.libs-test
+(ns skein.spools-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [skein.events.alpha :as events]
             [skein.graph.alpha :as graph]
-            [skein.libs.ephemeral :as ephemeral]
+            [skein.spools.ephemeral :as ephemeral]
             [skein.runtime.alpha :as runtime-alpha]
             [skein.weaver.config :as daemon-config]
             [skein.weaver.api :as api]
@@ -20,7 +20,7 @@
 (defn- temp-config-dir []
   (doto (.toFile (java.nio.file.Files/createTempDirectory
                   (.toPath (io/file "/tmp"))
-                  "skein-libs-config"
+                  "skein-spools-config"
                   (make-array java.nio.file.attribute.FileAttribute 0)))
     (.mkdirs)))
 
@@ -59,22 +59,22 @@
         ;; Keep temp config dirs so later add-libs calls do not see stale basis entries.
         nil))))
 
-(defn- write-libs! [config-dir content]
-  (spit (io/file config-dir "libs.edn") content))
+(defn- write-spools! [config-dir content]
+  (spit (io/file config-dir "spools.edn") content))
 
-(defn- write-local-libs! [config-dir content]
-  (spit (io/file config-dir "libs.local.edn") content))
+(defn- write-local-spools! [config-dir content]
+  (spit (io/file config-dir "spools.local.edn") content))
 
 (defn- shared-source [config-dir]
   {:kind :shared
-   :file (.getPath (io/file (.getCanonicalPath config-dir) "libs.edn"))})
+   :file (.getPath (io/file (.getCanonicalPath config-dir) "spools.edn"))})
 
 (defn- local-source [config-dir]
   {:kind :local
-   :file (.getPath (io/file (.getCanonicalPath config-dir) "libs.local.edn"))})
+   :file (.getPath (io/file (.getCanonicalPath config-dir) "spools.local.edn"))})
 
 (defn- write-local-lib! [config-dir lib-name ns-sym]
-  (let [root (io/file config-dir "libs" lib-name)
+  (let [root (io/file config-dir "spools" lib-name)
         ns-path (-> (str ns-sym)
                     (.replace \- \_)
                     (.replace \. java.io.File/separatorChar))
@@ -84,52 +84,63 @@
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     root))
 
-(deftest approved-returns-empty-libs-when-files-are-missing
+(deftest approved-returns-empty-spools-when-files-are-missing
   (with-runtime
     (fn [_ _]
-      (is (= {:libs {}} (runtime-alpha/approved))))))
+      (is (= {:spools {}} (runtime-alpha/approved))))))
 
-(deftest approved-fails-loudly-when-local-libs-edn-is-malformed
+(deftest approved-fails-loudly-when-local-spools-edn-is-malformed
   (with-runtime
     (fn [_ config-dir]
-      (write-local-libs! config-dir "{:libs")
+      (write-local-spools! config-dir "{:spools")
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"libs.local.edn is malformed or unreadable"
+                            #"spools.local.edn is malformed or unreadable"
                             (runtime-alpha/approved))))))
 
-(deftest approved-includes-shared-only-and-local-only-libraries
+(deftest approved-rejects-legacy-libs-files-and-symlinks
   (with-runtime
     (fn [_ config-dir]
-      (let [shared-root (io/file config-dir "libs" "shared")
-            local-root (io/file config-dir "libs" "local")]
-        (write-libs! config-dir (pr-str {:libs {'demo/shared {:local/root "libs/shared"}}}))
-        (write-local-libs! config-dir (pr-str {:libs {'demo/local {:local/root "libs/local"}}}))
-        (is (= {:libs {'demo/shared {:local/root "libs/shared"
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file config-dir "libs.local.edn"))
+       (.toPath (io/file config-dir "missing"))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"rename libs.edn/libs.local.edn to spools.edn/spools.local.edn"
+                            (runtime-alpha/approved))))))
+
+(deftest approved-includes-shared-only-and-local-only-spools
+  (with-runtime
+    (fn [_ config-dir]
+      (let [shared-root (io/file config-dir "spools" "shared")
+            local-root (io/file config-dir "spools" "local")]
+        (write-spools! config-dir (pr-str {:spools {'demo/shared {:local/root "spools/shared"}}}))
+        (write-local-spools! config-dir (pr-str {:spools {'demo/local {:local/root "spools/local"}}}))
+        (is (= {:spools {'demo/shared {:local/root "spools/shared"
                                      :root (.getCanonicalPath shared-root)
                                      :source (shared-source config-dir)}
-                       'demo/local {:local/root "libs/local"
+                       'demo/local {:local/root "spools/local"
                                     :root (.getCanonicalPath local-root)
                                     :source (local-source config-dir)}}}
                (runtime-alpha/approved)))))))
 
-(deftest approved-local-libs-override-shared-by-coordinate
+(deftest approved-local-spools-override-shared-by-coordinate
   (with-runtime
     (fn [_ config-dir]
-      (let [shared-root (io/file config-dir "libs" "shared")
-            local-root (io/file config-dir "libs" "local")]
-        (write-libs! config-dir (pr-str {:libs {'demo/override {:local/root "libs/shared"}}}))
-        (write-local-libs! config-dir (pr-str {:libs {'demo/override {:local/root "libs/local"}}}))
-        (is (= {:local/root "libs/local"
+      (let [shared-root (io/file config-dir "spools" "shared")
+            local-root (io/file config-dir "spools" "local")]
+        (write-spools! config-dir (pr-str {:spools {'demo/override {:local/root "spools/shared"}}}))
+        (write-local-spools! config-dir (pr-str {:spools {'demo/override {:local/root "spools/local"}}}))
+        (is (= {:local/root "spools/local"
                 :root (.getCanonicalPath local-root)
                 :source (local-source config-dir)}
-               (get-in (runtime-alpha/approved) [:libs 'demo/override])))
+               (get-in (runtime-alpha/approved) [:spools 'demo/override])))
         (is (not= (.getCanonicalPath shared-root)
-                  (get-in (runtime-alpha/approved) [:libs 'demo/override :root])))))))
+                  (get-in (runtime-alpha/approved) [:spools 'demo/override :root])))))))
 
-(deftest approved-fails-when-libs-edn-is-not-a-file
+(deftest approved-fails-when-spools-edn-is-not-a-file
   (with-runtime
     (fn [_ config-dir]
-      (.mkdirs (io/file config-dir "libs.edn"))
+      (.mkdirs (io/file config-dir "spools.edn"))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"malformed or unreadable"
                             (runtime-alpha/approved))))))
@@ -137,17 +148,17 @@
 (deftest approved-normalizes-relative-and-absolute-roots
   (with-runtime
     (fn [_ config-dir]
-      (let [relative-root (io/file config-dir "libs" "demo")
+      (let [relative-root (io/file config-dir "spools" "demo")
             absolute-root (io/file config-dir "external" "abs")]
         (.mkdirs relative-root)
         (.mkdirs absolute-root)
-        (write-libs! config-dir
-                     (pr-str {:libs {'demo/relative {:local/root "libs/demo"}
+        (write-spools! config-dir
+                     (pr-str {:spools {'demo/relative {:local/root "spools/demo"}
                                      'demo/absolute {:local/root (.getAbsolutePath absolute-root)}}}))
-        (is (= {:libs {'demo/absolute {:local/root (.getAbsolutePath absolute-root)
+        (is (= {:spools {'demo/absolute {:local/root (.getAbsolutePath absolute-root)
                                        :root (.getCanonicalPath absolute-root)
                                        :source (shared-source config-dir)}
-                       'demo/relative {:local/root "libs/demo"
+                       'demo/relative {:local/root "spools/demo"
                                        :root (.getCanonicalPath relative-root)
                                        :source (shared-source config-dir)}}}
                (runtime-alpha/approved)))))))
@@ -157,8 +168,8 @@
     (fn [_ config-dir]
       (let [home (System/getProperty "user.home")
             home-root (io/file home "dev" "projects" "my-lib")]
-        (write-libs! config-dir (pr-str {:libs {'demo/home {:local/root "~/dev/projects/my-lib"}}}))
-        (is (= {:libs {'demo/home {:local/root "~/dev/projects/my-lib"
+        (write-spools! config-dir (pr-str {:spools {'demo/home {:local/root "~/dev/projects/my-lib"}}}))
+        (is (= {:spools {'demo/home {:local/root "~/dev/projects/my-lib"
                                    :root (.getCanonicalPath home-root)
                                    :source (shared-source config-dir)}}}
                (runtime-alpha/approved)))))))
@@ -166,13 +177,13 @@
 (deftest approved-canonicalizes-symlink-roots
   (with-runtime
     (fn [_ config-dir]
-      (let [target (io/file config-dir "libs" "target")
-            link (io/file config-dir "libs" "link")]
+      (let [target (io/file config-dir "spools" "target")
+            link (io/file config-dir "spools" "link")]
         (.mkdirs target)
         (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath target)
                                                 (make-array java.nio.file.attribute.FileAttribute 0))
-        (write-libs! config-dir (pr-str {:libs {'demo/link {:local/root "libs/link"}}}))
-        (is (= {:libs {'demo/link {:local/root "libs/link"
+        (write-spools! config-dir (pr-str {:spools {'demo/link {:local/root "spools/link"}}}))
+        (is (= {:spools {'demo/link {:local/root "spools/link"
                                    :root (.getCanonicalPath target)
                                    :source (shared-source config-dir)}}}
                (runtime-alpha/approved)))))))
@@ -180,9 +191,9 @@
 (deftest approved-does-not-reject-missing-local-roots
   (with-runtime
     (fn [_ config-dir]
-      (let [missing (io/file config-dir "libs" "missing")]
-        (write-libs! config-dir (pr-str {:libs {'demo/missing {:local/root "libs/missing"}}}))
-        (is (= {:libs {'demo/missing {:local/root "libs/missing"
+      (let [missing (io/file config-dir "spools" "missing")]
+        (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}}}))
+        (is (= {:spools {'demo/missing {:local/root "spools/missing"
                                       :root (.getCanonicalPath missing)
                                       :source (shared-source config-dir)}}}
                (runtime-alpha/approved)))))))
@@ -197,17 +208,17 @@
                                           :args args})]
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {}
-            :op :approved-libs
+            :op :approved-spools
             :args nil}
            (runtime-alpha/approved)))
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {}
-            :op :sync-approved-libs
+            :op :sync-approved-spools
             :args nil}
            (runtime-alpha/sync!)))
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {}
-            :op :approved-lib-syncs
+            :op :approved-spool-syncs
             :args nil}
            (runtime-alpha/syncs)))
     (is (= {:config-dir "/tmp/skein-connected-world"
@@ -232,9 +243,9 @@
            (runtime-alpha/use :demo)))))
 
 
-(deftest ephemeral-library-composes-public-helper-surfaces
+(deftest ephemeral-spool-composes-public-helper-surfaces
   (is (= '#{skein.graph.alpha skein.repl}
-         (ns-requires "skein/libs/ephemeral.clj")))
+         (ns-requires "skein/spools/ephemeral.clj")))
   (with-runtime
     (fn [_ _]
       (let [parent (repl/strand! "Parent")
@@ -296,17 +307,17 @@
       (is (= [] (events/handlers)))
       (is (= [] (events/recent-failures))))))
 
-(deftest connected-client-can-register-weaver-only-library-handler
+(deftest connected-client-can-register-weaver-only-spool-handler
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
             ns-sym (symbol (str "demo.event_handler_" suffix))
             lib (symbol (str "demo/event-handler-lib-" suffix))]
         (write-local-lib! config-dir "event-handler" ns-sym)
-        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/event-handler"}}}))
-        (is (= :loaded (get-in (client/call-world (get-in rt [:metadata :config-dir]) {} :sync-approved-libs)
-                               [:libs lib :status])))
-        (is (= :loaded (:status (client/call-world (get-in rt [:metadata :config-dir]) {} :use! :events {:ns ns-sym :libs [lib]}))))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/event-handler"}}}))
+        (is (= :loaded (get-in (client/call-world (get-in rt [:metadata :config-dir]) {} :sync-approved-spools)
+                               [:spools lib :status])))
+        (is (= :loaded (:status (client/call-world (get-in rt [:metadata :config-dir]) {} :use! :events {:ns ns-sym :spools [lib]}))))
         (let [entry (client/call-world (get-in rt [:metadata :config-dir]) {}
                                        :register-event-handler! :lib #{:strand/added}
                                        (symbol (str ns-sym) "event-handler") {})]
@@ -317,40 +328,40 @@
   (with-runtime
     (fn [_ config-dir]
       (doseq [[label content pattern]
-              [["malformed EDN" "{:libs" #"malformed or unreadable"]
-               ["unknown top-level key" (pr-str {:libs {} :extra true}) #"unknown top-level keys"]
-               ["missing :libs" (pr-str {}) #"requires :libs map"]
-               ["non-map :libs" (pr-str {:libs []}) #"requires :libs map"]
-               ["non-symbol coordinate" (pr-str {:libs {"demo/lib" {:local/root "libs/demo"}}}) #"coordinate must be a symbol"]
-               ["non-map entry" (pr-str {:libs {'demo/lib "libs/demo"}}) #"entry must be a map"]
-               ["unknown per-lib key" (pr-str {:libs {'demo/lib {:local/root "libs/demo" :extra true}}}) #"unknown keys"]
-               ["missing root" (pr-str {:libs {'demo/lib {}}}) #"requires non-blank string"]
-               ["non-string root" (pr-str {:libs {'demo/lib {:local/root 1}}}) #"requires non-blank string"]
-               ["blank root" (pr-str {:libs {'demo/lib {:local/root "  "}}}) #"requires non-blank string"]]]
+              [["malformed EDN" "{:spools" #"malformed or unreadable"]
+               ["unknown top-level key" (pr-str {:spools {} :extra true}) #"unknown top-level keys"]
+               ["missing :spools" (pr-str {}) #"requires :spools map"]
+               ["non-map :spools" (pr-str {:spools []}) #"requires :spools map"]
+               ["non-symbol coordinate" (pr-str {:spools {"demo/lib" {:local/root "spools/demo"}}}) #"coordinate must be a symbol"]
+               ["non-map entry" (pr-str {:spools {'demo/lib "spools/demo"}}) #"entry must be a map"]
+               ["unknown per-lib key" (pr-str {:spools {'demo/lib {:local/root "spools/demo" :extra true}}}) #"unknown keys"]
+               ["missing root" (pr-str {:spools {'demo/lib {}}}) #"requires non-blank string"]
+               ["non-string root" (pr-str {:spools {'demo/lib {:local/root 1}}}) #"requires non-blank string"]
+               ["blank root" (pr-str {:spools {'demo/lib {:local/root "  "}}}) #"requires non-blank string"]]]
         (testing label
-          (write-libs! config-dir content)
+          (write-spools! config-dir content)
           (is (thrown-with-msg? clojure.lang.ExceptionInfo pattern (runtime-alpha/approved))))))))
 
-(deftest approved-applies-structural-validation-to-local-libs
+(deftest approved-applies-structural-validation-to-local-spools
   (with-runtime
     (fn [_ config-dir]
-      (write-local-libs! config-dir (pr-str {:libs {'demo/lib {:local/root " "}}}))
+      (write-local-spools! config-dir (pr-str {:spools {'demo/lib {:local/root " "}}}))
       (try
         (runtime-alpha/approved)
-        (is false "expected libs.local.edn structural validation to fail")
+        (is false "expected spools.local.edn structural validation to fail")
         (catch clojure.lang.ExceptionInfo e
           (is (re-find #"requires non-blank string" (ex-message e)))
           (is (= (local-source config-dir) (select-keys (ex-data e) [:kind :file]))))))))
 
-(deftest approved-fails-loudly-on-broken-local-libs-symlink
+(deftest approved-fails-loudly-on-broken-local-spools-symlink
   (with-runtime
     (fn [_ config-dir]
       (java.nio.file.Files/createSymbolicLink
-       (.toPath (io/file config-dir "libs.local.edn"))
+       (.toPath (io/file config-dir "spools.local.edn"))
        (.toPath (io/file config-dir "missing-target.edn"))
        (make-array java.nio.file.attribute.FileAttribute 0))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"libs.local.edn is malformed or unreadable"
+                            #"spools.local.edn is malformed or unreadable"
                             (runtime-alpha/approved))))))
 
 (deftest sync-loads-approved-local-root-and-exposes-state
@@ -360,27 +371,27 @@
             ns-sym (symbol (str "demo.synced-" suffix))
             lib (symbol (str "demo/lib-" suffix))
             root (write-local-lib! config-dir "demo" ns-sym)]
-        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/demo"}}}))
-        (is (= {:libs {lib {:lib lib
-                            :local/root "libs/demo"
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/demo"}}}))
+        (is (= {:spools {lib {:lib lib
+                            :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :loaded}}}
                (runtime-alpha/sync!)))
-        (is (= {:libs {lib {:lib lib
-                            :local/root "libs/demo"
+        (is (= {:spools {lib {:lib lib
+                            :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :loaded}}}
                (runtime-alpha/syncs)))
-        (is (= {:libs {lib {:lib lib
-                            :local/root "libs/demo"
+        (is (= {:spools {lib {:lib lib
+                            :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :already-available}}}
                (runtime-alpha/sync!)))))))
 
-(deftest daemon-init-runs-with-library-classloader-after-sync
+(deftest daemon-init-runs-with-spool-classloader-after-sync
   (let [db-file (db-test/temp-db-file)
         config-dir (temp-config-dir)
         suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
@@ -389,7 +400,7 @@
         result-file (io/file config-dir "init-result.edn")]
     (write-local-lib! config-dir "init-demo" ns-sym)
     (try
-      (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/init-demo"}}}))
+      (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/init-demo"}}}))
       (spit (io/file config-dir "init.clj")
             (str "(do\n"
                  "  (require '[skein.runtime.alpha :as runtime-alpha])\n"
@@ -400,7 +411,7 @@
       (let [rt (runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))})]
         (try
           (is (= :synced-lib-loaded (read-string (slurp result-file))))
-          (is (= :loaded (get-in (runtime-alpha/syncs) [:libs lib :status])))
+          (is (= :loaded (get-in (runtime-alpha/syncs) [:spools lib :status])))
           (finally
             (runtime/stop! rt))))
       (finally
@@ -411,29 +422,29 @@
 (deftest sync-clears-stale-state-before-structural-failure
   (with-runtime
     (fn [_ config-dir]
-      (let [missing (io/file config-dir "libs" "missing")]
-        (write-libs! config-dir (pr-str {:libs {'demo/missing {:local/root "libs/missing"}}}))
-        (is (= {:libs {'demo/missing {:lib 'demo/missing
-                                      :local/root "libs/missing"
+      (let [missing (io/file config-dir "spools" "missing")]
+        (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}}}))
+        (is (= {:spools {'demo/missing {:lib 'demo/missing
+                                      :local/root "spools/missing"
                                       :root (.getCanonicalPath missing)
                                       :source (shared-source config-dir)
                                       :status :failed
                                       :reason :missing-root}}}
                (runtime-alpha/sync!)))
-        (write-libs! config-dir "{:libs")
+        (write-spools! config-dir "{:spools")
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"malformed or unreadable" (runtime-alpha/sync!)))
-        (is (= {:libs {}} (runtime-alpha/syncs)))))))
+        (is (= {:spools {}} (runtime-alpha/syncs)))))))
 
 (deftest sync-records-runtime-add-failures-as-failed-outcomes
   (with-runtime
     (fn [_ config-dir]
-      (let [root (io/file config-dir "libs" "bad-deps")]
+      (let [root (io/file config-dir "spools" "bad-deps")]
         (.mkdirs root)
         (spit (io/file root "deps.edn") "{:paths [}")
-        (write-libs! config-dir (pr-str {:libs {'demo/bad-deps {:local/root "libs/bad-deps"}}}))
-        (let [result (get-in (runtime-alpha/sync!) [:libs 'demo/bad-deps])]
+        (write-spools! config-dir (pr-str {:spools {'demo/bad-deps {:local/root "spools/bad-deps"}}}))
+        (let [result (get-in (runtime-alpha/sync!) [:spools 'demo/bad-deps])]
           (is (= {:lib 'demo/bad-deps
-                  :local/root "libs/bad-deps"
+                  :local/root "spools/bad-deps"
                   :root (.getCanonicalPath root)
                   :source (shared-source config-dir)
                   :status :failed
@@ -445,19 +456,19 @@
 (deftest sync-records-missing-and-unreadable-roots-as-failed-outcomes
   (with-runtime
     (fn [_ config-dir]
-      (let [not-dir (io/file config-dir "libs" "not-dir")]
+      (let [not-dir (io/file config-dir "spools" "not-dir")]
         (.mkdirs (.getParentFile not-dir))
         (spit not-dir "not a directory")
-        (write-libs! config-dir (pr-str {:libs {'demo/missing {:local/root "libs/missing"}
-                                                'demo/not-dir {:local/root "libs/not-dir"}}}))
-        (is (= {:libs {'demo/missing {:lib 'demo/missing
-                                      :local/root "libs/missing"
-                                      :root (.getCanonicalPath (io/file config-dir "libs" "missing"))
+        (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}
+                                                'demo/not-dir {:local/root "spools/not-dir"}}}))
+        (is (= {:spools {'demo/missing {:lib 'demo/missing
+                                      :local/root "spools/missing"
+                                      :root (.getCanonicalPath (io/file config-dir "spools" "missing"))
                                       :source (shared-source config-dir)
                                       :status :failed
                                       :reason :missing-root}
                        'demo/not-dir {:lib 'demo/not-dir
-                                      :local/root "libs/not-dir"
+                                      :local/root "spools/not-dir"
                                       :root (.getCanonicalPath not-dir)
                                       :source (shared-source config-dir)
                                       :status :failed
@@ -519,7 +530,7 @@
       (Thread/sleep 250)
       (is (seq (api/recent-event-failures rt)))
       (spit (io/file config-dir "init.clj")
-            "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n(api/register-event-handler! @runtime/current-runtime :fresh #{:strand/added} 'skein.libs-test/fresh-reload-handler {})\n")
+            "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n(api/register-event-handler! @runtime/current-runtime :fresh #{:strand/added} 'skein.spools-test/fresh-reload-handler {})\n")
       (is (= :loaded (:status (runtime-alpha/reload!))))
       (is (nil? (runtime-alpha/use :stale)))
       (is (nil? (get (api/queries rt) "stale")))
@@ -542,9 +553,9 @@
             lib (symbol (str "demo/use-ns-lib-" suffix))
             root (write-local-lib! config-dir "use-ns" ns-sym)
             expected-file (io/file root "src" "demo" (str "use_ns_" suffix ".clj"))]
-        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/use-ns"}}}))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/use-ns"}}}))
         (runtime-alpha/sync!)
-        (let [result (runtime-alpha/use! :demo/ns {:ns ns-sym :libs [lib]})]
+        (let [result (runtime-alpha/use! :demo/ns {:ns ns-sym :spools [lib]})]
           (is (= :loaded (:status result)))
           (is (= ns-sym (get-in result [:loaded :ns])))
           (is (= (.getCanonicalPath expected-file) (get-in result [:loaded :file])))
@@ -561,10 +572,10 @@
             second-lib (symbol (str "demo/second-lib-" suffix))
             root (write-local-lib! config-dir "second" second-ns)]
         (write-local-lib! config-dir "first" first-ns)
-        (write-libs! config-dir (pr-str {:libs {first-lib {:local/root "libs/first"}
-                                               second-lib {:local/root "libs/second"}}}))
+        (write-spools! config-dir (pr-str {:spools {first-lib {:local/root "spools/first"}
+                                               second-lib {:local/root "spools/second"}}}))
         (runtime-alpha/sync!)
-        (let [result (runtime-alpha/use! :demo/second {:ns second-ns :libs #{first-lib second-lib}})]
+        (let [result (runtime-alpha/use! :demo/second {:ns second-ns :spools #{first-lib second-lib}})]
           (is (= :loaded (:status result)))
           (is (= (.getCanonicalPath (io/file root "src" "demo" (str "second_lib_" suffix ".clj")))
                  (get-in result [:loaded :file]))))))))
@@ -577,11 +588,11 @@
             missing-ns (symbol (str "demo.missing-lib-" suffix))
             lib (symbol (str "demo/missing-ns-lib-" suffix))
             root (write-local-lib! config-dir "missing-ns" existing-ns)]
-        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/missing-ns"}}}))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/missing-ns"}}}))
         (runtime-alpha/sync!)
-        (let [result (runtime-alpha/use! :demo/missing-ns {:ns missing-ns :libs [lib]})]
+        (let [result (runtime-alpha/use! :demo/missing-ns {:ns missing-ns :spools [lib]})]
           (is (= :failed (:status result)))
-          (is (= "Could not locate namespace source in synced library roots" (get-in result [:error :message])))
+          (is (= "Could not locate namespace source in synced spool roots" (get-in result [:error :message])))
           (is (= {:ns missing-ns
                   :relative-path (str "demo" java.io.File/separator "missing_lib_" suffix ".clj")
                   :searched-roots [(.getCanonicalPath (io/file root "src"))]}
@@ -610,11 +621,11 @@
             ns-sym (symbol (str "demo.override_gated_" suffix))
             lib (symbol (str "demo/override-gated-" suffix))
             root (write-local-lib! config-dir "override-gated-local" ns-sym)]
-        (write-libs! config-dir (pr-str {:libs {lib {:local/root "libs/missing-shared"}}}))
-        (write-local-libs! config-dir (pr-str {:libs {lib {:local/root "libs/override-gated-local"}}}))
-        (is (= :loaded (get-in (runtime-alpha/sync!) [:libs lib :status])))
-        (is (= (local-source config-dir) (get-in (runtime-alpha/syncs) [:libs lib :source])))
-        (let [result (runtime-alpha/use! :override/gated {:ns ns-sym :libs [lib]})]
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/missing-shared"}}}))
+        (write-local-spools! config-dir (pr-str {:spools {lib {:local/root "spools/override-gated-local"}}}))
+        (is (= :loaded (get-in (runtime-alpha/sync!) [:spools lib :status])))
+        (is (= (local-source config-dir) (get-in (runtime-alpha/syncs) [:spools lib :source])))
+        (let [result (runtime-alpha/use! :override/gated {:ns ns-sym :spools [lib]})]
           (is (= :loaded (:status result)))
           (is (= (.getCanonicalPath (io/file root "src" "demo" (str "override_gated_" suffix ".clj")))
                  (get-in result [:loaded :file]))))))))
@@ -624,15 +635,15 @@
     (fn [_ config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
             ns-sym (symbol (str "demo.gated" suffix))
-            approved-lib (symbol (str "demo/gated-lib-" suffix))
+            approved-spool (symbol (str "demo/gated-lib-" suffix))
             failed-lib (symbol (str "demo/failed-lib-" suffix))]
         (write-local-lib! config-dir "gated" ns-sym)
-        (write-libs! config-dir (pr-str {:libs {approved-lib {:local/root "libs/gated"}
-                                               failed-lib {:local/root "libs/missing"}}}))
-        (is (= :not-approved (:reason (runtime-alpha/use! :not-approved {:ns ns-sym :libs ['demo/not-approved]}))))
-        (is (= :not-synced (:reason (runtime-alpha/use! :not-synced {:ns ns-sym :libs [approved-lib]}))))
+        (write-spools! config-dir (pr-str {:spools {approved-spool {:local/root "spools/gated"}
+                                               failed-lib {:local/root "spools/missing"}}}))
+        (is (= :not-approved (:reason (runtime-alpha/use! :not-approved {:ns ns-sym :spools ['demo/not-approved]}))))
+        (is (= :not-synced (:reason (runtime-alpha/use! :not-synced {:ns ns-sym :spools [approved-spool]}))))
         (runtime-alpha/sync!)
-        (let [result (runtime-alpha/use! :sync-failed {:ns ns-sym :libs [failed-lib]})]
+        (let [result (runtime-alpha/use! :sync-failed {:ns ns-sym :spools [failed-lib]})]
           (is (= :skipped (:status result)))
           (is (= :sync-failed (:reason result)))
           (is (= :failed (get-in result [:sync :status]))))))))
@@ -675,7 +686,7 @@
                ["bad file" :bad {:file ""} #":file must be"]
                ["absolute file" :bad {:file "/tmp/mod.clj"} #"relative to selected config-dir"]
                ["escaping file" :bad {:file "../mod.clj"} #"stay within selected config-dir"]
-               ["bad libs" :bad {:ns 'demo.core :libs ['demo/lib 1]} #":libs entries"]
+               ["bad spools" :bad {:ns 'demo.core :spools ['demo/lib 1]} #":spools entries"]
                ["bad after" :bad {:ns 'demo.core :after [1]} #":after entries"]
                ["bad call" :bad {:ns 'demo.core :call 'install!} #":call must"]
                ["bad required" :bad {:ns 'demo.core :required? :yes} #":required\? must"]]]
@@ -702,7 +713,7 @@
                                  "(defn install! [] (spit " (pr-str (str side-effect-file)) " :called))\n"))
         (is (= :not-approved (:reason (runtime-alpha/use! :gate/not-approved
                                                  {:file "modules/gated_effect.clj"
-                                                  :libs ['demo/not-approved]
+                                                  :spools ['demo/not-approved]
                                                   :call 'demo.gated-effect/install!}))))
         (is (false? (.exists side-effect-file)))
         (is (= :missing-after (:reason (runtime-alpha/use! :gate/missing-after

@@ -1,4 +1,4 @@
-(ns skein.libs.ephemeral
+(ns skein.spools.ephemeral
   "Userland helpers for temporary, parent-owned work strands.
 
   This namespace is intentionally authorable example code: it composes the
@@ -43,7 +43,7 @@
   "Install ephemeral strand helpers into the active weaver."
   []
   {:installed true
-   :namespace 'skein.libs.ephemeral
+   :namespace 'skein.spools.ephemeral
    :ephemeral {:attribute :ephemeral
-               :creator 'skein.libs.ephemeral/ephemeral!
-               :burner 'skein.libs.ephemeral/burn-ephemeral!}})
+               :creator 'skein.spools.ephemeral/ephemeral!
+               :burner 'skein.spools.ephemeral/burn-ephemeral!}})

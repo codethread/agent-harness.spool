@@ -41,7 +41,7 @@ strand --config-dir "$world" ready
 strand --config-dir "$world" weaver stop
 ```
 
-`strand init` bootstraps missing `config.json`, `libs.edn`, `init.clj`, `libs/`, and `.gitignore` files/directories without overwriting existing user files. `config.json` contains only `{"configFormat":"alpha"}`.
+`strand init` bootstraps missing `config.json`, `spools.edn`, `init.clj`, `spools/`, and `.gitignore` files/directories without overwriting existing user files. `config.json` contains only `{"configFormat":"alpha"}`.
 
 ## REPL and runtime config
 
@@ -64,7 +64,7 @@ Non-interactive trusted forms:
 printf '@skein.weaver.runtime/current-runtime\n' | strand --config-dir "$world" weaver repl --stdin
 ```
 
-Runtime library startup config may use:
+Runtime spool startup config may use:
 
 ```clojure
 (require '[skein.runtime.alpha :as runtime]
@@ -73,7 +73,7 @@ Runtime library startup config may use:
 (runtime/sync!)
 ```
 
-Shipped `skein.*.alpha` namespaces are privileged built-in helpers. `libs.edn` approves user/community local roots; `skein.runtime.alpha/sync!` makes approved roots available; `runtime/use!` activates modules for the weaver lifetime. `skein.libs.alpha` remains compatibility-only.
+Shipped `skein.*.alpha` namespaces are privileged built-in helpers. `spools.edn` approves user/community local roots; `skein.runtime.alpha/sync!` makes approved roots available; `runtime/use!` activates modules for the weaver lifetime.
 
 ## Validation
 

@@ -44,7 +44,7 @@
   "Copy the repo-local config files into a temporary config dir."
   [target]
   (.mkdirs (io/file target))
-  (doseq [name ["init.clj" "config.clj" "libs.edn"]]
+  (doseq [name ["init.clj" "config.clj" "spools.edn"]]
     (io/copy (io/file ".skein" name) (io/file target name))))
 
 (defn- with-startup-config-runtime

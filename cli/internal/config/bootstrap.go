@@ -10,14 +10,17 @@ import (
 )
 
 const DefaultInitCLJ = "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n"
-const DefaultSkeinGitignore = "config.json\ninit.local.clj\nlibs.local.edn\nstate/\ndata/\nweaver.*\n*.sqlite\n*.sqlite-*\n"
+const DefaultSkeinGitignore = "config.json\ninit.local.clj\nspools.local.edn\nstate/\ndata/\nweaver.*\n*.sqlite\n*.sqlite-*\n"
 
 func BootstrapWorld(cwd, configDir, source string) (World, error) {
 	world, err := BootstrapTargetWorld(cwd, configDir)
 	if err != nil {
 		return World{}, err
 	}
-	if err := os.MkdirAll(filepath.Join(world.ConfigDir, "libs"), 0o755); err != nil {
+	if err := rejectLegacySpoolConfig(world.ConfigDir); err != nil {
+		return World{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(world.ConfigDir, "spools"), 0o755); err != nil {
 		return World{}, err
 	}
 	if _, err := os.Stat(world.ConfigFile); os.IsNotExist(err) {
@@ -31,7 +34,7 @@ func BootstrapWorld(cwd, configDir, source string) (World, error) {
 	} else if err != nil {
 		return World{}, err
 	}
-	if err := writeMissing(filepath.Join(world.ConfigDir, "libs.edn"), "{:libs {}}\n"); err != nil {
+	if err := writeMissing(filepath.Join(world.ConfigDir, "spools.edn"), "{:spools {}}\n"); err != nil {
 		return World{}, err
 	}
 	if err := writeMissing(filepath.Join(world.ConfigDir, "init.clj"), DefaultInitCLJ); err != nil {
@@ -92,6 +95,22 @@ func GitRoot(cwd string) (string, error) {
 		return "", fmt.Errorf("unsupported Git layout for default Skein world: common Git dir must be a repository .git directory, got %s", commonDir)
 	}
 	return filepath.Dir(commonDir), nil
+}
+
+func rejectLegacySpoolConfig(configDir string) error {
+	var legacy []string
+	for _, name := range []string{"libs.edn", "libs.local.edn"} {
+		path := filepath.Join(configDir, name)
+		if _, err := os.Lstat(path); err == nil {
+			legacy = append(legacy, path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if len(legacy) > 0 {
+		return fmt.Errorf("legacy runtime library config files are no longer supported; rename libs.edn/libs.local.edn to spools.edn/spools.local.edn and change top-level :libs to :spools: %s", strings.Join(legacy, ", "))
+	}
+	return nil
 }
 
 func writeMissing(path, content string) error {

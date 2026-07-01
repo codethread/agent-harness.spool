@@ -16,7 +16,6 @@ Root specs are canonical for shipped behavior:
 ## Active features
 
 - `library-author-testing-support` — proposed library-author testing helpers and weaver storage support.
-- `library-to-spool` — proposed rename of the runtime "library" concept to "spool", with a recommended non-enforced `.spool` discovery convention.
 - `cli-definition-parity` — proposed CLI parity for named weaver definitions: query introspection (`query list`/`explain`) aligned with patterns, plus explicit `weave`/`batch` framing.
 
 ## Archived features
@@ -45,3 +44,4 @@ Archived feature folders preserve historical planning context. Current shipped c
 - `26-06-30__mill-router-runtime` — shipped local Go `mill` router/supervisor, mill-routed `strand` commands, Git-root repo bootstrap, XDG runtime/data worlds, startup storage initialization, and connected REPL attachment through mill metadata.
 - `26-06-30__mill-owned-source` — shipped mill-owned source resolution, marker-only config, and repository-canonical default weavers shared across linked Git worktrees.
 - `26-07-01__live-weaver-repl-and-runtime-loader` — shipped direct live weaver nREPL attachment, `skein.runtime.alpha` loader/config helper namespace, friendly weaver discovery, and Neovim/Conjure integration.
+- `26-07-01__library-to-spool` — shipped rename of the runtime approved-code-unit surface from library/libs to spool/spools, including `spools.edn`, `:spools`, `skein.spools.*`, and legacy `libs.edn` rejection.

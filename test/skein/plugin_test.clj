@@ -34,7 +34,7 @@
 (deftest runtime-loader-state-is-the-public-path
   (with-runtime
     (fn []
-      (is (= {:libs {}} (runtime-alpha/approved)))
-      (is (= {:libs {}} (runtime-alpha/syncs)))
+      (is (= {:spools {}} (runtime-alpha/approved)))
+      (is (= {:spools {}} (runtime-alpha/syncs)))
       (is (= {} (runtime-alpha/uses))))))
 

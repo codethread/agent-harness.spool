@@ -1,6 +1,6 @@
 config.json
 init.local.clj
-libs.local.edn
+spools.local.edn
 state/
 data/
 weaver.*

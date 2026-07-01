@@ -21,7 +21,7 @@
     (.delete child)))
 
 (defn- write-hot-lib! [config-dir suffix]
-  (let [root (io/file config-dir "libs" "runtime-spike")
+  (let [root (io/file config-dir "spools" "runtime-spike")
         ns-sym (symbol (str "runtime-spike.hot-" suffix))
         src-dir (io/file root "src" "runtime_spike")]
     (.mkdirs src-dir)

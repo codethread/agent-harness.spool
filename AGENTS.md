@@ -81,7 +81,7 @@ For non-interactive trusted forms:
 printf '@skein.weaver.runtime/current-runtime\n' | strand --config-dir "$world" weaver repl --stdin
 ```
 
-For config-dir library workspace workflows, use `libs.edn`, privileged `skein.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. `skein.libs.alpha` is compatibility-only. There are intentionally no plugin/package CLI commands.
+For config-dir spool workspace workflows, use `spools.edn`, privileged `skein.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
 
 ## Validation and smoke testing
 

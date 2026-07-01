@@ -34,8 +34,8 @@ func TestInitBootstrapsConfigDirWorkspaceThroughMill(t *testing.T) {
 	if _, ok := cfgFile["source"]; ok || cfgFile["configFormat"] != "alpha" {
 		t.Fatalf("unexpected bootstrap config: %#v", cfgFile)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "libs.edn")); err != nil {
-		t.Fatalf("expected libs.edn bootstrap: %v", err)
+	if _, err := os.Stat(filepath.Join(cfg, "spools.edn")); err != nil {
+		t.Fatalf("expected spools.edn bootstrap: %v", err)
 	}
 	initPath := filepath.Join(cfg, "init.clj")
 	if _, err := os.Stat(initPath); err != nil {

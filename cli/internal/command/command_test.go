@@ -239,11 +239,11 @@ func TestInitBootstrapsWorkspaceWhenMissingWithoutWeaverInit(t *testing.T) {
 	if !reflect.DeepEqual(c, map[string]any{"configFormat": "alpha"}) {
 		t.Fatalf("unexpected config fields: %#v", c)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "libs")); err != nil {
-		t.Fatalf("missing libs directory: %v", err)
+	if _, err := os.Stat(filepath.Join(cfg, "spools")); err != nil {
+		t.Fatalf("missing spools directory: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "libs.edn")); err != nil {
-		t.Fatalf("missing libs.edn: %v", err)
+	if _, err := os.Stat(filepath.Join(cfg, "spools.edn")); err != nil {
+		t.Fatalf("missing spools.edn: %v", err)
 	}
 	initPath := filepath.Join(cfg, "init.clj")
 	if _, err := os.Stat(initPath); err != nil {
@@ -254,6 +254,34 @@ func TestInitBootstrapsWorkspaceWhenMissingWithoutWeaverInit(t *testing.T) {
 	}
 	if got := string(mustReadFile(t, filepath.Join(cfg, ".gitignore"))); got != config.DefaultSkeinGitignore {
 		t.Fatalf("unexpected .gitignore contents: %q", got)
+	}
+}
+
+func TestInitRejectsLegacyLibsConfig(t *testing.T) {
+	cfg := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfg, "libs.edn"), []byte("{:libs {}}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	origClient := newClient
+	newClient = func(o Options) Caller { return &fakeClient{} }
+	t.Cleanup(func() { newClient = origClient })
+	_, err := run("--config-dir", cfg, "init")
+	if err == nil || !strings.Contains(err.Error(), "rename libs.edn/libs.local.edn to spools.edn/spools.local.edn") {
+		t.Fatalf("expected legacy libs rejection, got %v", err)
+	}
+}
+
+func TestInitRejectsLegacyLibsSymlink(t *testing.T) {
+	cfg := t.TempDir()
+	if err := os.Symlink(filepath.Join(cfg, "missing"), filepath.Join(cfg, "libs.local.edn")); err != nil {
+		t.Fatal(err)
+	}
+	origClient := newClient
+	newClient = func(o Options) Caller { return &fakeClient{} }
+	t.Cleanup(func() { newClient = origClient })
+	_, err := run("--config-dir", cfg, "init")
+	if err == nil || !strings.Contains(err.Error(), "rename libs.edn/libs.local.edn to spools.edn/spools.local.edn") {
+		t.Fatalf("expected legacy libs symlink rejection, got %v", err)
 	}
 }
 
@@ -274,14 +302,14 @@ func TestInitValidatesExistingConfigButDoesNotRewriteMissingKeys(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cfg, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(cfg, "libs"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg, "spools"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	original := `{"configFormat":"alpha"}`
 	if err := os.WriteFile(filepath.Join(cfg, "config.json"), []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg, "libs.edn"), []byte("{:libs {}}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, "spools.edn"), []byte("{:spools {}}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg, "init.clj"), []byte("(comment \"custom\")\n"), 0644); err != nil {
@@ -663,7 +691,7 @@ func TestInitWritesMarkerConfigAndDoesNotOverwriteBootstrapFiles(t *testing.T) {
 	withChdir(t, tempSource(t))
 	t.Setenv("SKEIN_SOURCE", tempSource(t))
 	cfg := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cfg, "libs.edn"), []byte("custom libs"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, "spools.edn"), []byte("custom spools"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg, "init.clj"), []byte("custom init"), 0o644); err != nil {
@@ -683,7 +711,7 @@ func TestInitWritesMarkerConfigAndDoesNotOverwriteBootstrapFiles(t *testing.T) {
 	if c.ConfigFormat != "alpha" || c.Source != "" {
 		t.Fatalf("unexpected marker config: %#v", c)
 	}
-	for path, want := range map[string]string{"libs.edn": "custom libs", "init.clj": "custom init", ".gitignore": "custom ignore"} {
+	for path, want := range map[string]string{"spools.edn": "custom spools", "init.clj": "custom init", ".gitignore": "custom ignore"} {
 		if got := string(mustReadFile(t, filepath.Join(cfg, path))); got != want {
 			t.Fatalf("%s overwritten: %q", path, got)
 		}

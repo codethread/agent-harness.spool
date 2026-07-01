@@ -231,15 +231,15 @@ Fresh `strand init` creates missing workspace files without overwriting existing
 .skein/
   .gitignore       # commit: ignore local/runtime artifacts
   init.clj         # commit: shared trusted startup config
-  libs.edn         # commit: shared approved local-root libraries
+  spools.edn         # commit: shared approved local-root spools
   config.json      # gitignored: local alpha config marker
   init.local.clj   # gitignored: personal startup overlay
-  libs.local.edn   # gitignored: personal approved-library overlay
+  spools.local.edn   # gitignored: personal approved-spool overlay
 ```
 
 Generated `.skein/.gitignore` ignores `config.json`, `init.local.clj`,
-`libs.local.edn`, and accidental `state/`, `data/`, `weaver.*`, and SQLite/runtime artifacts. Normal runtime metadata, sockets, and SQLite data live under mill-owned XDG state paths, not in `.skein`.
-`init.clj` and `libs.edn` are suitable to commit when the repo wants shared
+`spools.local.edn`, and accidental `state/`, `data/`, `weaver.*`, and SQLite/runtime artifacts. Normal runtime metadata, sockets, and SQLite data live under mill-owned XDG state paths, not in `.skein`.
+`init.clj` and `spools.edn` are suitable to commit when the repo wants shared
 Skein behavior. The generated `init.clj` is a small resilient bootstrap:
 
 ```clojure
@@ -248,22 +248,22 @@ Skein behavior. The generated `init.clj` is a small resilient bootstrap:
 (runtime-alpha/sync!)
 ```
 
-Create your own config or library files when you need runtime behavior.
-`init.clj` is the place for shared repo behavior: load approved libraries,
+Create your own config or spool files when you need runtime behavior.
+`init.clj` is the place for shared repo behavior: load approved spools,
 register queries, register weave patterns, register views, register event
 handlers, or call your own install functions. `init.local.clj` is loaded after
 `init.clj` for personal machine-specific behavior.
 
-Built-in `skein.*.alpha` namespaces are privileged helpers shipped on the Skein classpath, not ordinary user/community libraries. User/community libraries are trusted Clojure roots approved in `libs.edn` / `libs.local.edn`, synced through `skein.runtime.alpha`, and experimented with from the live REPL. `libs.local.edn` overlays `libs.edn` by coordinate, so a personal workflow library or fork can replace a shared entry without changing committed config:
+Built-in `skein.*.alpha` namespaces are privileged helpers shipped on the Skein classpath, not ordinary user/community spools. User/community spools are trusted Clojure roots approved in `spools.edn` / `spools.local.edn`, synced through `skein.runtime.alpha`, and experimented with from the live REPL. `spools.local.edn` overlays `spools.edn` by coordinate, so a personal workflow spool or fork can replace a shared entry without changing committed config:
 
 ```clojure
-;; .skein/libs.edn, committed
-{:libs {team/workflows {:local/root "libs/team-workflows"}}}
+;; .skein/spools.edn, committed
+{:spools {team/workflows {:local/root "spools/team-workflows"}}}
 ```
 
 ```clojure
-;; .skein/libs.local.edn, gitignored
-{:libs {team/workflows {:local/root "~/dev/workflows/team-workflows"}
+;; .skein/spools.local.edn, gitignored
+{:spools {team/workflows {:local/root "~/dev/workflows/team-workflows"}
         personal/ops   {:local/root "~/dev/workflows/personal-ops"}}}
 ```
 
@@ -273,13 +273,13 @@ Built-in `skein.*.alpha` namespaces are privileged helpers shipped on the Skein 
 (runtime-alpha/sync!)
 (runtime-alpha/use! :personal/ops
   {:ns 'personal.ops.alpha
-   :libs #{'personal/ops}
+   :spools #{'personal/ops}
    :call 'personal.ops.alpha/install!})
 ```
 
 Require `skein.batch.alpha` explicitly when you want `(batch/apply! payload)` for transactional graph mutations. Package management, source fetching, and install commands are outside this MVP; local roots must already exist.
 
-Example pattern and view setup in your own startup-loaded library:
+Example pattern and view setup in your own startup-loaded spool:
 
 ```clojure
 (ns my.workflow
@@ -346,7 +346,7 @@ strand op echo --flag value
 
 The `op` surface is intentionally generic: Skein only routes argv to a trusted
 weaver-side handler. Workflow behavior such as a kanban board belongs in your
-config or library code, not in core Skein.
+config or spool code, not in core Skein.
 
 For a safe demo, use a disposable world and append this handler to
 `$world/init.clj` rather than the default repo `.skein/init.clj`:
@@ -476,7 +476,7 @@ Call registered views from trusted Clojure, not from a public `strand view` CLI 
 (views/view! 'owned-view {})
 ```
 
-Register event handlers from trusted config or weaver-loadable libraries when you want asynchronous reactions to strand mutations. Event helpers are not public CLI commands:
+Register event handlers from trusted config or weaver-loadable spools when you want asynchronous reactions to strand mutations. Event helpers are not public CLI commands:
 
 ```clojure
 (ns my.workflow
@@ -497,7 +497,7 @@ Hot-reload the selected config-dir `init.clj` from the live weaver REPL:
 (runtime-alpha/reload!)
 ```
 
-Reload clears weaver-lifetime library sync state, module-use state, named queries, views, patterns, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
+Reload clears weaver-lifetime spool sync state, module-use state, named queries, views, patterns, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
 
 Use the live stdin REPL for scripts. Include `--config-dir` when scripting
 against a disposable or test world:

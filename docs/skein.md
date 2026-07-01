@@ -8,7 +8,7 @@ The short version:
 - A **weaver** is the long-lived local process that owns the database and runtime state.
 - The **`strand` CLI** is a thin JSON control surface for scripts and agents.
 - The **REPL** is the trusted, high-power surface for customization and exploration.
-- Your workflow model lives mostly in custom **attributes** and your own config/library code.
+- Your workflow model lives mostly in custom **attributes** and your own config/spool code.
 
 This guide is written for Skein users and for agents working inside a user's Skein world. Maintainer-facing contracts live in [`devflow/specs/`](../devflow/specs/); see the [spec index](#spec-index) at the end.
 
@@ -21,9 +21,9 @@ selected config-dir (normally canonical repo .skein)
   config.json      -> local, gitignored alpha config marker
   init.clj         -> shared trusted startup code loaded by the weaver
   init.local.clj   -> personal startup overlay loaded after init.clj
-  libs.edn         -> shared approved local library roots
-  libs.local.edn   -> personal approved-library overlay
-  libs/            -> optional local libraries
+  spools.edn         -> shared approved local spool roots
+  spools.local.edn   -> personal approved-spool overlay
+  spools/            -> optional local spools
 
 running weaver
   owns SQLite storage
@@ -31,7 +31,7 @@ running weaver
   owns weave pattern registrations
   owns view registrations
   owns event handler registrations
-  owns synced library state
+  owns synced spool state
 
 clients
   strand CLI       -> mill -> weaver JSON socket, small safe command set
@@ -95,7 +95,7 @@ The weaver is the application core. It is a long-lived local Clojure process tha
 - the in-memory weave-pattern registry;
 - the in-memory view registry;
 - the in-memory event handler registry and async dispatch worker;
-- the approved-library sync state;
+- the approved-spool sync state;
 - runtime module activation state.
 
 Start mill once, then start the selected world's weaver:
@@ -122,7 +122,7 @@ The weaver exposes two local transports:
 - a Unix socket used by the Go `strand` CLI;
 - an nREPL endpoint used by the live weaver REPL.
 
-A selected config-dir may have one running weaver. Runtime registries are weaver-lifetime state, so named queries, weave patterns, views, and synced library state should be loaded from startup config if you want them to appear after every restart.
+A selected config-dir may have one running weaver. Runtime registries are weaver-lifetime state, so named queries, weave patterns, views, and synced spool state should be loaded from startup config if you want them to appear after every restart.
 
 ## CLI
 
@@ -232,7 +232,7 @@ Your world can decide what attributes mean. For example:
 
 Skein stores attributes as JSON text. CLI input is simple string pairs; `--attr temporary=true` stores the string `"true"`, not a JSON boolean. Trusted Clojure workflows can write richer JSON-compatible values.
 
-Because attributes are userland, your own config and libraries should define the conventions for your world. Prefer documenting those conventions in source-controlled docs or in your library docs. Attribute names and cleanup behavior are userland choices, not Skein core.
+Because attributes are userland, your own config and spools should define the conventions for your world. Prefer documenting those conventions in source-controlled docs or in your spool docs. Attribute names and cleanup behavior are userland choices, not Skein core.
 
 ## Queries
 
@@ -266,7 +266,7 @@ For a simple persistent query, put it directly in `init.clj`:
 (api/register-query! 'mine [:= [:attr :owner] "ct"])
 ```
 
-For a world that already activates a local library with `runtime-alpha/use!`, follow that existing pattern instead: add the `api/register-query!` call to the library's `install!` function so reload/startup installs everything from one place.
+For a world that already activates a local spool with `runtime-alpha/use!`, follow that existing pattern instead: add the `api/register-query!` call to the spool's `install!` function so reload/startup installs everything from one place.
 
 Defining a Clojure var that contains query data is not the same as registering a named query. A local var can be passed to graph helpers from your own code, but `strand list --query mine` only works after `mine` has been registered in the weaver's named-query registry.
 
@@ -274,7 +274,7 @@ Defining a Clojure var that contains query data is not the same as registering a
 
 ## REPL
 
-The REPL is the trusted, high-power surface. `strand weaver repl` attaches directly to the selected running weaver nREPL, so forms evaluate in the weaver JVM with weaver process authority. Use it for richer inspection, custom query authoring, config reloads, and calling your own library code. Prefer blessed helper/API paths for operations that should preserve validation, hooks, events, and normalized return shapes.
+The REPL is the trusted, high-power surface. `strand weaver repl` attaches directly to the selected running weaver nREPL, so forms evaluate in the weaver JVM with weaver process authority. Use it for richer inspection, custom query authoring, config reloads, and calling your own spool code. Prefer blessed helper/API paths for operations that should preserve validation, hooks, events, and normalized return shapes.
 
 Open a live weaver REPL:
 
@@ -298,7 +298,7 @@ Script the live weaver REPL with stdin:
 printf '@skein.weaver.runtime/current-runtime\n' | strand --config-dir "$world" weaver repl --stdin
 ```
 
-The REPL helper namespace includes common strand functions. Privileged runtime loader/config helpers are explicit built-in namespaces, not ordinary user libraries; require them when needed:
+The REPL helper namespace includes common strand functions. Privileged runtime loader/config helpers are explicit built-in namespaces, not ordinary user spools; require them when needed:
 
 ```clojure
 (require '[skein.runtime.alpha :as runtime-alpha])
@@ -312,12 +312,12 @@ The REPL helper namespace includes common strand functions. Privileged runtime l
 For the ordinary repo-local `.skein` world, it creates or ensures:
 
 - `.skein/config.json` only if absent, with the alpha format marker;
-- `.skein/libs/` directory;
-- `.skein/libs.edn` only if absent, with `{:libs {}}`;
+- `.skein/spools/` directory;
+- `.skein/spools.edn` only if absent, with `{:spools {}}`;
 - `.skein/init.clj` only if absent, with the default below;
-- `.skein/.gitignore` only if absent, ignoring local config overlays such as `config.json`, `init.local.clj`, and `libs.local.edn`.
+- `.skein/.gitignore` only if absent, ignoring local config overlays such as `config.json`, `init.local.clj`, and `spools.local.edn`.
 
-Explicit `--config-dir` standalone worlds bootstrap the selected config directory directly. Existing `config.json`, `libs.edn`, `init.clj`, and `.gitignore` are preserved.
+Explicit `--config-dir` standalone worlds bootstrap the selected config directory directly. Existing `config.json`, `spools.edn`, `init.clj`, and `.gitignore` are preserved.
 
 The generated `init.clj` is intentionally small:
 
@@ -328,7 +328,7 @@ The generated `init.clj` is intentionally small:
 (runtime-alpha/sync!)
 ```
 
-The weaver loads startup files in order: `init.clj`, then `init.local.clj`. Missing files are skipped; present failing files fail loudly with file context. Use startup-loaded code to register queries, weave patterns, load approved libraries, register views, and install conventions for your world. Simple worlds can put shared registrations directly in `init.clj` and personal overlays in gitignored `init.local.clj`; reusable or larger worlds should keep `init.clj` minimal and install behavior from a local library.
+The weaver loads startup files in order: `init.clj`, then `init.local.clj`. Missing files are skipped; present failing files fail loudly with file context. Use startup-loaded code to register queries, weave patterns, load approved spools, register views, and install conventions for your world. Simple worlds can put shared registrations directly in `init.clj` and personal overlays in gitignored `init.local.clj`; reusable or larger worlds should keep `init.clj` minimal and install behavior from a local spool.
 
 A direct `init.clj` query registration can look like this:
 
@@ -347,11 +347,11 @@ Use reload during development:
 (runtime-alpha/reload!)
 ```
 
-`skein.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community library, and loader/config helpers do not live under `skein.libs.*`.
+`skein.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community spool, and loader/config helpers do not live under `skein.spools.*`.
 
-Reload clears weaver-lifetime library sync state, module-use state, named queries, weave patterns, views, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then reloads `init.clj` followed by `init.local.clj`. Missing files are skipped; present failures fail loudly.
+Reload clears weaver-lifetime spool sync state, module-use state, named queries, weave patterns, views, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then reloads `init.clj` followed by `init.local.clj`. Missing files are skipped; present failures fail loudly.
 
-## Authoring your own library code
+## Authoring your own spool code
 
 Skein treats runtime extensions as trusted Clojure code. A common layout is:
 
@@ -359,22 +359,22 @@ Skein treats runtime extensions as trusted Clojure code. A common layout is:
 world/
   config.json
   init.clj
-  libs.edn
-  libs/
+  spools.edn
+  spools/
     my-workflow/
       deps.edn
       src/my/workflow.clj
 ```
 
-Approve the local library root in `libs.edn`:
+Approve the local spool root in `spools.edn`:
 
 ```clojure
-{:libs {my/workflow {:local/root "libs/my-workflow"}}}
+{:spools {my/workflow {:local/root "spools/my-workflow"}}}
 ```
 
 Relative `:local/root` values resolve against the selected config-dir. Absolute paths are accepted as explicit user-approved paths, and `~` expands to your home directory.
 
-Create a minimal `deps.edn` in the library root:
+Create a minimal `deps.edn` in the spool root:
 
 ```clojure
 {:paths ["src"]}
@@ -382,7 +382,7 @@ Create a minimal `deps.edn` in the library root:
 
 If `:paths` is omitted, Skein's namespace loading defaults to `["src"]`.
 
-Implement the library:
+Implement the spool:
 
 ```clojure
 (ns my.workflow
@@ -401,13 +401,13 @@ Activate it from `init.clj`:
 (runtime-alpha/sync!)
 (runtime-alpha/use! :my/workflow
   {:ns 'my.workflow
-   :libs #{'my/workflow}
+   :spools #{'my/workflow}
    :call 'my.workflow/install!})
 ```
 
 Key points:
 
-- `libs.edn` is approval. It says which local roots the weaver may load.
+- `spools.edn` is approval. It says which local roots the weaver may load.
 - `runtime-alpha/sync!` makes approved roots available to the weaver.
 - `runtime-alpha/use!` activates one module and records whether it loaded, skipped, or failed.
 - `:call` must name a fully qualified zero-argument function.
@@ -419,7 +419,7 @@ Key points:
 
 Weave patterns are trusted owner-defined transformations that turn a JSON-like input payload into an atomic batch of new strands and edges. They are useful when agents should submit intent and your world should decide the graph shape.
 
-Pattern registration lives in trusted Clojure config or libraries, not in the public CLI. A pattern has a simple name, a fully qualified weaver-loadable function symbol, and a `clojure.spec` input contract.
+Pattern registration lives in trusted Clojure config or spools, not in the public CLI. A pattern has a simple name, a fully qualified weaver-loadable function symbol, and a `clojure.spec` input contract.
 
 ```clojure
 (ns my.workflow
@@ -455,7 +455,7 @@ Like queries and views, patterns are weaver-lifetime runtime state. Register the
 
 ## Views and graph helpers
 
-Skein ships built-in privileged alpha namespaces for trusted runtime transformations. They are source-visible helper namespaces from the Skein checkout/classpath, not user/community libraries that need `libs.edn` approval:
+Skein ships built-in privileged alpha namespaces for trusted runtime transformations. They are source-visible helper namespaces from the Skein checkout/classpath, not user/community spools that need `spools.edn` approval:
 
 ```clojure
 (require '[skein.graph.alpha :as graph]
@@ -505,7 +505,7 @@ Like queries, views are weaver-lifetime runtime state. Register them from startu
 
 Skein ships `skein.events.alpha` for trusted config and live REPL workflows that need to react to strand mutations. There are no public JSON socket or `strand` CLI commands for event registration.
 
-Register handlers from startup-loaded code or weaver-loadable libraries:
+Register handlers from startup-loaded code or weaver-loadable spools:
 
 ```clojure
 (ns my.workflow
@@ -534,11 +534,11 @@ Event dispatch is asynchronous after successful mutations. Handler exceptions do
 (events/recent-failures)
 ```
 
-Event handler state is weaver-lifetime runtime state. Register handlers from `init.clj` or an installed library if they should exist after startup or reload.
+Event handler state is weaver-lifetime runtime state. Register handlers from `init.clj` or an installed spool if they should exist after startup or reload.
 
 ## Fail loudly
 
-Skein intentionally fails loudly instead of guessing. Expect errors for malformed config, unsupported fields, missing weavers, stale metadata, invalid edge targets, cycles, unknown queries, missing libraries, and bad runtime code.
+Skein intentionally fails loudly instead of guessing. Expect errors for malformed config, unsupported fields, missing weavers, stale metadata, invalid edge targets, cycles, unknown queries, missing spools, and bad runtime code.
 
 This is by design: the system is flexible because attributes and user code are open-ended, so surprising states should be visible and fixable rather than silently papered over.
 
@@ -622,9 +622,9 @@ Covers:
 - query registration and execution;
 - `skein.runtime.alpha` loader/config helpers;
 - graph, view, event, and explicit batch helper namespaces;
-- runtime library workspace activation.
+- runtime spool workspace activation.
 
-Read this when writing trusted Clojure forms, config code, local libraries, or custom query/view workflows.
+Read this when writing trusted Clojure forms, config code, local spools, or custom query/view workflows.
 
 ### Weaver runtime
 
@@ -639,8 +639,8 @@ Covers:
 - weaver API boundaries;
 - startup config loading;
 - named query registry behavior;
-- runtime library workspace model;
+- runtime spool workspace model;
 - graph/view runtime primitives;
 - trusted event handler runtime and helper contracts.
 
-Read this when debugging weaver startup, metadata, transports, runtime state, library loading, or multi-world behavior.
+Read this when debugging weaver startup, metadata, transports, runtime state, spool loading, or multi-world behavior.

@@ -238,8 +238,8 @@
           (repl/-main "--stdin" (:config-dir (:metadata rt))))
         (let [lines (str/split-lines (str out))]
           (is (= 4 (count lines)))
-          (is (= {:libs {}} (read-string (second lines))))
-          (is (= {:libs {}} (read-string (nth lines 2))))
+          (is (= {:spools {}} (read-string (second lines))))
+          (is (= {:spools {}} (read-string (nth lines 2))))
           (is (= {} (read-string (nth lines 3)))))))))
 
 (deftest query-helpers-use-daemon-backed-task-flow

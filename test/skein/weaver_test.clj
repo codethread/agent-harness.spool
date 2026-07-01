@@ -193,7 +193,7 @@
 (s/def ::never-valid (constantly false))
 
 (defn write-view-lib! [config-dir lib ns-sym]
-  (let [root (io/file config-dir "libs" (name lib))
+  (let [root (io/file config-dir "spools" (name lib))
         ns-path (-> (str ns-sym)
                     (.replace \- \_)
                     (.replace \. java.io.File/separatorChar))
@@ -933,11 +933,11 @@
         (is (= [:strand/add :strand/update] (mapv :mutation/operation @hook-contexts)))
         (is (= (:id added) (:strand/id (second @hook-contexts))))))))
 
-(deftest attribute-normalize-hooks-run-through-runtime-library-classloader
+(deftest attribute-normalize-hooks-run-through-runtime-spool-classloader
   (with-runtime
     (fn [rt _]
       (api/init rt)
-      (reset! expected-hook-loader (:library-classloader rt))
+      (reset! expected-hook-loader (:spool-classloader rt))
       (api/register-hook! rt :classloader #{:attributes/normalize} 'skein.weaver-test/asserting-classloader-hook {})
       (is (= {:a "b"} (:attributes (api/add rt {:title "Classloader" :attributes {:a "b"}})))))))
 
@@ -1209,7 +1209,7 @@
             lib (symbol (str "view-" suffix))
             ns-sym (symbol (str "demo.view-" suffix))
             root (write-view-lib! (get-in rt [:metadata :config-dir]) lib ns-sym)]
-        (.addURL ^clojure.lang.DynamicClassLoader (:library-classloader rt)
+        (.addURL ^clojure.lang.DynamicClassLoader (:spool-classloader rt)
                  (.toURL (.toURI (io/file root "src"))))
         (api/register-view! rt 'synced-lib (symbol (str ns-sym) "render"))
         (is (= {:lib-view {:from :synced}}

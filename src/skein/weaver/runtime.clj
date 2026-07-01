@@ -22,7 +22,7 @@
   "Maximum number of recent event handler failures retained in memory."
   100)
 
-(declare stop! with-library-classloader)
+(declare stop! with-spool-classloader)
 
 (defn- event-system-base []
   {:handler-registry (atom {})
@@ -53,7 +53,7 @@
                           (doseq [{:keys [key types fn fn-value]} (vals @(:handler-registry event-system))
                                   :when (contains? types (:event/type event))]
                             (try
-                              (with-library-classloader runtime #(fn-value event))
+                              (with-spool-classloader runtime #(fn-value event))
                               (catch Throwable t
                                 (let [failure {:handler/key key
                                                :handler/fn fn
@@ -133,7 +133,7 @@
   [runtime world]
   (mapv (fn [{:keys [file] :as startup-file}]
           (try
-            (assoc startup-file :return (with-library-classloader runtime #(load-file file)))
+            (assoc startup-file :return (with-spool-classloader runtime #(load-file file)))
             (catch Throwable t
               (throw (ex-info "Selected config-dir startup file failed to load"
                               {:config-dir (:config-dir world)
@@ -141,11 +141,11 @@
                               t)))))
         (startup-files world)))
 
-(defn- with-library-classloader [runtime f]
+(defn- with-spool-classloader [runtime f]
   (let [thread (Thread/currentThread)
         previous-loader (.getContextClassLoader thread)]
     (try
-      (.setContextClassLoader thread (:library-classloader runtime))
+      (.setContextClassLoader thread (:spool-classloader runtime))
       (f)
       (finally
         (.setContextClassLoader thread previous-loader)))))
@@ -195,9 +195,9 @@
                          :pattern-registry (atom {})
                          :op-registry (atom {})
                          :hook-registry (atom {})
-                         :approved-lib-sync-state (atom {})
+                         :approved-spool-sync-state (atom {})
                          :module-use-state (atom {})
-                         :library-classloader (clojure.lang.DynamicClassLoader.
+                         :spool-classloader (clojure.lang.DynamicClassLoader.
                                                (.getContextClassLoader (Thread/currentThread)))
                          :server server
                          :metadata meta}

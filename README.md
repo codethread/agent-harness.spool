@@ -105,14 +105,14 @@ Everything else — outcomes, categories, temporary markers, priorities — live
 
 The CLI stays thin on purpose; the power lives in the weaver. It's a real Clojure image — the full language, macros and all — so your customizations can be as expressive as you want, and you can introspect or redefine any of them from a live REPL without a restart.
 
-Richer behavior — named queries, weave patterns, weaver-memory views, event handlers, custom `strand op` commands, and trusted runtime libraries — is loaded into your world, then consumed by helpers or by small CLI commands such as `list --query <name>` and `weave --pattern <name>`.
+Richer behavior — named queries, weave patterns, weaver-memory views, event handlers, custom `strand op` commands, and trusted runtime spools — is loaded into your world, then consumed by helpers or by small CLI commands such as `list --query <name>` and `weave --pattern <name>`.
 
 Two kinds of code can extend the weaver:
 
 - **Built-in `skein.*.alpha` namespaces** — privileged helpers shipped with Skein.
-- **Your own trusted libraries** — Clojure loaded through config, approved local roots, or live REPL work.
+- **Your own trusted spools** — Clojure loaded through config, approved local roots, or live REPL work.
 
-Fresh `strand init` creates a repo's config files: `.skein/init.clj`, `.skein/libs.edn`, `.skein/.gitignore`, and a local `.skein/config.json` alpha marker. Commit the shared files (`init.clj`, `libs.edn`) for behavior the whole repo gets; keep personal libraries in gitignored `init.local.clj` / `libs.local.edn`.
+Fresh `strand init` creates a repo's config files: `.skein/init.clj`, `.skein/spools.edn`, `.skein/.gitignore`, and a local `.skein/config.json` alpha marker. Commit the shared files (`init.clj`, `spools.edn`) for behavior the whole repo gets; keep personal spools in gitignored `init.local.clj` / `spools.local.edn`.
 
 `strand init` does not persist a source path. Mill resolves the Skein source for weaver/REPL launch from `SKEIN_SOURCE`, the install-time source, or a canonical Skein checkout as the working directory.
 
