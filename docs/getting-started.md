@@ -497,7 +497,7 @@ Hot-reload the selected config-dir `init.clj` from the live weaver REPL:
 (runtime-alpha/reload!)
 ```
 
-Reload clears weaver-lifetime library sync state, module-use state, named queries, views, patterns, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
+Reload clears weaver-lifetime library sync state, module-use state, named queries, views, patterns, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
 
 Use the live stdin REPL for scripts. Include `--config-dir` when scripting
 against a disposable or test world:
