@@ -2,7 +2,7 @@
 
 > skein: A continuous length of thread or wool wound into a loose, long twist so it doesn't tangle
 
-Skein is a small, local graph for coding agents and the humans working with them. It stores everything on your machine in SQLite and keeps its command-line surface small and script-friendly — its everyday commands emit JSON. Richer customization lives in trusted config and a live Clojure REPL, not in the CLI.
+Skein is a small, local graph for coding agents and the humans working with them — and, under the thin CLI, a live Lisp runtime you can reshape while it runs. Strands live on your machine in SQLite, and everyday `strand` commands emit JSON for easy scripting. But the real power is the **weaver**: a long-lived Clojure image you attach a REPL to, introspect, and extend without ever restarting it.
 
 A few terms you'll see throughout:
 
@@ -13,12 +13,13 @@ A few terms you'll see throughout:
 - **REPL** — a live, trusted Clojure connection to the weaver for customization and exploration.
 - **world** — one isolated Skein setup, chosen by config directory (a repo's `.skein`, or an explicit `--config-dir`).
 
-Use it to:
+Most agent tools ship a fixed schema and someone else's workflow. Skein ships primitives and a running Lisp, so you build the workflow you actually want:
 
-- Track local strand graphs without a hosted service.
-- Let coding agents create, update, query, and inspect structured strand state.
-- Attach flexible JSON attributes to strands and edges for userland workflows.
-- Keep custom queries, weave patterns, graph helpers, views, and runtime libraries in trusted Clojure config instead of the low-privilege CLI.
+- Track work as a local strand graph — no hosted service, no server to babysit.
+- Let agents create, update, query, and inspect structured state through a safe JSON CLI.
+- Model your own concepts — status, priority, ownership, "done", board columns — as open JSON attributes, instead of waiting for a schema to grow.
+- Rebuild whatever you need, in trusted Clojure: a beads-style issue tracker, a kanban board, or your own Claude Code workflow — from named queries, weave patterns, views, event handlers, and custom `strand op` commands.
+- Introspect and reshape the running system live: attach a REPL, inspect runtime state, redefine a function and watch the next call pick it up, or hot-reload your whole config — all without restarting or losing your strands.
 
 ## Quick start
 
@@ -102,7 +103,9 @@ Everything else — outcomes, categories, temporary markers, priorities — live
 
 ## Runtime customization
 
-The CLI stays thin on purpose. Richer behavior — named queries, weave patterns, weaver-memory views, and trusted runtime libraries — is loaded into your world, then consumed by helpers or by small CLI commands such as `list --query <name>` and `weave --pattern <name>`.
+The CLI stays thin on purpose; the power lives in the weaver. It's a real Clojure image — the full language, macros and all — so your customizations can be as expressive as you want, and you can introspect or redefine any of them from a live REPL without a restart.
+
+Richer behavior — named queries, weave patterns, weaver-memory views, event handlers, custom `strand op` commands, and trusted runtime libraries — is loaded into your world, then consumed by helpers or by small CLI commands such as `list --query <name>` and `weave --pattern <name>`.
 
 Two kinds of code can extend the weaver:
 
