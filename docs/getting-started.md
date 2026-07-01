@@ -15,7 +15,7 @@ just typed, attribute-bearing links.
 On top of that model you get two ways to work:
 
 - A small, predictable **CLI** (`strand`) for everyday CRUD and safe, scriptable
-  consumption of existing state. It always emits JSON.
+  consumption of existing state. Those commands emit JSON.
 - A live **Lisp machine**: the long-lived weaver owns the store and runtime
   state, and `strand weaver repl` attaches directly to that running weaver JVM
   so you can query, mutate, and _extend_ Skein at runtime — registering queries,
@@ -46,8 +46,11 @@ make install
 
 ## Choosing a world
 
-By default `strand` is repo-first: without `--config-dir`, `mill` resolves the canonical repository root and uses that repo's `.skein` directory as the selected config world. Linked worktrees for the same repository share this default world. Repo `.skein` is trusted config only; mill-owned
-runtime state, metadata, sockets, and data live under Skein's XDG state root. Outside supported Git layouts, no-flag commands fail with remediation instead of creating an accidental cwd world or falling back to a global personal world.
+By default, `strand` is **repo-first**. With no `--config-dir`, `mill` resolves the canonical repository root and uses that repo's `.skein` directory as your world; linked worktrees of the same repository share it.
+
+That `.skein` directory holds trusted config only. The mill-owned runtime state — metadata, sockets, and SQLite data — lives under Skein's XDG state root, not in your repo.
+
+Outside a supported Git layout, no-flag commands fail with remediation rather than guess. They won't create an accidental world from your current directory or fall back to a global personal world.
 
 Initialize a repo world from the Git repo you want to use Skein in:
 
@@ -55,7 +58,13 @@ Initialize a repo world from the Git repo you want to use Skein in:
 strand init
 ```
 
-Mill resolves the Skein source checkout used to launch the weaver from `SKEIN_SOURCE`, the install-time source recorded by `make install`, or a canonical Skein checkout cwd. `strand init` does not persist a source path in `.skein/config.json`.
+Mill resolves the Skein source checkout it uses to launch the weaver from, in order:
+
+- `SKEIN_SOURCE`,
+- the install-time source recorded by `make install`, or
+- a canonical Skein checkout as the current directory.
+
+`strand init` does not persist a source path in `.skein/config.json`.
 
 `strand init` without `--config-dir` creates or completes `.skein` at the Git
 root and fails loudly outside Git. To work in a separate, disposable world
@@ -91,7 +100,7 @@ strand add "Review docs" --attr owner=ct --attr area=docs
 strand add "Scratch idea" --attr temporary=true --attr example_category=scratch
 ```
 
-List and inspect ready strands. The CLI always emits JSON:
+List and inspect ready strands — these commands emit JSON:
 
 ```sh
 strand list
