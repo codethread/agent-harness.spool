@@ -15,7 +15,7 @@ References:
 ## TASK-001.P2 Implementation notes
 
 - Inspect and update `src/skein/db.clj`, `src/skein/weaver/runtime.clj`, and `src/skein/weaver/metadata.clj`.
-- Keep existing `skein.db` schema/query functions using next.jdbc-compatible connectables.
+- Keep existing `skein.core.db` schema/query functions using next.jdbc-compatible connectables.
 - Add a small internal storage representation with at least:
   - storage kind
   - storage label

@@ -21,6 +21,8 @@ Userland reference spools are indexed in [`spools/`](./spools/README.md), with s
 - [Agent Shuttle](./spools/shuttle/README.md) (approved local-root spool)
 - [Treadle Gate Bridge](./spools/shuttle/treadle.md) (approved local-root spool)
 
+Namespace tiers are intentional: `skein.api.*.alpha` is the blessed spool-facing API with accretion-based compatibility within each subnamespace, `skein.core.*` is internal and may change freely, `skein.spools.*` is the authorable/reference spool layer, and `skein.repl` is the human interactive surface.
+
 ## Project commands
 
 Use Homebrew OpenJDK when Java is not on the default PATH:
@@ -86,10 +88,10 @@ strand --workspace "$workspace" weaver repl
 For non-interactive trusted forms:
 
 ```sh
-printf '@skein.weaver.runtime/current-runtime\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
-For spool workspace workflows, use `spools.edn`, privileged `skein.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
+For spool workspace workflows, use `spools.edn`, privileged `skein.api.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
 
 ## Validation and smoke testing
 
@@ -118,7 +120,7 @@ sqlite3 smoke-cli.sqlite.workspace/data/skein.sqlite 'select from_strand_id, to_
 ## Implementation boundaries
 
 - Keep the CLI thin: parse command-line input, normalize output, and route strand commands through the weaver client.
-- Keep SQL and shared persistence behavior in `skein.db`.
+- Keep SQL and shared persistence behavior in `skein.core.db`.
 - Keep strand attributes as JSON `TEXT`; do not introduce JSONB assumptions.
 - Keep public CLI automation in `cli/` and weaver transport glue thin.
 - Keep interactive convenience wrappers in `skein.repl`.

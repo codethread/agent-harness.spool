@@ -110,7 +110,7 @@ Richer behavior — named queries, weave patterns, weaver-memory views, event ha
 
 Two kinds of code can extend the weaver:
 
-- **Built-in `skein.*.alpha` namespaces** — privileged helpers shipped with Skein.
+- **Built-in `skein.api.*.alpha` namespaces** — privileged helpers shipped with Skein.
 - **Your own trusted spools** — Clojure loaded through config, approved local roots, or live REPL work.
 
 Reference spools ship with Skein in [`spools/`](./spools/README.md), with sources under `spools/src` — a workflow engine, a devflow lifecycle, and an ephemeral-strand helper — each documented beside its code and driven end-to-end by its tests.
@@ -119,7 +119,7 @@ Fresh `strand init` creates a repo's config files: `.skein/init.clj`, `.skein/sp
 
 `strand init` does not persist a source path. Mill resolves the Skein source for weaver/REPL launch from `SKEIN_SOURCE`, the install-time source, or a canonical Skein checkout as the working directory.
 
-Use `strand weaver repl` to attach directly to the running weaver's nREPL for trusted interactive work, and `(skein.runtime.alpha/reload!)` to hot-reload `init.clj` followed by `init.local.clj`.
+Use `strand weaver repl` to attach directly to the running weaver's nREPL for trusted interactive work, and `(skein.api.runtime.alpha/reload!)` to hot-reload `init.clj` followed by `init.local.clj`.
 
 ## Documentation
 

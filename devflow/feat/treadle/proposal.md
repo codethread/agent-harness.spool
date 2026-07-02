@@ -154,7 +154,7 @@ On the closed gate the ordinary workflow vocabulary carries the outcome:
 
 1. `spools/shuttle/src/skein/spools/treadle.clj` — ns docstring required
    (repo rule); composes only public surfaces (`skein.spools.workflow`,
-   `skein.spools.shuttle`, `skein.weaver.api`, `skein.repl`).
+   `skein.spools.shuttle`, `skein.api.weaver.alpha`, `skein.repl`).
 2. `test/skein/treadle_test.clj` — modeled on `test/skein/shuttle_test.clj`
    (temp workspace fixture installing shuttle then treadle; `sh` harness), at
    minimum:

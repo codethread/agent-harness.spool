@@ -18,9 +18,9 @@ SQLite remains the long-term persistence layer for the strand graph. The weaver 
 
 Skein ships source-visible helper namespaces:
 
-- `skein.runtime.alpha` for approved local-root sync and module activation.
-- `skein.graph.alpha` for graph/query helpers such as `query-ids!`, `strands-by-ids`, `ancestor-root-ids`, and `subgraph`.
-- `skein.views.alpha` for `register-view!`, `view!`, and `views`.
+- `skein.api.runtime.alpha` for approved local-root sync and module activation.
+- `skein.api.graph.alpha` for graph/query helpers such as `query-ids!`, `strands-by-ids`, `ancestor-root-ids`, and `subgraph`.
+- `skein.api.views.alpha` for `register-view!`, `view!`, and `views`.
 
 These helpers run in trusted startup config or connected REPL workflows.
 
@@ -29,7 +29,7 @@ These helpers run in trusted startup config or connected REPL workflows.
 A user tracks repository ownership in strand attributes:
 
 ```clojure
-(require '[skein.weaver.api :as api])
+(require '[skein.api.weaver.alpha :as api])
 
 (api/register-query!
  'ready-for-repo
@@ -50,9 +50,9 @@ Assume a world uses user attributes such as `example_category="feature"` and `pa
 
 ```clojure
 (ns my.skein.views
-  (:require [skein.graph.alpha :as graph]
-            [skein.views.alpha :as views]
-            [skein.weaver.api :as api]))
+  (:require [skein.api.graph.alpha :as graph]
+            [skein.api.views.alpha :as views]
+            [skein.api.weaver.alpha :as api]))
 
 (api/register-query!
  'active-owned

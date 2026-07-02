@@ -2,8 +2,8 @@
 
 **Document ID:** `SPEC-003`
 **Status:** Implemented
-**Last Updated:** 2026-07-01
-**Code:** `src/skein/repl.clj`, `src/skein/batch/alpha.clj`
+**Last Updated:** 2026-07-02
+**Code:** `src/skein/repl.clj`, `src/skein/api/batch/alpha.clj`
 
 ## SPEC-003.P1 Purpose
 
@@ -43,7 +43,7 @@ weave!
 - **SPEC-003.C1:** `connect!` selects one active weaver connection by Skein workspace for explicit Clojure client/test workflows. It requires an explicit selected workspace and optional state metadata supplied directly by standalone Clojure/test helpers. It never accepts a database path and no longer silently falls back to an XDG global workspace. Default `strand weaver repl` does not call `connect!`.
 - **SPEC-003.C2:** `strand weaver repl` requires a running `mill`, asks it to resolve the selected workspace, verify that workspace's weaver is running, and return nREPL metadata, then attaches the user's terminal to the selected weaver nREPL endpoint. Mill does not proxy nREPL. Any launched attach client is transport/UI only: user forms are evaluated in the weaver JVM, not in a separate local runtime or through the fixed API bridge.
 - **SPEC-003.C3:** `strand weaver repl --stdin` attaches to the selected running weaver nREPL, reads and evaluates top-level stdin forms in the weaver JVM in order, prints one direct normal Clojure result per form, and exits non-zero on read, eval, or transport failure. Callers that want one machine-readable payload should wrap work in one top-level `do` or `let`.
-- **SPEC-003.C4:** Helpers that need a weaver use `@skein.weaver.runtime/current-runtime` when evaluated inside the active weaver JVM. Outside an active weaver process, they fail before connection with remediation that points to `strand weaver repl` or `connect!`; explicit connected helper/client workflows route through the selected workspace after `connect!`. Weaver/transport failures surface loudly as Clojure exceptions.
+- **SPEC-003.C4:** Helpers that need a weaver use `(skein.api.runtime.alpha/current-runtime)` when evaluated inside the active weaver JVM. Outside an active weaver process, they fail before connection with remediation that points to `strand weaver repl` or `connect!`; explicit connected helper/client workflows route through the selected workspace after `connect!`. Weaver/transport failures surface loudly as Clojure exceptions.
 - **SPEC-003.C5:** `init!` is a trusted idempotent helper for explicit schema initialization/testing. Normal CLI setup does not require calling it because weaver startup prepares empty stores.
 - **SPEC-003.C6:** `strand!` creates a strand and returns the created row. Supported arities include a title alone, title with attributes, and title with options containing optional `:state` and `:attributes`.
 - **SPEC-003.C7:** `update!` accepts a strand id and patch map with optional `:title`, `:state`, `:attributes`, and `:edges`. Generic update accepts `active|closed`; `replaced` is reserved for supersession. Other lifecycle keys are not core strand fields.
@@ -59,11 +59,11 @@ weave!
 - **SPEC-003.C14:** `strand`, `strands`, `query`, and `ready` return rows with JSON-bearing columns normalized to Clojure values and with the `state` lifecycle field.
 - **SPEC-003.C15:** `ready` returns active strands whose direct `depends-on` dependencies are not active and may be further filtered by an ad hoc or registered query. This is equivalent to `[:and [:= :state "active"] [:not [:edge/out "depends-on" [:= :state "active"]]]]`.
 - **SPEC-003.C15a:** `declare-acyclic-relation!` declares a valid relation name acyclic in durable storage and is idempotent. It fails loudly if edges of that relation already exist. `acyclic-relations` lists declared acyclic relation names.
-- **SPEC-003.C16:** Blessed spool-workspace helpers live in explicit `skein.runtime.alpha`, not in the preloaded `skein.repl` helper namespace.
-- **SPEC-003.C17:** `skein.runtime.alpha` exposes approved spool config helpers, approved-local-root sync helpers, resilient module activation with `use!`, and weaver-lifetime sync/use introspection.
-- **SPEC-003.C18:** `skein.runtime.alpha` helpers execute against the active `current-runtime` when called inside the live weaver JVM. In explicit connected client/test workflows, they route to the selected weaver workspace after `connect!`.
-- **SPEC-003.C19:** `skein.runtime.alpha` is the documented spool-workspace path, but trusted users may require lower-level namespaces or read raw SQLite when they accept compatibility cost.
-- **SPEC-003.C20:** `defpattern!` registers a simple pattern name, optional non-blank doc string, fully qualified function symbol, and input spec name in the active weaver's in-memory pattern registry. Supported arities are `(defpattern! name fn-sym input-spec)` and `(defpattern! name doc fn-sym input-spec)`. Duplicate registration replaces the prior entry. The same operations are available through the blessed `skein.patterns.alpha` namespace for trusted startup config, activated spools, and connected REPL workflows.
+- **SPEC-003.C16:** Blessed spool-workspace helpers live in explicit `skein.api.runtime.alpha`, not in the preloaded `skein.repl` helper namespace.
+- **SPEC-003.C17:** `skein.api.runtime.alpha` exposes approved spool config helpers, approved-local-root sync helpers, resilient module activation with `use!`, and weaver-lifetime sync/use introspection.
+- **SPEC-003.C18:** `skein.api.runtime.alpha` helpers execute against the active `current-runtime` when called inside the live weaver JVM. In explicit connected client/test workflows, they route to the selected weaver workspace after `connect!`.
+- **SPEC-003.C19:** `skein.api.runtime.alpha` is the documented spool-workspace path. Namespace tiers are contractual: `skein.api.*.alpha` promises accretion-based back-compat within each subnamespace; breaking rethinks move to a new subnamespace. `skein.core.*` promises nothing and is for engine internals; trusted users may require it or read raw SQLite when they accept compatibility cost. `skein.spools.*` is the authorable/reference spool layer. `skein.repl` is the interactive human surface.
+- **SPEC-003.C20:** `defpattern!` registers a simple pattern name, optional non-blank doc string, fully qualified function symbol, and input spec name in the active weaver's in-memory pattern registry. Supported arities are `(defpattern! name fn-sym input-spec)` and `(defpattern! name doc fn-sym input-spec)`. Duplicate registration replaces the prior entry. The same operations are available through the blessed `skein.api.patterns.alpha` namespace for trusted startup config, activated spools, and connected REPL workflows.
 - **SPEC-003.C21:** `patterns`, `pattern`, and `pattern-explain` inspect active weaver pattern state. Missing pattern lookup fails loudly. Explanations return serializable caller guidance based on the registered spec.
 - **SPEC-003.C22:** `weave!` validates input against the registered spec, calls the registered function with `{:input input}`, requires the result to be a valid batch strand vector, and creates the batch atomically through the weaver.
 
@@ -71,16 +71,16 @@ weave!
 
 Skein ships blessed source-visible runtime transformation namespaces for trusted config, live weaver REPL, and explicit connected client workflows:
 
-- `skein.graph.alpha` exposes `(query-ids! query params)`, `(burn-by-id! id)`, `(burn-by-ids! ids)`, `(strands-by-ids ids)`, `(ancestor-root-ids seed-ids)`, `(ancestor-root-ids seed-ids opts)`, `(subgraph root-ids)`, and `(subgraph root-ids opts)`. Traversal opts may include `:type` for the declared acyclic relation to walk and default to `"parent-of"`; annotation relations fail loudly. `ancestor-root-ids` also preserves `:where`/`:params` filtering.
-- `skein.views.alpha` exposes `(register-view! name fn-sym)`, `(view! name params)`, and `(views)`. View registration accepts a simple view name and a fully qualified function symbol, not an arbitrary client-side function value.
-- `skein.patterns.alpha` exposes `(register-pattern! name fn-sym input-spec)`, `(register-pattern! name doc fn-sym input-spec)`, `(patterns)`, `(pattern name)`, `(explain name)`, and `(weave! name input)`. Pattern functions are weaver-loadable function symbols called with `{:input input}` after input spec validation.
-- `skein.events.alpha` exposes `(register! key types fn-sym)`, `(register! key types fn-sym metadata)`, `(unregister! key)`, `(handlers)`, and `(recent-failures)`.
-- `skein.hooks.alpha` exposes `(register! key types fn-sym)`, `(register! key types fn-sym opts)`, `(unregister! key)`, and `(hooks)`. Hook keys are stable keywords, symbols, or non-blank strings; hook type sets are non-empty keyword sets; function symbols are fully qualified and weaver-resolvable; `opts` may include `:order` and data-first metadata. Registration replaces by key, `hooks` returns deterministic data-first entries, validation hooks return normally or throw, and transform hooks return `{:hook/value replacement}`.
-- `skein.batch.alpha` exposes `(apply! payload)` for transactional batch graph mutation payloads with `:refs`, `:strands`, `:edges`, and `:burn`. It returns normalized Clojure data from the weaver operation, including final refs, created rows, updated before/after rows, burned rows, and edge outcomes, without a JSON envelope.
+- `skein.api.graph.alpha` exposes `(query-ids! query params)`, `(burn-by-id! id)`, `(burn-by-ids! ids)`, `(strands-by-ids ids)`, `(ancestor-root-ids seed-ids)`, `(ancestor-root-ids seed-ids opts)`, `(subgraph root-ids)`, and `(subgraph root-ids opts)`. Traversal opts may include `:type` for the declared acyclic relation to walk and default to `"parent-of"`; annotation relations fail loudly. `ancestor-root-ids` also preserves `:where`/`:params` filtering.
+- `skein.api.views.alpha` exposes `(register-view! name fn-sym)`, `(view! name params)`, and `(views)`. View registration accepts a simple view name and a fully qualified function symbol, not an arbitrary client-side function value.
+- `skein.api.patterns.alpha` exposes `(register-pattern! name fn-sym input-spec)`, `(register-pattern! name doc fn-sym input-spec)`, `(patterns)`, `(pattern name)`, `(explain name)`, and `(weave! name input)`. Pattern functions are weaver-loadable function symbols called with `{:input input}` after input spec validation.
+- `skein.api.events.alpha` exposes `(register! key types fn-sym)`, `(register! key types fn-sym metadata)`, `(unregister! key)`, `(handlers)`, and `(recent-failures)`.
+- `skein.api.hooks.alpha` exposes `(register! key types fn-sym)`, `(register! key types fn-sym opts)`, `(unregister! key)`, and `(hooks)`. Hook keys are stable keywords, symbols, or non-blank strings; hook type sets are non-empty keyword sets; function symbols are fully qualified and weaver-resolvable; `opts` may include `:order` and data-first metadata. Registration replaces by key, `hooks` returns deterministic data-first entries, validation hooks return normally or throw, and transform hooks return `{:hook/value replacement}`.
+- `skein.api.batch.alpha` exposes `(apply! payload)` for transactional batch graph mutation payloads with `:refs`, `:strands`, `:edges`, and `:burn`. It returns normalized Clojure data from the weaver operation, including final refs, created rows, updated before/after rows, burned rows, and edge outcomes, without a JSON envelope.
 
 Helpers execute weaver-side when called from `init.clj`, activated runtime spools, or the live weaver REPL. Explicit connected client users who want to register new view, pattern, event handler, or hook functions should place them in weaver-loadable config/spool code and register their symbols. View, pattern, event, and hook registrations are weaver-lifetime runtime state unless user config reloads them on startup.
 
-User config may require `skein.graph.alpha`, `skein.patterns.alpha`, `skein.views.alpha`, `skein.events.alpha`, `skein.hooks.alpha`, and `skein.batch.alpha` so users can inspect and extend the blessed path. These built-in namespaces come from the Skein checkout on the weaver classpath; they do not require `spools.edn` approval.
+User config may require `skein.api.graph.alpha`, `skein.api.patterns.alpha`, `skein.api.views.alpha`, `skein.api.events.alpha`, `skein.api.hooks.alpha`, and `skein.api.batch.alpha` so users can inspect and extend the blessed path. These built-in namespaces come from the Skein checkout on the weaver classpath; they do not require `spools.edn` approval.
 
 Hook functions receive one context map and run synchronously at the lifecycle gates specified by the Weaver Runtime contract. They may reject by throwing; only explicit transform hook families may replace values. Hook registration, unregistration, and introspection are trusted Clojure workflows and are not public JSON socket operations.
 
@@ -88,7 +88,7 @@ Event handlers receive one event map and may perform trusted side effects, inclu
 
 ## SPEC-003.P5 Runtime spool workspace helpers
 
-`skein.runtime.alpha` is the blessed alpha namespace for trusted config, live weaver REPL, and explicit connected client spool workspace workflows. It is explicit and is not preloaded into `skein.repl`. Loader/config helpers do not live under `skein.spools.*`; that namespace family is reserved for authorable spools and examples.
+`skein.api.runtime.alpha` is the blessed alpha namespace for trusted config, live weaver REPL, and explicit connected client spool workspace workflows. It is explicit and is not preloaded into `skein.repl`. Loader/config helpers do not live under `skein.spools.*`; that namespace family is reserved for authorable spools and examples. Across the namespace map, `skein.api.*.alpha` is the accreting compatibility tier, `skein.core.*` is internal with no compatibility promise, `skein.spools.*` is authorable userland/reference code, and `skein.repl` is the interactive surface.
 
 Approved spool config is the effective overlay of `spools.edn` and `spools.local.edn` in the selected workspace. Both files use the same MVP EDN grammar: exactly one top-level key, `:spools`, whose value is a map from symbol spool coordinates to maps containing exactly one required key, `:local/root`, a non-blank string path. Unknown top-level keys, non-symbol coordinates, missing `:spools` in a present file, non-map entries, unknown per-lib keys, and missing/non-string `:local/root` fail loudly as structural config errors. Missing files contribute no spools. When both files define the same coordinate, the `spools.local.edn` entry replaces the `spools.edn` entry.
 
@@ -114,7 +114,7 @@ Maven/remote dependency coordinates, version-range matching, alternate approved-
 Selected workspace startup files (`init.clj`, then `init.local.clj`) may sync approved local roots and activate optional modules:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 
 (runtime-alpha/sync!)
 (runtime-alpha/use! :my/module

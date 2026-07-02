@@ -61,19 +61,19 @@ strand --workspace "$workspace" weaver repl
 Non-interactive trusted forms:
 
 ```sh
-printf '@skein.weaver.runtime/current-runtime\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
 Runtime spool startup config may use:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime]
-         '[skein.graph.alpha :as graph]
-         '[skein.views.alpha :as views])
+(require '[skein.api.runtime.alpha :as runtime]
+         '[skein.api.graph.alpha :as graph]
+         '[skein.api.views.alpha :as views])
 (runtime/sync!)
 ```
 
-Shipped `skein.*.alpha` namespaces are privileged built-in helpers. `spools.edn` approves user/community local roots; `skein.runtime.alpha/sync!` makes approved roots available; `runtime/use!` activates modules for the weaver lifetime.
+Shipped `skein.api.*.alpha` namespaces are privileged built-in helpers. `spools.edn` approves user/community local roots; `skein.api.runtime.alpha/sync!` makes approved roots available; `runtime/use!` activates modules for the weaver lifetime.
 
 ## Validation
 
@@ -97,7 +97,7 @@ sqlite3 /tmp/sk<pid>/smoke-cli.sqlite.workspace/data/skein.sqlite 'select from_s
 ## Implementation boundaries
 
 - Keep the CLI thin: parse command-line input, normalize output, and route strand commands through the weaver client.
-- Keep SQL and persistence behavior in `skein.db`.
+- Keep SQL and persistence behavior in `skein.core.db`.
 - Keep strand attributes as JSON `TEXT`; do not introduce JSONB assumptions.
 - Do not add schemas for userland attributes yet.
 - Keep public CLI automation in `cli/` and weaver transport glue thin.

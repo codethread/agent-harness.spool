@@ -114,7 +114,7 @@ printf '(strands)\n' | strand weaver repl --stdin
 Hot-reload selected config after config/library edits:
 
 ```sh
-printf "(do (require '[skein.runtime.alpha :as runtime]) (runtime/reload!))\n" \
+printf "(do (require '[skein.api.runtime.alpha :as runtime]) (runtime/reload!))\n" \
   | strand weaver repl --stdin
 ```
 

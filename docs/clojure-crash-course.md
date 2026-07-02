@@ -94,9 +94,9 @@ A namespace groups related names, like a module or file. `config.clj`'s `(ns con
 ## Require helper namespaces
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha]
-         '[skein.graph.alpha :as graph]
-         '[skein.views.alpha :as views])
+(require '[skein.api.runtime.alpha :as runtime-alpha]
+         '[skein.api.graph.alpha :as graph]
+         '[skein.api.views.alpha :as views])
 ```
 
 These are privileged built-in helper namespaces shipped with Skein. The aliases let you call functions like `runtime-alpha/sync!`, `graph/strands-by-ids`, and `views/view!`.
@@ -121,7 +121,7 @@ Terms to use when discussing Clojure with an agent (or another dev), so requests
 - **function** / **fn** — not "method". `strand!`, `ref-symbol`, `plan-strand` are all functions.
 - **var** — a top-level name created by `def`/`defn`/`defonce`, e.g. "`devflow-workflows` is a var" or "check the `ref-symbol` fn". Say "the `X` var" only when `X` isn't a function.
 - **atom** — mutable state held in a var, e.g. "`devflow-summary-notifications` is a defonce atom"; "reset the atom" / "check the atom".
-- **namespace** — a named group of vars, e.g. `config`, `skein.runtime.alpha`.
+- **namespace** — a named group of vars, e.g. `config`, `skein.api.runtime.alpha`.
 - **keyword** — a `:like-this` token, usually a map key.
 - **symbol** — a bare name like `foo` or `config/foo`, used to refer to a var or namespace.
 - **macro** — code that generates code at compile time, e.g. `defn` itself is a macro (expands to a `def` of a function).

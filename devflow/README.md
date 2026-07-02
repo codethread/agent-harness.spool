@@ -36,13 +36,13 @@ Archived feature folders preserve historical planning context. Current shipped c
 - `26-06-27__patterned-weave` — shipped named weaver-side patterns for owner-controlled strand DAG creation from JSON CLI input.
 - `26-06-27__weaver-event-system` — shipped weaver-owned semantic strand mutation events with trusted async handlers.
 - `26-06-28__cli-attribute-inputs` — shipped file, stdin, and bulk JSON attribute input sources for `strand add`.
-- `26-06-28__batch-graph-upsert` — shipped transactional trusted Clojure batch graph mutation primitive with local refs, create/update/burn/edge upsert support, weaver events, and `skein.batch.alpha/apply!`.
+- `26-06-28__batch-graph-upsert` — shipped transactional trusted Clojure batch graph mutation primitive with local refs, create/update/burn/edge upsert support, weaver events, and `skein.api.batch.alpha/apply!`.
 - `26-06-29__edge-relation-families` — shipped state lifecycle model, declared acyclic relation families, core supersession, edge predicates, relation-scoped traversal, and annotation catalog.
 - `26-06-29__repo-first-config` — shipped repo-local `.skein` world selection, layered shared/local config, local extension overrides, and fail-loud no-global default behavior.
 - `26-06-29__weaver-lifecycle-hooks` — shipped synchronous trusted lifecycle hooks for payload gating, attribute normalization, and pre-commit mutation policy.
 - `26-06-30__mill-router-runtime` — shipped local Go `mill` router/supervisor, mill-routed `strand` commands, Git-root repo bootstrap, XDG runtime/data worlds, startup storage initialization, and connected REPL attachment through mill metadata.
 - `26-06-30__mill-owned-source` — shipped mill-owned source resolution, marker-only config, and repository-canonical default weavers shared across linked Git worktrees.
-- `26-07-01__live-weaver-repl-and-runtime-loader` — shipped direct live weaver nREPL attachment, `skein.runtime.alpha` loader/config helper namespace, friendly weaver discovery, and Neovim/Conjure integration.
+- `26-07-01__live-weaver-repl-and-runtime-loader` — shipped direct live weaver nREPL attachment, `skein.api.runtime.alpha` loader/config helper namespace, friendly weaver discovery, and Neovim/Conjure integration.
 - `26-07-01__library-to-spool` — shipped rename of the runtime approved-code-unit surface from library/libs to spool/spools, including `spools.edn`, `:spools`, `skein.spools.*`, and legacy `libs.edn` rejection.
 - `26-07-01__cli-definition-parity` — shipped read-only CLI/socket query introspection (`query list`/`query explain`), `skein.repl/query-explain`, and explicit query/pattern discovery plus weave/batch framing.
 - `26-07-02__workflow-engine-review` — shipped the `skein.spools.workflow` engine (plain-data definitions, loop-by-routing, gates, checkpoints, forge-agnostic step bindings) and the `skein.spools.devflow` lifecycle spool built on it; folder holds the review findings and step-bindings plan records.

@@ -1,7 +1,7 @@
 # Namespace tiers and a root spool home
 
-**Status:** Accepted design, implementation in progress
-**Related:** [repl-api spec](../../specs/repl-api.md), [daemon-runtime spec](../../specs/daemon-runtime.md), [spools index](../../../src/skein/spools/README.md), TEN-000/TEN-004
+**Status:** Implemented
+**Related:** [repl-api spec](../../specs/repl-api.md), [daemon-runtime spec](../../specs/daemon-runtime.md), [spools index](../../../spools/README.md), TEN-000/TEN-004
 
 ## Summary
 

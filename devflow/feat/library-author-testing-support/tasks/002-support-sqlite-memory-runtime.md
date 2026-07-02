@@ -4,7 +4,7 @@
 
 Type: AFK
 
-Add real Xerial SQLite in-memory weaver storage for trusted runtime/test construction. This must use the same `skein.db` schema and SQL code as file-backed storage, with a weaver-owned held `java.sql.Connection` that is closed on runtime stop.
+Add real Xerial SQLite in-memory weaver storage for trusted runtime/test construction. This must use the same `skein.core.db` schema and SQL code as file-backed storage, with a weaver-owned held `java.sql.Connection` that is closed on runtime stop.
 
 References:
 
@@ -17,8 +17,8 @@ References:
 - Build on the storage handle from task 1.
 - Add a trusted runtime construction path for `:sqlite-memory`, likely via an option to `runtime/start!` or a small internal storage constructor.
 - Use Xerial SQLite JDBC with a held `java.sql.Connection`; do not use a datasource-only `jdbc:sqlite::memory:` path because the schema can disappear across connections.
-- Keep all DB operations flowing through existing `skein.db` functions and next.jdbc-compatible connectables.
-- Initialize schema through the same `skein.db/init!` path.
+- Keep all DB operations flowing through existing `skein.core.db` functions and next.jdbc-compatible connectables.
+- Initialize schema through the same `skein.core.db/init!` path.
 - Ensure `runtime/stop!` closes the held connection and later use fails loudly.
 - Add tests for:
   - schema/init and basic strand CRUD/list/ready through weaver API

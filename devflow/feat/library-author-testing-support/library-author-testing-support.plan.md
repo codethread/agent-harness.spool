@@ -26,9 +26,9 @@ Deliver first-class library-author testing support by refactoring weaver storage
 
 | ID | Area | Expected change |
 | -- | ---- | --------------- |
-| LAT-PLAN-001.AA1 | `skein.db` | Add or expose storage construction support for file-backed datasource and held in-memory SQLite connection without changing schema/query functions. |
-| LAT-PLAN-001.AA2 | `skein.weaver.runtime` | Start runtimes from a storage handle, own storage close lifecycle, and keep existing weaver API call sites using a next.jdbc-compatible connectable. |
-| LAT-PLAN-001.AA3 | `skein.weaver.metadata` / socket status | Publish storage kind/label and file path only for file storage; validate metadata accordingly. |
+| LAT-PLAN-001.AA1 | `skein.core.db` | Add or expose storage construction support for file-backed datasource and held in-memory SQLite connection without changing schema/query functions. |
+| LAT-PLAN-001.AA2 | `skein.core.weaver.runtime` | Start runtimes from a storage handle, own storage close lifecycle, and keep existing weaver API call sites using a next.jdbc-compatible connectable. |
+| LAT-PLAN-001.AA3 | `skein.core.weaver.metadata` / socket status | Publish storage kind/label and file path only for file storage; validate metadata accordingly. |
 | LAT-PLAN-001.AA4 | Go CLI client/status | Parse and validate new storage metadata while preserving current file-backed behavior. |
 | LAT-PLAN-001.AA5 | `skein.test.alpha` | New blessed dev/test helper namespace for disposable weaver-world tests, shipped from `src/skein/test/alpha.clj` so external test JVMs can require it via Skein local-root dependency. |
 | LAT-PLAN-001.AA6 | `docs` | Add `docs/library-authoring.md` with testing tiers, deps.edn examples, classpath boundaries, and CI guidance. |

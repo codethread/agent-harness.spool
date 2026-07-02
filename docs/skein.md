@@ -268,8 +268,8 @@ Named query registries are not durable by themselves. If you want a query after 
 For a simple persistent query, put it directly in `init.clj`:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha]
-         '[skein.weaver.api :as api])
+(require '[skein.api.runtime.alpha :as runtime-alpha]
+         '[skein.api.weaver.alpha :as api])
 
 (runtime-alpha/sync!)
 (api/register-query! 'mine [:= [:attr :owner] "ct"])
@@ -304,13 +304,13 @@ Useful forms:
 Script the live weaver REPL with stdin:
 
 ```sh
-printf '@skein.weaver.runtime/current-runtime\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
 The REPL helper namespace includes common strand functions. Privileged runtime loader/config helpers are explicit built-in namespaces, not ordinary user spools; require them when needed:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 (runtime-alpha/reload!)
 ```
 
@@ -332,7 +332,7 @@ The generated `init.clj` is intentionally small:
 
 ```clojure
 ;; init.clj
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 
 (runtime-alpha/sync!)
 ```
@@ -342,8 +342,8 @@ The weaver loads startup files in order: `init.clj`, then `init.local.clj`. Miss
 A direct `init.clj` query registration can look like this:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha]
-         '[skein.weaver.api :as api])
+(require '[skein.api.runtime.alpha :as runtime-alpha]
+         '[skein.api.weaver.alpha :as api])
 
 (runtime-alpha/sync!)
 (api/register-query! 'mine [:= [:attr :owner] "ct"])
@@ -352,11 +352,11 @@ A direct `init.clj` query registration can look like this:
 Use reload during development:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 (runtime-alpha/reload!)
 ```
 
-`skein.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community spool, and loader/config helpers do not live under `skein.spools.*`.
+`skein.api.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community spool, and loader/config helpers do not live under `skein.spools.*`.
 
 Reload clears weaver-lifetime spool sync state, module-use state, named queries, weave patterns, views, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then reloads `init.clj` followed by `init.local.clj`. Missing files are skipped; present failures fail loudly.
 
@@ -398,7 +398,7 @@ Implement the spool:
 
 ```clojure
 (ns my.workflow
-  (:require [skein.weaver.api :as api]))
+  (:require [skein.api.weaver.alpha :as api]))
 
 (defn install! []
   (api/register-query! 'mine [:= [:attr :owner] "ct"])
@@ -408,7 +408,7 @@ Implement the spool:
 Activate it from `init.clj`:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 
 (runtime-alpha/sync!)
 (runtime-alpha/use! :my/workflow
@@ -436,7 +436,7 @@ Pattern registration lives in trusted Clojure config or spools, not in the publi
 ```clojure
 (ns my.workflow
   (:require [clojure.spec.alpha :as s]
-            [skein.patterns.alpha :as patterns]))
+            [skein.api.patterns.alpha :as patterns]))
 
 (s/def ::title string?)
 (s/def ::task-input (s/keys :req-un [::title]))
@@ -467,7 +467,7 @@ printf '{"title":"Implement review flow"}\n' | strand --workspace "$workspace" w
 
 The pattern function runs inside the weaver and receives `{:input input}`. Its return value must be the same batch vector shape accepted by Skein's batch primitive: strand maps with optional `:ref` and `:edges`. Symbolic refs are transient to the batch and are never durable ids. Input spec failure, malformed batch output, missing refs, invalid durable targets, cycles, and database errors fail loudly and leave no partial batch writes.
 
-`weave --pattern` is the CLI-safe, named, spec-checked, create-only front door over the same transactional batch engine as REPL-only `skein.batch.alpha/apply!`. Raw batch is the trusted loading-dock door: it can create, update, burn, and upsert edges, so it remains a Clojure config/REPL workflow instead of a public CLI command.
+`weave --pattern` is the CLI-safe, named, spec-checked, create-only front door over the same transactional batch engine as REPL-only `skein.api.batch.alpha/apply!`. Raw batch is the trusted loading-dock door: it can create, update, burn, and upsert edges, so it remains a Clojure config/REPL workflow instead of a public CLI command.
 
 Like queries and views, patterns are weaver-lifetime runtime state. Register them from startup config if they should always exist after restart or reload.
 
@@ -476,8 +476,8 @@ Like queries and views, patterns are weaver-lifetime runtime state. Register the
 Skein ships built-in privileged alpha namespaces for trusted runtime transformations. They are source-visible helper namespaces from the Skein checkout/classpath, not user/community spools that need `spools.edn` approval:
 
 ```clojure
-(require '[skein.graph.alpha :as graph]
-         '[skein.views.alpha :as views])
+(require '[skein.api.graph.alpha :as graph]
+         '[skein.api.views.alpha :as views])
 ```
 
 Graph helpers include operations such as query id selection, strand hydration by ids, ancestor-root traversal, subgraph expansion, and burn-by-id helpers.
@@ -486,9 +486,9 @@ Views let you register named read-only transformations backed by weaver-loadable
 
 ```clojure
 (ns my.workflow
-  (:require [skein.graph.alpha :as graph]
-            [skein.views.alpha :as views]
-            [skein.weaver.api :as api]))
+  (:require [skein.api.graph.alpha :as graph]
+            [skein.api.views.alpha :as views]
+            [skein.api.weaver.alpha :as api]))
 
 (defn owned-view [{:keys [params]}]
   (let [ids (graph/query-ids! 'owned params)]
@@ -504,14 +504,14 @@ Views let you register named read-only transformations backed by weaver-loadable
 Call a registered view from trusted Clojure, usually the live weaver REPL:
 
 ```clojure
-(require '[skein.views.alpha :as views])
+(require '[skein.api.views.alpha :as views])
 (views/view! 'owned-view {})
 ```
 
 For scripts, use `weaver repl --stdin`:
 
 ```sh
-printf "(do (require '[skein.views.alpha :as views]) (views/view! 'owned-view {}))\n" \
+printf "(do (require '[skein.api.views.alpha :as views]) (views/view! 'owned-view {}))\n" \
   | strand --workspace "$workspace" weaver repl --stdin
 ```
 
@@ -521,13 +521,13 @@ Like queries, views are weaver-lifetime runtime state. Register them from startu
 
 ## Events
 
-Skein ships `skein.events.alpha` for trusted config and live REPL workflows that need to react to strand mutations. There are no public JSON socket or `strand` CLI commands for event registration.
+Skein ships `skein.api.events.alpha` for trusted config and live REPL workflows that need to react to strand mutations. There are no public JSON socket or `strand` CLI commands for event registration.
 
 Register handlers from startup-loaded code or weaver-loadable spools:
 
 ```clojure
 (ns my.workflow
-  (:require [skein.events.alpha :as events]))
+  (:require [skein.api.events.alpha :as events]))
 
 (defn cleanup-temporary! [event]
   ;; Handler receives one event map and can call trusted Skein helpers/APIs.
@@ -547,7 +547,7 @@ Handlers are selected by explicit event-type filters such as `:strand/added`, `:
 Event dispatch is asynchronous after successful mutations. Handler exceptions do not roll back the mutation; inspect bounded failure state from trusted Clojure:
 
 ```clojure
-(require '[skein.events.alpha :as events])
+(require '[skein.api.events.alpha :as events])
 (events/handlers)
 (events/recent-failures)
 ```
@@ -638,7 +638,7 @@ Covers:
 - live weaver REPL functions;
 - `strand weaver repl --stdin` behavior;
 - query registration and execution;
-- `skein.runtime.alpha` loader/config helpers;
+- `skein.api.runtime.alpha` loader/config helpers;
 - graph, view, event, and explicit batch helper namespaces;
 - runtime spool workspace activation.
 
