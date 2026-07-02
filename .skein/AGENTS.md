@@ -12,13 +12,16 @@ and `skein.spools.devflow` from the weaver classpath, plus
   `current-dags`, `agent-delegate`, `devflow-conventions`
 - queries: `work`, `feature-active`, `feature-work`, `feature-owner-work`,
   `feature-run`, `workflow-runs`, `devflow-runs`
-- patterns: `agent-plan`
+- patterns: `agent-plan`, `delegate-pipeline`
 - shuttle harness aliases: `pi-main` (delegation default), plus claude tiers
   matched to roles — `explore` (haiku: fan-out search/read-only recon),
   `grunt` (sonnet: tests and mechanical work), `build` (opus: feature
   building, reviews, councils). `strand op agent harnesses` lists all.
   Delegate existing task strands with `strand op agent-delegate <task-id>`;
-  raw `strand op agent spawn` remains the escape hatch for custom shuttle
+  the delegated-agent policy text is the `delegation-policy-text` def in
+  `.skein/config.clj`. Review completed work with `strand op agent review
+  <target-id> --members 2 --harness pi-main,build`; findings are appended as
+  notes on the target strand. Raw `strand op agent spawn` remains the escape hatch for custom shuttle
   runs (manual: `strand op agent about`). Workflow `:subagent` gates are
   fulfilled automatically by the treadle (`spools/shuttle/treadle.md`).
 
@@ -111,10 +114,17 @@ other agents avoid duplicating it. Prefer the repo-local delegation op:
 strand op agent-delegate <task-id> --prompt "Extra implementation constraints if needed"
 ```
 
-Delegated agents must read their assigned strand, append `progress` attributes
-while working, set `status=implemented` when their scoped work is ready for
-coordinator verification, never close their own assigned strand, and never
-mutate sibling or parent strands unless the assignment explicitly says so.
+Delegated agents receive the repo policy from `.skein/config.clj`'s
+`delegation-policy-text`. `agent-delegate` resolves routing as flags > task
+attributes > repo defaults for `harness`, `cwd`, and `max-attempts`; invalid
+attribute types fail at delegation time. `agent-plan` may set those optional
+keys on each task.
+
+For sequential delegated workflows, use `delegate-pipeline`:
+
+```sh
+printf '%s' '{"run_id":"pipe-1","harness":"pi-main","accept":true,"tasks":[{"id":"a","title":"Do A","body":"..."}]}' | strand weave --pattern delegate-pipeline
+```
 
 ## Config changes
 

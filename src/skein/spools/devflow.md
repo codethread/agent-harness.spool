@@ -79,7 +79,9 @@ Notes:
   (after the task queue is approved) and `direct-implementation` on `:accepted`.
   The route-after-plan checkpoint chooses between them. In delegated AFK mode,
   `run-afk-loop` first pours one sequential `workflow/gate "subagent"` per
-  approved task, then requires the `:human-acceptance-afk` HITL checkpoint.
+  approved task, then requires the `:human-acceptance-afk` HITL checkpoint. A
+  caller may pass optional `:delegate-preamble` text; devflow prepends it to each
+  delegated AFK prompt as data and remains policy-free.
 - **`:abort` is reachable from every HITL (`:human`) checkpoint** — the intake
   worktree checkpoint and the four sign-off checkpoints. The two `:agent`
   checkpoints (`:discuss-scope`, `:route-after-plan`) offer no abort. Aborting

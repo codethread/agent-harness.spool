@@ -263,7 +263,11 @@
           (shuttle/agent-op {:op/argv ["note" (:id spawned) "op note" "--by" (:id spawned)]})
           (is (= ["op note"]
                  (mapv :note (shuttle/agent-op {:op/argv ["notes" (:id spawned)]}))))
-          (is (pos? (count (shuttle/agent-op {:op/argv ["ps"]}))))))
+          (is (pos? (count (shuttle/agent-op {:op/argv ["ps"]}))))
+          ;; --active is a bare flag: it must survive flag parsing, alone and
+          ;; combined with the value-carrying --for
+          (is (vector? (shuttle/agent-op {:op/argv ["ps" "--active"]})))
+          (is (= [] (shuttle/agent-op {:op/argv ["ps" "--active" "--for" "no-such-strand"]})))))
       (testing "invalid input fails loudly"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown agent subcommand"
                               (shuttle/agent-op {:op/argv ["dance"]})))
@@ -282,6 +286,41 @@
         (let [logs (shuttle/agent-op {:op/argv ["logs" (:id spawned) "--tail" "1"]})]
           (is (= "b" (get-in logs [:out :text])))
           (is (= "e" (get-in logs [:err :text]))))))))
+
+(deftest review-spawns-independent-reviewers
+  (with-shuttle
+    (fn [rt]
+      (let [target (api/add rt {:title "Review target" :attributes {:body "Inspect me"}})
+            review (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "correctness"}
+                                                              {:harness :sh :focus "tests"}]
+                                                :contract "Review contract"})]
+        (is (= (:id target) (:target review)))
+        (is (= 2 (count (:reviewers review))))
+        (is (nil? (:synthesizer review)))
+        (doseq [run-id (:reviewers review)]
+          (let [run (api/show rt run-id)]
+            (is (= (:id target) (get-in run [:attributes :shuttle/review-target])))
+            (is (str/includes? (get-in run [:attributes :shuttle/prompt]) "Review contract"))))))))
+
+(deftest review-consumes-workspace-default-contract
+  (with-shuttle
+    (fn [rt]
+      (try
+        (shuttle/set-default-review-contract! "Workspace policy contract")
+        (let [target (api/add rt {:title "Default-contract target"})
+              review (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "policy"}]})
+              run (api/show rt (first (:reviewers review)))]
+          (is (str/includes? (get-in run [:attributes :shuttle/prompt])
+                             "Workspace policy contract"))
+          ;; explicit :contract still overrides the workspace default
+          (let [review* (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "override"}]
+                                                       :contract "Explicit contract"})
+                run* (api/show rt (first (:reviewers review*)))]
+            (is (str/includes? (get-in run* [:attributes :shuttle/prompt]) "Explicit contract"))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"non-blank"
+                              (shuttle/set-default-review-contract! "  ")))
+        (finally
+          (shuttle/set-default-review-contract! nil))))))
 
 (deftest council-wires-members-and-synthesizer
   (with-shuttle

@@ -65,8 +65,10 @@
       (throw (ex-info "AFK task missing harness resolution"
                       {:task task :delegate-harness delegate-harness})))))
 
-(defn- afk-task-prompt [feature task]
-  (str "Devflow AFK task for " feature ": " (task-value task :title) "\n\n"
+(defn- afk-task-prompt [feature task delegate-preamble]
+  (str (when (non-blank-string? delegate-preamble)
+         (str delegate-preamble "\n\n"))
+       "Devflow AFK task for " feature ": " (task-value task :title) "\n\n"
        (or (task-value task :body) (task-value task :title))))
 
 (defn- afk-task-gate [delegate-harness delegate-cwd]
@@ -81,8 +83,8 @@
                  :attributes (cond-> {"devflow/task" (fn [{:keys [item]}] (task-value item :id))
                                       "shuttle/harness" (fn [{:keys [item delegate-harness]}]
                                                           (or (task-value item :harness) delegate-harness))
-                                      "shuttle/prompt" (fn [{:keys [feature item]}]
-                                                         (afk-task-prompt feature item))}
+                                      "shuttle/prompt" (fn [{:keys [feature item delegate-preamble]}]
+                                                         (afk-task-prompt feature item delegate-preamble))}
                                delegate-cwd (assoc "shuttle/cwd" delegate-cwd))))
 
 (def ^:private abort-reason-input
@@ -281,10 +283,11 @@
   With no `:tasks` opt, returns the legacy single manual AFK step. With `:tasks`,
   returns a sequential chain of `:subagent` gates for treadle fulfillment, then a
   HITL acceptance checkpoint. Task maps may be keyword- or string-keyed."
-  [{:keys [tasks delegate-harness delegate-cwd] :as opts}]
+  [{:keys [tasks delegate-harness delegate-cwd delegate-preamble] :as opts}]
   (let [tasks (validate-afk-tasks (or tasks (get opts "tasks")))
         delegate-harness (or delegate-harness (get opts "delegate-harness"))
-        delegate-cwd (or delegate-cwd (get opts "delegate-cwd"))]
+        delegate-cwd (or delegate-cwd (get opts "delegate-cwd"))
+        delegate-preamble (or delegate-preamble (get opts "delegate-preamble"))]
     (when tasks
       (validate-afk-harnesses tasks delegate-harness))
     (apply workflow/workflow
@@ -292,7 +295,8 @@
            {:params {:feature (workflow/param :required true)
                      :tasks (workflow/param :default tasks)
                      :delegate-harness (workflow/param :default delegate-harness)
-                     :delegate-cwd (workflow/param :default delegate-cwd)}
+                     :delegate-cwd (workflow/param :default delegate-cwd)
+                     :delegate-preamble (workflow/param :default delegate-preamble)}
             :attributes {"devflow/stage" "afk"
                          "devflow/feature" (param-value :feature)}}
            (if tasks

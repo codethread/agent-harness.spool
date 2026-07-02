@@ -594,7 +594,94 @@
                   (sattr note "round") (assoc :round (sattr note "round"))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Council
+;; Review and council shapes
+
+(def generic-review-contract
+  "Default contract text for independent shuttle reviews."
+  "Review the target read-only. Report prioritized findings with file:line references when applicable. Do not modify files or close strands. Append your findings as a note on the target strand, then end with the same findings as your final result.")
+
+(defonce ^{:private true
+           :doc "Weaver-lifetime default review contract override. Startup
+  config sets it (like harness aliases) so `review!`/`agent review` consume
+  the workspace's one authoritative policy text without callers passing
+  :contract by hand."}
+  default-review-contract
+  (atom nil))
+
+(defn set-default-review-contract!
+  "Set the workspace default review contract text; nil restores the generic one."
+  [text]
+  (when (and (some? text) (or (not (string? text)) (str/blank? text)))
+    (fail! "Default review contract must be a non-blank string or nil" {:text text}))
+  (reset! default-review-contract text)
+  {:default-review-contract (boolean text)})
+
+(defn- effective-review-contract [contract]
+  (or contract @default-review-contract generic-review-contract))
+
+(defn- review-prompt [{:keys [target-id focus contract]}]
+  (let [cmd (pinned-strand)]
+    (str contract "\n\n"
+         "Review target strand " target-id ".\n"
+         (when (not (str/blank? focus))
+           (str "Focus: " focus "\n"))
+         "Read the target with `" cmd " show " target-id "` and inspect the relevant repository state.\n"
+         "When finished, append findings with: " cmd " op agent note " target-id
+         " \"<findings>\" --by <your run-id>\n"
+         "Findings are notes-only; do not write verdict attributes.")))
+
+(defn- review-synthesis-prompt [{:keys [target-id review-runs contract]}]
+  (let [cmd (pinned-strand)]
+    (str contract "\n\n"
+         "Synthesize independent review findings for target strand " target-id ".\n"
+         "Review run ids: " (str/join ", " review-runs) "\n"
+         "Read target notes with `" cmd " op agent notes " target-id "`, append one synthesis note with `"
+         cmd " op agent note " target-id " \"<synthesis>\" --by <your run-id>`, then finish with the synthesis.")))
+
+(defn review!
+  "Spawn independent read-only reviewers for a target strand.
+
+  Opts: `:reviewers` vector of `{:harness ... :focus ...}` maps, or `:members`
+  plus `:harnesses`; optional `:contract`, `:synthesize?`, and `:spawned-by`.
+  Review findings are appended by reviewers as notes on the target strand."
+  [target-id {:keys [reviewers members harnesses contract synthesize? spawned-by]
+              :or {members 2}}]
+  (when-not (api/show (rt) target-id)
+    (fail! "Review target strand not found" {:id target-id}))
+  (let [contract (effective-review-contract contract)]
+  (let [reviewers (or reviewers
+                      (let [hs (or (seq harnesses) [:claude])]
+                        (mapv (fn [idx]
+                                {:harness (nth hs (mod idx (count hs)))
+                                 :focus (str "review pass " (inc idx))})
+                              (range members))))]
+    (when-not (and (vector? reviewers) (seq reviewers))
+      (fail! "Review requires at least one reviewer" {:reviewers reviewers}))
+    (let [review-runs (mapv (fn [{:keys [harness focus]}]
+                              (spawn-run! {:harness (or harness (fail! "Review reviewer requires :harness" {:reviewer {:focus focus}}))
+                                           :title (truncate (str "Review " target-id (when focus (str ": " focus))) 72)
+                                           :prompt (review-prompt {:target-id target-id
+                                                                   :focus focus
+                                                                   :contract contract})
+                                           :parent target-id
+                                           :spawned-by spawned-by
+                                           :attrs {"shuttle/review-target" target-id
+                                                   "shuttle/review-focus" (or focus "")}}))
+                            reviewers)
+          synthesis (when synthesize?
+                      (spawn-run! {:harness (:harness (first reviewers))
+                                   :title (truncate (str "Review synthesis: " target-id) 72)
+                                   :prompt (review-synthesis-prompt {:target-id target-id
+                                                                     :review-runs (mapv :id review-runs)
+                                                                     :contract contract})
+                                   :parent target-id
+                                   :spawned-by spawned-by
+                                   :depends-on (mapv :id review-runs)
+                                   :attrs {"shuttle/review-target" target-id
+                                           "shuttle/review-synthesis" "true"}}))]
+      (cond-> {:target target-id
+               :reviewers (mapv :id review-runs)}
+        synthesis (assoc :synthesizer (:id synthesis)))))))
 
 (defn- council-member-prompt [{:keys [council-id topic member member-count rounds]}]
   (let [cmd (pinned-strand)
@@ -692,7 +779,9 @@
     :harnesses "strand op agent harnesses — list available harnesses and aliases."
     :council (str "strand op agent council --topic \"...\" [--members n] [--rounds n] [--harness name] [--spawned-by id] "
                   "— spawn n agents that deliberate on one shared strand for n rounds plus a synthesizer; "
-                  "await the returned synthesizer id for the verdict.")}
+                  "await the returned synthesizer id for the verdict.")
+    :review (str "strand op agent review <target-id> [--members n] [--harness a,b] [--synthesize] [--contract text] [--spawned-by id] "
+                 "— spawn independent read-only reviewers; findings are notes on the target.")}
    :recipes
    {:review "spawn --harness claude --prompt \"Review the diff on branch X for correctness...\" then await the id."
     :explore-fan-out "spawn 3 runs with different exploration prompts, then await all three ids and read their results."
@@ -716,14 +805,16 @@
     (if-let [arg (first remaining)]
       (if (str/starts-with? arg "--")
         (let [kind (or (get flag-spec arg)
-                       (fail! "Unknown flag" {:flag arg :allowed (sort (keys flag-spec))}))
-              value (or (second remaining)
-                        (fail! "Flag requires a value" {:flag arg}))]
-          (recur (drop 2 remaining)
-                 positional
-                 (if (= :multi kind)
-                   (update flags arg (fnil conj []) value)
-                   (assoc flags arg value))))
+                       (fail! "Unknown flag" {:flag arg :allowed (sort (keys flag-spec))}))]
+          (if (= :bool kind)
+            (recur (rest remaining) positional (assoc flags arg true))
+            (let [value (or (second remaining)
+                            (fail! "Flag requires a value" {:flag arg}))]
+              (recur (drop 2 remaining)
+                     positional
+                     (if (= :multi kind)
+                       (update flags arg (fnil conj []) value)
+                       (assoc flags arg value))))))
         (recur (rest remaining) (conj positional arg) flags))
       {:positional positional :flags flags})))
 
@@ -797,13 +888,33 @@
              :text (read-file (str/replace log-path #"\.out$" ".err"))}})))
 
 (defn- op-ps [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--for" :single})
-        active? (boolean (some #{"--active"} positional))
-        unexpected (vec (remove #{"--active"} positional))]
-    (when (seq unexpected)
-      (fail! "ps takes only --active and --for" {:unexpected unexpected}))
+  ;; --active is a bare flag; strip it before parse-argv, which treats every
+  ;; "--" token as a value-carrying flag and would reject it as unknown
+  (let [active? (boolean (some #{"--active"} argv))
+        {:keys [positional flags]} (parse-argv (vec (remove #{"--active"} argv))
+                                               {"--for" :single})]
+    (when (seq positional)
+      (fail! "ps takes only --active and --for" {:unexpected positional}))
     (runs (cond-> {:active active?}
             (get flags "--for") (assoc :for (get flags "--for"))))))
+
+(defn- split-csv [s]
+  (when s
+    (mapv str/trim (remove str/blank? (str/split s #",")))))
+
+(defn- op-review [argv]
+  (let [{:keys [positional flags]}
+        (parse-argv argv {"--members" :single "--harness" :single "--synthesize" :bool
+                          "--contract" :single "--spawned-by" :single})
+        [target-id] positional]
+    (when-not (= 1 (count positional))
+      (fail! "review requires <target-id>" {:got positional}))
+    (review! target-id (cond-> {}
+                         (get flags "--members") (assoc :members (parse-int! "--members" (get flags "--members")))
+                         (get flags "--harness") (assoc :harnesses (split-csv (get flags "--harness")))
+                         (get flags "--contract") (assoc :contract (get flags "--contract"))
+                         (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
+                         (get flags "--synthesize") (assoc :synthesize? true)))))
 
 (defn- op-council [argv]
   (let [{:keys [positional flags]}
@@ -836,9 +947,10 @@
       "logs" (op-logs args)
       "harnesses" (harnesses)
       "council" (op-council args)
+      "review" (op-review args)
       (fail! "Unknown agent subcommand"
              {:subcommand sub
-              :available ["about" "spawn" "ps" "await" "kill" "note" "notes" "logs" "harnesses" "council"]}))))
+              :available ["about" "spawn" "ps" "await" "kill" "note" "notes" "logs" "harnesses" "council" "review"]}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Install

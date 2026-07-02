@@ -19,10 +19,19 @@
             [skein.weaver.runtime :as runtime]))
 
 ;; ---------------------------------------------------------------------------
-;; agent-plan weave pattern: lightweight CLI-created work DAGs
+;; Delegation policy and agent-plan weave patterns
 ;; ---------------------------------------------------------------------------
 
-(s/def ::non-blank-string (s/and string? (complement str/blank?)))
+(def delegation-policy-text
+  "Repo-local policy text prepended to delegated-agent prompts."
+  "Repo delegated-agent contract:\n- Read the assigned strand first with the pinned strand command.\n- Record progress with a `progress` attribute on the task strand and notes on the run.\n- Set `status=implemented` on the task only when validation is green.\n- Never close the assigned strand.\n- Never mutate sibling or parent strands unless the body says so.\n- Do not commit unless the body says so.")
+
+(defn- non-blank-string?
+  "Return true when v is a non-blank string."
+  [v]
+  (and (string? v) (not (str/blank? v))))
+
+(s/def ::non-blank-string non-blank-string?)
 (s/def ::feature ::non-blank-string)
 (s/def ::title ::non-blank-string)
 (s/def ::key ::non-blank-string)
@@ -33,9 +42,12 @@
 (s/def ::owner ::non-blank-string)
 (s/def ::branch ::non-blank-string)
 (s/def ::validation (s/coll-of ::non-blank-string :kind vector? :min-count 1))
+(s/def ::harness ::non-blank-string)
+(s/def ::cwd ::non-blank-string)
+(s/def ::max-attempts pos-int?)
 (s/def ::task (s/keys :req-un [::key ::title]
                       :opt-un [::body ::kind ::hitl ::depends_on
-                               ::owner ::branch ::validation]))
+                               ::owner ::branch ::validation ::harness ::cwd ::max-attempts]))
 (s/def ::tasks (s/coll-of ::task :kind vector? :min-count 1))
 (s/def ::agent-plan-input (s/keys :req-un [::feature ::title ::tasks]
                                   :opt-un [::body]))
@@ -60,7 +72,7 @@
 
 (defn- task-strand
   "Return one task/review strand for an agent-plan input task."
-  [feature {:keys [key title body kind hitl owner branch validation depends_on] :as task}]
+  [feature {:keys [key title body kind hitl owner branch validation depends_on harness cwd max-attempts] :as task}]
   (cond-> {:ref (ref-symbol key)
            :title title
            :attributes (cond-> {:feature feature
@@ -71,6 +83,9 @@
                          hitl (assoc :hitl true)
                          owner (assoc :owner owner)
                          branch (assoc :branch branch)
+                         harness (assoc :harness harness)
+                         cwd (assoc :cwd cwd)
+                         max-attempts (assoc :max-attempts max-attempts)
                          (contains? task :validation) (assoc :validation validation))}
     (seq depends_on)
     (assoc :edges (mapv (fn [dep]
@@ -86,11 +101,100 @@
   true, and `depends_on` to a vector of task keys. The generated plan has
   `kind=plan`, children share `feature`, the plan has `parent-of` edges to each
   child, and task dependencies become `depends-on` edges. Optional coordination
-  attributes include `owner`, `branch`, and `validation`."
+  attributes include `owner`, `branch`, `validation`, `harness`, `cwd`, and `max-attempts`."
   [{:keys [input]}]
   (into [(plan-strand input)]
         (map #(task-strand (:feature input) %))
         (:tasks input)))
+
+(s/def ::id ::non-blank-string)
+(s/def ::run_id ::non-blank-string)
+(s/def ::accept boolean?)
+(s/def ::pipeline-task (s/keys :req-un [::id ::title]
+                               :opt-un [::body ::harness ::cwd ::max-attempts]))
+(s/def ::pipeline-tasks (s/coll-of ::pipeline-task :kind vector? :min-count 1))
+(s/def ::delegate-pipeline-input
+  (s/and map?
+         #(s/valid? ::run_id (:run_id %))
+         #(s/valid? ::pipeline-tasks (:tasks %))
+         #(or (not (contains? % :harness)) (s/valid? ::harness (:harness %)))
+         #(or (not (contains? % :cwd)) (s/valid? ::cwd (:cwd %)))
+         #(or (not (contains? % :accept)) (s/valid? ::accept (:accept %)))))
+
+(defn- task-value
+  "Return task field `k`, accepting keyword or string keyed task maps."
+  [task k]
+  (or (get task k) (get task (name k))))
+
+(defn- pipeline-task-prompt
+  "Return the prompt for one delegate-pipeline task."
+  [run-id item]
+  (str delegation-policy-text "\n\n"
+       "Delegated pipeline run: " run-id "\n"
+       "Task: " (task-value item :title) "\n\n"
+       (or (task-value item :body) (task-value item :title))))
+
+(defn- compiled-workflow-strands
+  "Return workflow compile output as a weave-compatible strand vector."
+  [{:keys [strands edges]}]
+  (let [ref-symbol #(if (keyword? %) (symbol (name %)) %)
+        edges-by-from (group-by :from edges)]
+    (mapv (fn [{:keys [ref] :as strand}]
+            (let [edge-specs (mapv (fn [edge]
+                                     (merge {:type (:type edge) :to (ref-symbol (:to edge))}
+                                            (select-keys edge [:attributes])))
+                                   (get edges-by-from ref))]
+              (cond-> (-> strand
+                          (update :ref ref-symbol)
+                          (update :attributes #(into {} (remove (comp nil? val)) %)))
+                (seq edge-specs) (assoc :edges edge-specs))))
+          strands)))
+
+(defn delegate-pipeline
+  "Create a chain-loop workflow for sequential delegated pipeline gates."
+  [{:keys [input]}]
+  (let [{:keys [run_id tasks harness cwd accept]} input
+        task-gate (workflow/gate
+                   :task
+                   (fn [{:keys [item]}]
+                     (str "Delegate pipeline task " (task-value item :id)))
+                   :subagent
+                   :loop {:each :tasks :chain true}
+                   :attributes {"shuttle/harness" (fn [{:keys [item harness]}]
+                                                      (or (task-value item :harness) harness))
+                                "shuttle/prompt" (fn [{:keys [run-id item]}]
+                                                   (pipeline-task-prompt run-id item))
+                                "shuttle/cwd" (fn [{:keys [item cwd]}]
+                                                (or (task-value item :cwd) cwd))
+                                "shuttle/max-attempts" (fn [{:keys [item]}]
+                                                         (task-value item :max-attempts))
+                                "delegate-pipeline/task" (fn [{:keys [item]}]
+                                                           (task-value item :id))})
+        accept-checkpoint (workflow/checkpoint
+                           :accept
+                           "Accept delegated pipeline"
+                           :depends-on [:task]
+                           :kind :human
+                           :choices [{:key :accepted
+                                      :label "Accept"
+                                      :description "Delegated pipeline output is accepted."}])]
+    (doseq [task tasks]
+      (when-not (non-blank-string? (or (task-value task :harness) harness))
+        (throw (ex-info "delegate-pipeline task missing harness resolution"
+                        {:task task :harness harness}))))
+    (compiled-workflow-strands
+     (workflow/compile
+      (apply workflow/workflow
+             (str "Delegated pipeline: " run_id)
+             {:params {:run-id (workflow/param :default run_id)
+                       :tasks (workflow/param :default tasks)
+                       :harness (workflow/param :default harness)
+                       :cwd (workflow/param :default cwd)}
+              :attributes {"workflow/family" "delegate-pipeline"}}
+             (cond-> [task-gate]
+               accept (conj accept-checkpoint)))
+      {:run-id run_id :tasks tasks :harness harness :cwd cwd}
+      {:run-id run_id :family "delegate-pipeline"}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Named queries
@@ -495,9 +599,12 @@
          {:name "workflow-runs" :usage "strand op workflow-runs [family]"}
          {:name "current-dags" :usage "strand op current-dags"}
          {:name "agent-delegate" :usage "strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]"}
+         {:name "agent-review" :usage "strand op agent review <target-id> [--members n] [--harness a,b] [--synthesize]"}
          {:name "flow-await" :usage "strand op flow-await <workflow-run-id> [--timeout-secs <n>]"}]
    :patterns [{:name "agent-plan"
-               :purpose "Lightweight CLI-created plan/task DAG for general agent work outside the devflow lifecycle."}]
+               :purpose "Lightweight CLI-created plan/task DAG for general agent work outside the devflow lifecycle."}
+              {:name "delegate-pipeline"
+               :purpose "Sequential chain-loop workflow of subagent gates with optional acceptance checkpoint."}]
    :queries [{:name "feature-active"
               :usage "strand list --query feature-active --param feature=<feature>"}
              {:name "feature-work"
@@ -570,6 +677,27 @@
                       {:task-id task-id :state (:state task)})))
     task))
 
+(defn- task-attr-string
+  "Return task attribute k when it is a non-blank string, fail on malformed values."
+  [task k]
+  (let [v (get-in task [:attributes k])]
+    (cond
+      (nil? v) nil
+      (non-blank-string? v) v
+      :else (throw (ex-info (str "agent-delegate task attribute " (name k) " must be a non-blank string")
+                            {:task-id (:id task) :attribute k :value v})))))
+
+(defn- task-attr-long
+  "Return task attribute k as a positive long, fail on malformed values."
+  [task k]
+  (let [v (get-in task [:attributes k])]
+    (cond
+      (nil? v) nil
+      (pos-int? v) v
+      (and (integer? v) (pos? v)) (long v)
+      :else (throw (ex-info (str "agent-delegate task attribute " (name k) " must be a positive integer")
+                            {:task-id (:id task) :attribute k :value v})))))
+
 (defn- validation-text
   "Return the task validation attribute as prompt text."
   [validation]
@@ -601,12 +729,7 @@
            (str "Task body:\n" body-text "\n\n"))
          (when-let [gate (validation-text validation)]
            (str "Validation gate:\n" gate "\n\n"))
-         "Repo delegated-agent contract:\n"
-         "- Record progress with a `progress` attribute on the task strand and notes on the run.\n"
-         "- Set `status=implemented` on the task only when validation is green.\n"
-         "- Never close the assigned strand.\n"
-         "- Never mutate sibling or parent strands unless the body says so.\n"
-         "- Do not commit unless the body says so.\n"
+         delegation-policy-text "\n"
          (when extra
            (str "\nExtra instructions:\n" extra "\n")))))
 
@@ -624,13 +747,16 @@
         _ (require-non-blank! :task-id task-id)
         rt @runtime/current-runtime
         task (active-task! rt task-id)
-        max-attempts (some->> (get flags "--max-attempts")
-                              (parse-long-flag! "--max-attempts"))]
+        harness (or (get flags "--harness") (task-attr-string task :harness) "pi-main")
+        cwd (or (get flags "--cwd") (task-attr-string task :cwd) (repo-root-dir))
+        max-attempts (or (some->> (get flags "--max-attempts")
+                                  (parse-long-flag! "--max-attempts"))
+                         (task-attr-long task :max-attempts))]
     (shuttle/run-summary
-     (shuttle/spawn-run! (cond-> {:harness (or (get flags "--harness") "pi-main")
+     (shuttle/spawn-run! (cond-> {:harness harness
                                   :prompt (agent-delegate-prompt task (get flags "--prompt"))
                                   :parent task-id
-                                  :cwd (or (get flags "--cwd") (repo-root-dir))
+                                  :cwd cwd
                                   :title (str "Delegate: " (:title task))}
                            max-attempts (assoc :max-attempts max-attempts)
                            (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by")))))))
@@ -696,11 +822,18 @@
   {:installed true
    :namespace 'config
    :harnesses (register-harness-aliases!)
+   ;; agent review consumes the one authoritative policy text by default
+   :review-contract (shuttle/set-default-review-contract! delegation-policy-text)
    :patterns [(patterns/register-pattern!
                'agent-plan
-               "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?}]}. Use body for delegated work context."
+               "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?,harness?,cwd?,max-attempts?}]}. Use body for delegated work context."
                'config/agent-plan
-               ::agent-plan-input)]
+               ::agent-plan-input)
+              (patterns/register-pattern!
+               'delegate-pipeline
+               "Create a sequential chain-loop workflow of subagent gates. Input: {run_id,tasks:[{id,title,body?,harness?,cwd?,max-attempts?}],harness?,cwd?,accept?}."
+               'config/delegate-pipeline
+               ::delegate-pipeline-input)]
    :queries (register-query-map!)
    :ops [(api/register-op!
           'current-dags

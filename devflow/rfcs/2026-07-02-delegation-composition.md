@@ -202,3 +202,15 @@ strand op flow-await pipe-1              # RFC-011 closes the loop
   text) → REC3 (attr-driven delegate) → REC2 (`review!`) → REC4
   (`delegate-pipeline`, gated on RFC-012.REC1). Each step is independently
   shippable and dogfoodable through the existing loop.
+- **RFC-013.OUT2 (2026-07-02):** Accepted and implemented via the delegated
+  pipeline. `delegation-policy-text` is the one authoritative policy home
+  (consumed by `agent-delegate`, devflow AFK prompts via
+  `:delegate-preamble`, and — after a review finding — by
+  `review!`/`agent review` through shuttle's new
+  `set-default-review-contract!`, set at config install like harness
+  aliases). `review!` shipped with independent reviewers and notes-only
+  findings (Q1/Q5 as recommended); `agent-delegate` reads
+  `harness`/`cwd`/`max-attempts` strand attributes with flags > attrs >
+  defaults precedence; `agent-plan` passes the new keys through; and
+  `delegate-pipeline` pours chain-loop gate workflows from JSON (built on
+  RFC-012.REC1 as required).

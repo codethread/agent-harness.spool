@@ -222,3 +222,15 @@ strand op agent logs <run-id> --tail 80
   ready checkpoint. One scoping note from review: `stalled-gates` covers
   spawn-side `treadle/error` only — failed/exhausted-run stalls are detected
   by the stall predicate (a query cannot join gate to run phase).
+- **RFC-011.OUT3 (2026-07-02, field findings from first live use):**
+  (a) A backgrounded `flow-await` died after long idle with
+  `malformed mill response … i/o timeout` — the mill proxy enforces a read
+  deadline shorter than useful await windows (shorter `agent await` calls of
+  ~20 min survived). Follow-up options: client-side chunked re-invocation
+  under the deadline, or a mill deadline exemption for blocking ops (core
+  change, needs its own proposal). (b) A review run exited 0 with empty
+  output, so the treadle closed its gate with no findings recorded anywhere —
+  gate success does not verify contract fulfillment. Follow-up: an opt-in
+  result validation on gates (e.g. `shuttle/require-result "true"` treating a
+  blank result as a failed run) so contract-carrying runs cannot silently
+  no-op.

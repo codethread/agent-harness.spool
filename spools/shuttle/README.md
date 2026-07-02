@@ -66,6 +66,7 @@ Readiness is the only scheduling primitive: a pending run with no active `depend
 | `(note! target-id text opts)` / `strand op agent note ...` | Append an immutable closed note strand linked to `target-id` by a `notes` annotation edge. |
 | `(notes target-id opts)` / `strand op agent notes ...` | Return notes in creation order, optionally filtered by round. |
 | `(council! topic opts)` / `strand op agent council ...` | Spawn multiple member runs plus a synthesizer run sharing one council strand as memory. |
+| `(review! target-id opts)` / `strand op agent review <target-id> ...` | Spawn independent read-only reviewers. Reviewers do not see each other; each appends findings as notes on the target. Optional synthesis is off by default. |
 
 Notes carry `shuttle/note-for`, `shuttle/note`, `shuttle/at`, and optional `shuttle/note-by` / `shuttle/round` attributes.
 
@@ -91,6 +92,7 @@ Notes carry `shuttle/note-for`, `shuttle/note`, `shuttle/at`, and optional `shut
 | `shuttle/note-for` | Target strand id for a note strand. |
 | `shuttle/note`, `shuttle/note-by`, `shuttle/round`, `shuttle/at` | Note payload and ordering metadata. |
 | `shuttle/council`, `shuttle/topic`, `shuttle/members`, `shuttle/rounds`, `shuttle/role` | Council orchestration metadata. |
+| `shuttle/review-target`, `shuttle/review-focus`, `shuttle/review-synthesis` | Review fan-out metadata; findings remain note strands on the target. |
 
 Run parents are connected to children with `parent-of` edges. Notes use the undeclared annotation relation `notes`.
 

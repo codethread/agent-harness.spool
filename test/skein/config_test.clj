@@ -4,7 +4,7 @@
   skein.spools.devflow."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [skein.db-test :as db-test]
             [skein.runtime.alpha :as runtime-alpha]
             [skein.weaver.api :as api]
@@ -91,7 +91,11 @@
                    "devflow-status" "workflow-runs" "devflow-conventions"
                    "agent-delegate"]]
     (is (some #(= op-name (:name %)) (api/ops rt))))
-  (is (some #(= "agent-plan" (:name %)) (api/patterns rt))))
+  (is (some #(= "agent-plan" (:name %)) (api/patterns rt)))
+  (is (some #(= "delegate-pipeline" (:name %)) (api/patterns rt)))
+  ;; agent review must consume the one authoritative policy text by default
+  (is (= (var-get (requiring-resolve 'config/delegation-policy-text))
+         @@(requiring-resolve 'skein.spools.shuttle/default-review-contract))))
 
 (deftest agent-plan-weave-creates-plan-and-task-dag
   (with-config-runtime
@@ -103,6 +107,8 @@
                    :tasks [{:key "impl"
                             :title "Implement it"
                             :owner "agent-a"
+                            :harness "build"
+                            :cwd "/tmp/work"
                             :validation ["clojure -M:test"]}
                            {:key "review"
                             :kind "review"
@@ -121,6 +127,8 @@
         (is (= #{(:id (by-key "impl")) (:id (by-key "review"))}
                (set (map :to_strand_id children))))
         (is (= true (get-in (by-key "review") [:attributes :hitl])))
+        (is (= "build" (get-in (by-key "impl") [:attributes :harness])))
+        (is (= "/tmp/work" (get-in (by-key "impl") [:attributes :cwd])))
         ;; review depends on impl, so only impl is ready
         (is (= ["Implement it"] (mapv :title ready)))
         ;; current-dags stays self-contained: a blocker outside the plan DAG
@@ -189,9 +197,57 @@
             run (op! "agent-delegate" [(:id task) "--prompt" "Use only this prompt." "--max-attempts" "5"])
             attrs (:attributes (api/show rt (:id run)))]
         (is (= 5 (get attrs :shuttle/max-attempts))))
+      (let [task (api/add rt {:title "Attr-routed task"
+                              :attributes {:body "Use attrs"
+                                           :harness "build"
+                                           :cwd "/tmp/attr-work"
+                                           :max-attempts 2}})
+            run (op! "agent-delegate" [(:id task)])
+            attrs (:attributes (api/show rt (:id run)))]
+        (is (= "build" (get attrs :shuttle/harness)))
+        (is (= "/tmp/attr-work" (get attrs :shuttle/cwd)))
+        (is (= 2 (get attrs :shuttle/max-attempts))))
       (let [task (api/add rt {:title "Bad attempts" :attributes {:body "Try"}})]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be an integer"
                               (op! "agent-delegate" [(:id task) "--max-attempts" "nope"])))))))
+
+(deftest delegate-pipeline-weave-creates-chain-loop-gates
+  (with-config-runtime
+    (fn [rt]
+      (api/weave! rt :delegate-pipeline
+                  {:run_id "pipe-test"
+                   :harness "pi-main"
+                   :accept true
+                   :tasks [{:id "a" :title "Do A" :body "A body"}
+                           {:id "b" :title "Do B"}]})
+      (let [strands (api/list rt)
+            by-task (into {} (keep (fn [s]
+                                     (when-let [task (or (get-in s [:attributes :delegate-pipeline/task])
+                                                         (get-in s [:attributes "delegate-pipeline/task"]))]
+                                       [task s])) strands))
+            attr (fn [s k]
+                   (or (get-in s [:attributes k])
+                       (get-in s [:attributes (name k)])))]
+        (is (= #{"a" "b"} (set (keys by-task))))
+        (is (str/includes? (attr (by-task "a") :shuttle/prompt)
+                           "Repo delegated-agent contract"))
+        (is (= "pi-main" (attr (by-task "b") :shuttle/harness))))))
+  (testing "acceptance checkpoint is optional and task max-attempts pass through"
+    (with-config-runtime
+      (fn [rt]
+        (api/weave! rt :delegate-pipeline
+                    {:run_id "pipe-no-accept"
+                     :tasks [{:id "a" :title "Do A" :harness "pi-main" :max-attempts 4}]})
+        (let [strands (api/list rt)
+              task (first (filter #(= "a" (or (get-in % [:attributes :delegate-pipeline/task])
+                                               (get-in % [:attributes "delegate-pipeline/task"])))
+                                  strands))]
+          (is (some? task))
+          (is (= 4 (or (get-in task [:attributes :shuttle/max-attempts])
+                       (get-in task [:attributes "shuttle/max-attempts"]))))
+          (is (not-any? #(= "checkpoint" (or (get-in % [:attributes :workflow/role])
+                                             (get-in % [:attributes "workflow/role"])))
+                        strands)))))))
 
 (deftest devflow-ops-drive-intake-into-proposal
   (with-config-runtime

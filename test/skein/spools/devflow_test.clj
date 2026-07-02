@@ -146,7 +146,8 @@
                    :tasks [{:id "a" :title "Do A" :body "Body A"}
                            {:id "b" :title "Do B" :harness "pi-alt"}]
                    :delegate-harness "pi-main"
-                   :delegate-cwd "/tmp/widgets"})
+                   :delegate-cwd "/tmp/widgets"
+                   :delegate-preamble "Policy text"})
                  {:feature "widgets"})
         by-local-id (into {} (map (juxt :ref identity)) (:strands payload))]
     (is (= {"workflow/gate" "subagent"
@@ -155,7 +156,7 @@
             "shuttle/cwd" "/tmp/widgets"}
            (select-keys (get-in by-local-id [:task-a :attributes])
                         ["workflow/gate" "devflow/task" "shuttle/harness" "shuttle/cwd"])))
-    (is (= "Devflow AFK task for widgets: Do A\n\nBody A"
+    (is (= "Policy text\n\nDevflow AFK task for widgets: Do A\n\nBody A"
            (get-in by-local-id [:task-a :attributes "shuttle/prompt"])))
     (is (= "pi-alt"
            (get-in by-local-id [:task-b :attributes "shuttle/harness"])))))
