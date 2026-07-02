@@ -135,38 +135,39 @@ Driving example with one revise round:
 ```clojure
 (require '[skein.spools.devflow :as devflow])
 
-;; feature name is the run-id
+;; feature name is the run-id; step-view's :id is the generated strand id,
+;; a checkpoint's stable definition name arrives as the :checkpoint string
 (devflow/start! "search-filters")
-;; => [{:id :create-or-confirm-worktree :kind "checkpoint"
+;; => [{:kind "checkpoint" :checkpoint "create-or-confirm-worktree"
 ;;      :choices ["created-worktree" "already-in-worktree" "abort"] ...}]
 
 ;; terminal choice — stays in the intake molecule and advances to capture-brief
 (devflow/choose! "search-filters" :created-worktree {})
-;; => [{:id :capture-brief ...}]
+;; => [{:title "Capture user brief for search-filters" :artifact "brief" ...}]
 
 (devflow/complete! "search-filters")
-;; => [{:id :discuss-scope :kind "checkpoint"
+;; => [{:kind "checkpoint" :checkpoint "discuss-scope"
 ;;      :choices ["proposal-ready" "needs-more-brief"] ...}]
 
 ;; scope is clear — route to the proposal stage (fresh molecule, same feature)
 (devflow/choose! "search-filters" :proposal-ready {})
-;; => [{:id :inspect-context ...}]
+;; => [{:action-ref "devflow.proposal.orient" ...}]
 
 ;; complete inspect-context, write-proposal, and the agent-review call steps
 ;; until the sign-off checkpoint is ready
-;; ... => [{:id :human-signoff-proposal :kind "checkpoint"
+;; ... => [{:kind "checkpoint" :checkpoint "human-signoff-proposal"
 ;;          :choices ["approved" "revise" "abort"] ...}]
 
 ;; revise: closes this proposal round and pours a fresh one; :inspect-context
 ;; is condition-skipped, so the round is ready at :write-proposal
 (devflow/choose! "search-filters" :revise {})
-;; => [{:id :write-proposal ...}]
+;; => [{:artifact "proposal.md" :skills "devflow" ...}]
 
-;; ... re-run write-proposal + review, reach :human-signoff-proposal again ...
+;; ... re-run write-proposal + review, reach human-signoff-proposal again ...
 
 ;; approve: route to the spec/plan stage
 (devflow/choose! "search-filters" :approved {})
-;; => [{:id :write-spec-deltas ...}]
+;; => [{:artifact "specs/*.delta.md" :skills "devflow" ...}]
 ```
 
 ## 5. Registries
@@ -201,7 +202,7 @@ molecule; the rest sit on individual step/checkpoint strands.
 | `workflow/decision-point` | Freeform label for what the checkpoint decides (`"worktree-ready"`, `"scope-ready"`, `"proposal-signed-off"`, `"choose-tasks-or-implementation"`, `"plan-signed-off"`, `"tasks-signed-off"`, `"implementation-accepted"`). | Each checkpoint. |
 | `workflow/action-ref` | Pointer to the action/skill an agent should invoke (`"devflow.worktree.ensure"`, `"devflow.proposal.orient"`, `"devflow.tasks.run-afk-loop"`, `"devflow.implementation.direct"`, `"devflow.implementation.validate"`, `"devflow.abort.record"`). Surfaced by `step-view`. | Steps/checkpoints that hand off to a named action. |
 | `workflow/instruction` | Freeform instruction text surfaced in `step-view`. | Steps/checkpoints needing explicit guidance. |
-| `skills` | Skill/tool hint (`"devflow"`), surfaced in `step-view`. | Artifact-writing steps. |
+| `skills` | Skill/tool hint (`"devflow"`), surfaced in `step-view`. | The four `write-*` artifact steps (`:capture-brief` produces `"brief"` without it). |
 
 The intake root additionally carries `devflow/worktree-check`
 (`"required"` or `"already-in-worktree-ok"`), seeded from the `start!`

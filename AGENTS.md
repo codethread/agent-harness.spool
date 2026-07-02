@@ -86,7 +86,7 @@ For non-interactive trusted forms:
 printf '@skein.weaver.runtime/current-runtime\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
-For workspace spool workspace workflows, use `spools.edn`, privileged `skein.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
+For spool workspace workflows, use `spools.edn`, privileged `skein.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
 
 ## Validation and smoke testing
 

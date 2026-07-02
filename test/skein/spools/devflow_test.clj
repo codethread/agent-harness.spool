@@ -3,7 +3,7 @@
   decision-point checkpoints, revision loops, and the small operational
   loop layered over skein.spools.workflow runs."
   (:require [clojure.test :refer [deftest is]]
-            [skein.spools.devflow :as devflow-lib]
+            [skein.spools.devflow :as devflow]
             [skein.spools.test-support :refer [with-runtime]]
             [skein.spools.workflow :as workflow]))
 
@@ -11,7 +11,7 @@
   (with-runtime
     (fn [_ _]
       (workflow/start! "prop-run"
-                       (devflow-lib/proposal-workflow {:feature "widgets"})
+                       (devflow/proposal-workflow {:feature "widgets"})
                        {:feature "widgets"}
                        {:family "devflow"
                         :definition 'skein.spools.devflow/proposal-workflow
@@ -43,7 +43,7 @@
   (with-runtime
     (fn [_ _]
       (workflow/start! "prop-input"
-                       (devflow-lib/proposal-workflow {:feature "widgets"})
+                       (devflow/proposal-workflow {:feature "widgets"})
                        {:feature "widgets"}
                        {:family "devflow"
                         :definition 'skein.spools.devflow/proposal-workflow
@@ -58,12 +58,12 @@
 (deftest devflow-intake-revision-preserves-start-opts
   (with-runtime
     (fn [_ _]
-      (devflow-lib/start! "intake-loop" {:worktree-check :already-in-worktree-ok})
-      (devflow-lib/choose! "intake-loop" :already-in-worktree)
-      (devflow-lib/complete! "intake-loop")
+      (devflow/start! "intake-loop" {:worktree-check :already-in-worktree-ok})
+      (devflow/choose! "intake-loop" :already-in-worktree)
+      (devflow/complete! "intake-loop")
       ;; the revision round skips the worktree checkpoint and resumes at capture-brief
       (is (= "Capture user brief for intake-loop"
-             (:title (first (devflow-lib/choose! "intake-loop" :needs-more-brief)))))
+             (:title (first (devflow/choose! "intake-loop" :needs-more-brief)))))
       ;; the start opt survived the loop: the fresh intake root still records it
       (is (= "already-in-worktree-ok"
              (get-in (workflow/current-root "intake-loop")
@@ -72,9 +72,9 @@
 (deftest devflow-spool-composes-decision-point-workflows
   (with-runtime
     (fn [_ _]
-      (let [intake (devflow-lib/intake-workflow {:worktree-check :already-in-worktree-ok})
-            proposal (devflow-lib/proposal-workflow {})
-            route (devflow-lib/route-after-plan-workflow {})
+      (let [intake (devflow/intake-workflow {:worktree-check :already-in-worktree-ok})
+            proposal (devflow/proposal-workflow {})
+            route (devflow/route-after-plan-workflow {})
             intake-result (workflow/pour! intake {:feature "workflow-stress"})
             intake-root (first (:created intake-result))
             proposal-payload (workflow/compile proposal {:feature "workflow-stress"})
@@ -96,39 +96,39 @@
 (deftest devflow-spool-exposes-small-operational-loop
   (with-runtime
     (fn [_ _]
-      (devflow-lib/start! "workflow-loop" {:worktree-check :already-in-worktree-ok})
-      (let [first-step (devflow-lib/next-step "workflow-loop")]
+      (devflow/start! "workflow-loop" {:worktree-check :already-in-worktree-ok})
+      (let [first-step (devflow/next-step "workflow-loop")]
         (is (= "checkpoint" (:kind first-step)))
         (is (= "create-or-confirm-worktree" (:checkpoint first-step)))
         (is (= "already-in-worktree-ok"
-               (get-in (first (devflow-lib/feature-roots "workflow-loop"))
+               (get-in (first (devflow/feature-roots "workflow-loop"))
                        [:attributes :devflow/worktree-check])))
         (is (= ["created-worktree" "already-in-worktree" "abort"]
                (:choices first-step)))
         (is (= {"label" "Abort"
                 "description" "Stop the feature before any substantive work begins."
                 "next" "skein.spools.devflow/abort-workflow"}
-               (devflow-lib/choice-detail "workflow-loop" :abort)))
+               (devflow/choice-detail "workflow-loop" :abort)))
         (is (not (contains? first-step :choice-details)))
         (is (= "Capture user brief for workflow-loop"
-               (:title (first (devflow-lib/choose! "workflow-loop" :already-in-worktree)))))))))
+               (:title (first (devflow/choose! "workflow-loop" :already-in-worktree)))))))))
 
 (deftest devflow-choice-next-workflow-validates-lazily
   (with-runtime
     (fn [_ _]
-      (devflow-lib/start! "workflow-abort" {:worktree-check :required})
+      (devflow/start! "workflow-abort" {:worktree-check :required})
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required params"
-                            (devflow-lib/choose! "workflow-abort" :abort)))
+                            (devflow/choose! "workflow-abort" :abort)))
       (is (= "create-or-confirm-worktree"
-             (:checkpoint (devflow-lib/next-step "workflow-abort"))))
+             (:checkpoint (devflow/next-step "workflow-abort"))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Choice input must be a map"
-                            (devflow-lib/choose! "workflow-abort" :abort [:bad])))
+                            (devflow/choose! "workflow-abort" :abort [:bad])))
       (is (= "Record abort for workflow-abort: cancelled"
-             (:title (first (devflow-lib/choose! "workflow-abort" :abort {:reason "cancelled"}))))))))
+             (:title (first (devflow/choose! "workflow-abort" :abort {:reason "cancelled"}))))))))
 
 (deftest devflow-next-step-fails-on-multiple-active-roots
   (with-runtime
     (fn [_ _]
-      (devflow-lib/start! "workflow-duplicate-root" {:worktree-check :required})
+      (devflow/start! "workflow-duplicate-root" {:worktree-check :required})
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Active workflow run already exists"
-                            (devflow-lib/start! "workflow-duplicate-root" {:worktree-check :required}))))))
+                            (devflow/start! "workflow-duplicate-root" {:worktree-check :required}))))))

@@ -4,9 +4,7 @@
   These helpers encode the agent-facing devflow checkpoints as Skein workflow
   data. They intentionally produce ordinary workflow definitions that callers
   can inspect, compose, pour as molecules, or materialize as wisps."
-  (:require [skein.graph.alpha :as graph]
-            [skein.repl :as repl]
-            [skein.spools.workflow :as workflow]))
+  (:require [skein.spools.workflow :as workflow]))
 
 (defn- titled
   ([prefix]

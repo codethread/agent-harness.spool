@@ -286,7 +286,7 @@
               {:pr.open    {:instruction "glab mr create --fill"}
                :pr.ci.wait {:instruction "glab ci status --live"}}))
 
-(deftest workflow-pr-flow-rebinds-forge-without-lib-changes
+(deftest workflow-pr-flow-rebinds-forge-without-spool-changes
   (with-runtime
     (fn [_ _]
       ;; reference run: no bindings passed, the github reference applies
@@ -688,6 +688,20 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= [:depend-on] (:unknown (ex-data e))))
         (is (contains? (:allowed (ex-data e)) :depends-on))))))
+
+(defn- cyclic-procedure-workflow [_params]
+  (workflow/workflow "Cyclic procedure"
+                     (workflow/step :work "Do work")
+                     (workflow/call :again cyclic-procedure-workflow {} :depends-on [:work])))
+
+(deftest workflow-compile-fails-loudly-on-cyclic-procedure-call
+  ;; conditions filter steps only after procedure expansion, so a cyclic
+  ;; procedure reference can never terminate — compile must throw, not overflow
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                        #"Workflow procedure call is cyclic"
+                        (workflow/compile
+                         (workflow/workflow "Cyclic root"
+                                            (workflow/call :outer cyclic-procedure-workflow {}))))))
 
 (deftest workflow-step-view-reads-keyword-and-string-keyed-attributes
   ;; strand attributes arrive keyword-keyed in-memory but string-keyed after a

@@ -277,6 +277,19 @@
 
 (declare compile)
 
+(def ^:private ^:dynamic *procedure-path*
+  ;; Conditions filter steps only after procedure expansion, so a cyclic
+  ;; procedure reference can never terminate; re-entry must fail loudly
+  ;; (TEN-003) instead of overflowing the stack.
+  [])
+
+(defn- require-acyclic-procedure! [call-id procedure]
+  (when (some #(= % procedure) *procedure-path*)
+    (fail! "Workflow procedure call is cyclic"
+           {:call call-id
+            :procedure procedure
+            :path (mapv #(if (symbol? %) % (type %)) *procedure-path*)})))
+
 (defn- resolve-procedure [procedure]
   (cond
     (symbol? procedure) (or (requiring-resolve procedure)
@@ -303,9 +316,12 @@
 
 (defn- expand-call-step [call-step params]
   (let [call-id (normalize-ref (:id call-step) [:call :id])
+        procedure (:procedure call-step)
+        _ (require-acyclic-procedure! call-id procedure)
         params (merge params (or (:params call-step) {}))
-        workflow (procedure-workflow (:procedure call-step) params)
-        payload (compile workflow params)
+        workflow (procedure-workflow procedure params)
+        payload (binding [*procedure-path* (conj *procedure-path* procedure)]
+                  (compile workflow params))
         steps (mapv (fn [strand]
                       {:id (:ref strand)
                        :title (:title strand)

@@ -162,7 +162,7 @@ should never name the tool. Instead:
   (`"workflow/instruction"`) when building step attributes.
 
 The pull-request model in `test/skein/spools/workflow_test.clj`
-(`workflow-pr-flow-rebinds-forge-without-lib-changes`) is the reference for
+(`workflow-pr-flow-rebinds-forge-without-spool-changes`) is the reference for
 this pattern: GitHub bindings shipped as defaults, GitLab swapped in as a
 partial user override, identical definitions. A weaver-side action registry
 (resolving action-ref names over the socket for CLI-grade drivers) is a
@@ -387,9 +387,10 @@ plain string-keyed `TEXT`/JSON values on the strand's `:attributes` map.
 | `workflow/squashed-count` | Number of strands in the squashed subgraph. | `squash!`. |
 | `skills` | Freeform skill/tool hint for a step (not `workflow/`-namespaced; devflow convention, surfaced by `step-view`). | Caller-supplied `:attributes`. |
 
-Other plain (non-`workflow/`-namespaced) attributes such as `"description"`
-pass through from a step's `:description`/`:attributes` fields as-is —
-`step-strand` only adds the `workflow/role`/`workflow/phase` pair itself.
+Other plain (non-`workflow/`-namespaced) attributes pass through from a
+step's `:attributes` as-is; `step-strand` itself adds only the
+`workflow/role`/`workflow/phase` pair and lifts a step's `:description`
+field into a plain `"description"` attribute.
 
 ## 8. End-to-end example
 
@@ -470,3 +471,6 @@ revise-by-routing loop.
   contracts for `:workflow`, `:step`, `:gate`, `:checkpoint`, and `:call`,
   intended for agents to call before constructing workflow data instead of
   relying on this document alone.
+- `(skein.spools.workflow/install!)` — installation metadata: the builder and
+  runtime fns of this namespace as symbol-valued maps, for trusted
+  registration by name (mirrors devflow's registries in `devflow.md` §5).
