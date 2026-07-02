@@ -24,6 +24,16 @@ needed — `require` them from `init.clj`, an activated spool, or a live
 
 ## Approved local-root examples
 
+These live in the repo-root [`spools/`](../../../spools/) directory, **off**
+the shipped classpath, and load only through the approved-local-root flow
+(`spools.edn` → `sync!` → `use!`). The placement rule: pure graph vocabulary
+that other code builds on ships on the classpath above; a spool that
+**escalates capability** (the shuttle spawns harness processes with the
+user's authority) or exists to exercise the userland distribution path sits
+here, behind the workspace's explicit `spools.edn` consent. They also serve
+as the worked example of authoring your own spool
+([docs/skein.md](../../../docs/skein.md#authoring-your-own-spool-code)).
+
 | Spool | Contract doc | Purpose |
 |---|---|---|
 | `skein.spools.shuttle` | [spools/shuttle/README.md](../../../spools/shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
