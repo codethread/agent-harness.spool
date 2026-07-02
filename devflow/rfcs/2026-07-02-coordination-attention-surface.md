@@ -234,3 +234,10 @@ strand op agent logs <run-id> --tail 80
   result validation on gates (e.g. `shuttle/require-result "true"` treating a
   blank result as a failed run) so contract-carrying runs cannot silently
   no-op.
+- **RFC-011.OUT4 (2026-07-02, follow-up):** There is still no single
+  high-level view of a running pipeline — the coordinator composes
+  `run-history` + `next-steps` + `agent ps --for` + `stalled-gates` by hand.
+  Well-shaped gap: a `flow-status <run-id>` op joining run history, the ready
+  frontier, delegated-run phases, and stall state into one payload (pure
+  reads over existing surfaces), with any renderer (mermaid gate-chain, HTML)
+  as userland on top. Tracked as a task strand in the canonical workspace.
