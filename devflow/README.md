@@ -16,7 +16,6 @@ Root specs are canonical for shipped behavior:
 ## Active features
 
 - `library-author-testing-support` — proposed library-author testing helpers and weaver storage support.
-- `shuttle-spool` — proposed userland spool spawning agents in user-chosen harnesses (Claude Code, `pi`) from agent-run strands, with crash-respawn recovery and append-only run memory.
 
 ## Archived features
 
@@ -48,3 +47,4 @@ Archived feature folders preserve historical planning context. Current shipped c
 - `26-07-01__cli-definition-parity` — shipped read-only CLI/socket query introspection (`query list`/`query explain`), `skein.repl/query-explain`, and explicit query/pattern discovery plus weave/batch framing.
 - `26-07-02__workflow-engine-review` — shipped the `skein.spools.workflow` engine (plain-data definitions, loop-by-routing, gates, checkpoints, forge-agnostic step bindings) and the `skein.spools.devflow` lifecycle spool built on it; folder holds the review findings and step-bindings plan records.
 - `26-07-02__workflow-ergonomics` — shipped workflow/devflow ergonomics: run mutation result maps, choice input declarations, stage-aware ready views, `advance!`, procedure join auto-close, named route/revise support, describe/history/archive helpers, and repo-local `.skein` ops/query guidance.
+- `26-07-02__shuttle-spool` — shipped approved-local-root Shuttle spool for readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`.

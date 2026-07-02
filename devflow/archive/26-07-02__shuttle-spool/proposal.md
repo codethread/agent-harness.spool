@@ -1,7 +1,8 @@
 # Shuttle Spool Proposal
 
 **Document ID:** `SHU-PROP-001`
-**Last Updated:** 2026-07-01
+**Status:** Shipped
+**Last Updated:** 2026-07-02
 **Related RFCs:** None
 **Related root specs:** [Weaver Runtime](../../specs/daemon-runtime.md), [Strand Model](../../specs/strand-model.md), [CLI Surface](../../specs/cli.md), [REPL API](../../specs/repl-api.md)
 
@@ -55,3 +56,17 @@ This is also the next deep-module stress test. The workflow spool proved the str
 - **SHU-PROP-001.Q3:** Where does the spool live: a directory in this repo consumed via `spools.edn` local roots (like the workflow worktree's approach), or a separate repo under `~/dev/projects`? Related: whether `skein.spools.ephemeral` should move out alongside it.
 - **SHU-PROP-001.Q4:** Memory shape details: one memory strand per entry versus a per-run journal strand, and the annotation edge relation name — to be fixed in the plan after prototyping retrieval ergonomics.
 - **SHU-PROP-001.Q5:** Does v1 need any spawn throttle knob (for example max concurrent runs per workspace), or is an unbounded ready set acceptable until real usage says otherwise?
+
+## SHU-PROP-001.P6 Shipped outcome
+
+Shipped in `3e3e8b1 feat: add shuttle agent spool`.
+
+- The shuttle lives as an approved-local-root spool under `spools/shuttle`, activated through `spools.edn`, `skein.runtime.alpha/sync!`, and `runtime/use!`.
+- The v1 public surface is the `skein.spools.shuttle` namespace plus `strand op agent`, whose in-band `about` response is the agent-facing manual.
+- Runs are ordinary strands with `shuttle/*` attributes. Pending runs spawn from readiness, successful runs close with `shuttle/result`, failed/exhausted runs stay active and block dependents loudly.
+- Default harnesses include `claude`, `pi`, and `sh`; the `sh` harness is for deterministic tests and plumbing.
+- Memory shipped as one closed note strand per entry, linked by a `notes` annotation edge and `shuttle/note-for` attributes.
+- Crash recovery shipped with bounded `shuttle/max-attempts` and pid start-instant verification before killing stale processes.
+- No spawn throttle shipped; fan-out remains the ready set until real usage requires a userland throttle knob.
+- Core runtime changes were limited to enabling primitives: SQLite write-lock waiting, concurrent JSON socket connection handling, long `op` deadlines, and namespaced JSON attribute key preservation.
+- Deferred/cut scope: interactive PTY/tmux launchers, live output streaming, remote execution, resource quotas, and session continuation on respawn.

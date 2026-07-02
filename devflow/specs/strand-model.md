@@ -2,7 +2,7 @@
 
 **Document ID:** `SPEC-001`
 **Status:** Implemented
-**Last Updated:** 2026-06-28
+**Last Updated:** 2026-07-02
 **Code:** `src/skein/db.clj`
 
 ## SPEC-001.P1 Purpose
@@ -31,6 +31,8 @@ Burning a strand explicitly deletes the strand and all incident edges. Burn oper
 ## SPEC-001.P4 Attributes
 
 Attributes are userland strand fields such as priority, owner, estimates, due dates, external references, categories, or outcomes. They are not core lifecycle metadata. Attribute values must encode to a JSON object; omitted or nil attributes normalize to `{}`.
+
+Clojure keyword and symbol attribute keys serialize to their full `namespace/name` text when a namespace is present, and JSON attribute reads keywordize object keys. Namespaced userland vocabularies such as `workflow/*` and `shuttle/*` therefore round-trip without collapsing distinct namespaces onto the same local name.
 
 ## SPEC-001.P5 Edges
 

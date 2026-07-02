@@ -2,7 +2,7 @@
 
 **Document ID:** `SPEC-004`
 **Status:** Implemented
-**Last Updated:** 2026-07-01
+**Last Updated:** 2026-07-02
 **Related RFCs:** [RFC-002 Task Query DSL](../rfcs/2026-06-24-task-query-dsl.md), [RFC-003 Fast JSON Socket CLI](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-fast-json-socket-cli.md), [RFC-004 Go CLI Migration](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-go-cli-migration.md)
 **Code:** `src/skein/weaver`, `src/skein/client.clj`, `cli/`
 
@@ -20,6 +20,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C5:** Runtime state for a selected workspace lives in the explicit selected state dir supplied at weaver startup, and weaver-owned data lives in the explicit selected data dir supplied at weaver startup. Mill derives those dirs from the canonical selected config identity, so linked worktrees that share the default workspace also share runtime/data/metadata identity.
 - **SPEC-004.C6:** A selected workspace is a trusted config workspace only; config files load from that directory while runtime state and data may live in independent XDG dirs selected by mill. Mill owns Skein source checkout resolution for launching the weaver and any thin nREPL attach client used by `weaver repl`; the weaver receives explicit `--workspace`, `--state-dir`, `--data-dir`, and optional `--name` values and does not read source from `config.json`.
 - **SPEC-004.C7:** The weaver owns storage selection. By default it uses `skein.sqlite` under the selected data dir. Public clients do not choose storage paths.
+- **SPEC-004.C7a:** Weaver-owned SQLite access is configured for concurrent in-process writers from sockets, event handlers, and spool worker threads to wait briefly on write-lock contention rather than fail immediately. Mutating transactions acquire write intent at transaction start so lock waiting happens at a predictable boundary.
 - **SPEC-004.C8:** A selected workspace may have at most one running weaver. Starting another weaver for the same selected workspace fails loudly unless stale socket/metadata can be proven dead and cleaned.
 - **SPEC-004.C9:** Multi-weaver use is explicit workspace selection: different selected workspaces create separate weaver/socket/metadata/data/init workspaces. Explicit `--workspace` is the intended isolation mechanism for Skein development, tests, and worktree-local experiments. Public request payloads do not carry cwd, repo metadata, storage paths, or source checkout paths as workspace identity.
 
@@ -51,6 +52,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 
 - **SPEC-004.C22:** The public Go CLI uses a local JSON Unix domain socket advertised in Go-readable runtime metadata.
 - **SPEC-004.C23:** JSON socket requests are one request per connection and include protocol version, request id, weaver id, operation name, operation arguments, and an empty options object reserved for future protocol use.
+- **SPEC-004.C23a:** The JSON socket accept loop may serve multiple client connections concurrently. A long-running trusted operation on one connection must not starve unrelated status, stop, or graph requests on other connections.
 - **SPEC-004.C24:** JSON socket responses include protocol version, request id, success flag, result on success, and a structured error envelope on failure. Error types distinguish domain, protocol, and transport failures.
 - **SPEC-004.C25:** The JSON transport dispatches to weaver semantic operations rather than duplicating SQL or query logic in transport handlers.
 - **SPEC-004.C26:** The JSON socket operation allowlist is limited to public CLI behavior: `add`, `update`, `supersede`, `show`, `burn`, `list`, `ready`, `list-query`, `ready-query`, `weave`, `query-list`, `query-explain`, `pattern-list`, `pattern-explain`, `op`, `subgraph`, `status`, and `stop`. Storage initialization is a weaver startup responsibility, not a public JSON socket operation.
@@ -110,7 +112,7 @@ The weaver runtime is the long-lived local Clojure process that owns strand stor
 - **SPEC-004.C62:** Pattern explanation returns serializable guidance containing the pattern name, optional doc string, function symbol string, input spec string, printable spec form, and expanded schema details when available. This is caller guidance; invocation-time spec validation remains authoritative.
 - **SPEC-004.C63:** Pattern registry contents are weaver-lifetime runtime state and are not durable across restarts. `skein.runtime.alpha/reload!` clears pattern state before loading selected config again.
 - **SPEC-004.C63a:** CLI operation registry entries are named by simple unqualified names and point to an optional non-blank doc string and fully qualified Clojure function symbol resolvable in the weaver JVM. Duplicate registration replaces the prior entry for reload workflows.
-- **SPEC-004.C63b:** CLI operation invocation resolves the registered function symbol and calls it with one context map containing `:op/name` and raw string vector `:op/argv`. The function return value is transported as JSON-compatible data to `strand op` callers.
+- **SPEC-004.C63b:** CLI operation invocation resolves the registered function symbol and calls it with one context map containing `:op/name` and raw string vector `:op/argv`. The function return value is transported as JSON-compatible data to `strand op` callers. Operation handlers are trusted userland code and may intentionally block for workflow waits, agent awaits, or other long-running local orchestration.
 - **SPEC-004.C63c:** The weaver installs a built-in `help` CLI operation before user config loads. `skein.runtime.alpha/reload!` clears operation state, reinstalls built-in operations, and then reloads selected config.
 
 ## SPEC-004.P10a Event helpers

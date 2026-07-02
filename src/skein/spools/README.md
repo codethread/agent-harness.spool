@@ -22,6 +22,12 @@ needed — `require` them from `init.clj`, an activated spool, or a live
 | `skein.spools.devflow` | [devflow.md](./devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
 | `skein.spools.ephemeral` | [ephemeral.md](./ephemeral.md) | Small helper for temporary, parent-owned strands marked and burned via a userland attribute. |
 
+## Approved local-root examples
+
+| Spool | Contract doc | Purpose |
+|---|---|---|
+| `skein.spools.shuttle` | [spools/shuttle/README.md](../../../spools/shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
+
 ## Reference examples
 
 - Each contract doc ends with worked examples (`workflow.md` §8,
