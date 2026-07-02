@@ -578,13 +578,13 @@
   [_ctx]
   {:operation "devflow-conventions"
    :spools [{:namespace "skein.spools.workflow"
-             :doc "src/skein/spools/workflow.md"
+             :doc "spools/workflow.md"
              :purpose "Workflow engine: definitions compiled to strand molecules with checkpoints, routing, and gates."}
             {:namespace "skein.spools.devflow"
-             :doc "src/skein/spools/devflow.md"
+             :doc "spools/devflow.md"
              :purpose "Feature lifecycle (intake -> proposal -> spec-plan -> tasks/implementation) keyed by feature name."}
             {:namespace "skein.spools.ephemeral"
-             :doc "src/skein/spools/ephemeral.md"
+             :doc "spools/ephemeral.md"
              :purpose "Temporary parent-owned strands burned via a userland attribute."}]
    :ops [{:name "devflow-start" :usage "strand op devflow-start <feature> [required|already-in-worktree-ok]"}
          {:name "devflow-next" :usage "strand op devflow-next <feature>"}

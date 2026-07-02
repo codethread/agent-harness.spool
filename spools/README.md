@@ -2,7 +2,7 @@
 
 Spools are trusted, authorable Clojure loaded into the weaver. The
 `skein.spools.*` namespace family is reserved for exactly this kind of code
-(see the [REPL API spec](../../../devflow/specs/repl-api.md)); the spools in
+(see the [REPL API spec](../devflow/specs/repl-api.md)); the spools in
 this directory ship with Skein as working references — use them directly,
 copy them as starting points, or study them to author your own.
 
@@ -24,7 +24,7 @@ needed — `require` them from `init.clj`, an activated spool, or a live
 
 ## Approved local-root examples
 
-These live in the repo-root [`spools/`](../../../spools/) directory, **off**
+These live beside this index in the repo-root [`spools/`](./) directory, **off**
 the shipped classpath, and load only through the approved-local-root flow
 (`spools.edn` → `sync!` → `use!`). The placement rule: pure graph vocabulary
 that other code builds on ships on the classpath above; a spool that
@@ -32,12 +32,12 @@ that other code builds on ships on the classpath above; a spool that
 user's authority) or exists to exercise the userland distribution path sits
 here, behind the workspace's explicit `spools.edn` consent. They also serve
 as the worked example of authoring your own spool
-([docs/skein.md](../../../docs/skein.md#authoring-your-own-spool-code)).
+([docs/skein.md](../docs/skein.md#authoring-your-own-spool-code)).
 
 | Spool | Contract doc | Purpose |
 |---|---|---|
-| `skein.spools.shuttle` | [spools/shuttle/README.md](../../../spools/shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
-| `skein.spools.treadle` | [spools/shuttle/treadle.md](../../../spools/shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
+| `skein.spools.shuttle` | [shuttle/README.md](./shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
+| `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
 
 ## Reference examples
 
@@ -45,10 +45,10 @@ as the worked example of authoring your own spool
   `devflow.md` §4).
 - The test suites drive every documented behavior against a real weaver
   runtime and double as executable examples:
-  [`test/skein/spools/workflow_test.clj`](../../../test/skein/spools/workflow_test.clj),
-  [`test/skein/spools/devflow_test.clj`](../../../test/skein/spools/devflow_test.clj),
+  [`test/skein/spools/workflow_test.clj`](../test/skein/spools/workflow_test.clj),
+  [`test/skein/spools/devflow_test.clj`](../test/skein/spools/devflow_test.clj),
   and the ephemeral cases in
-  [`test/skein/spools_test.clj`](../../../test/skein/spools_test.clj).
+  [`test/skein/spools_test.clj`](../test/skein/spools_test.clj).
 
 ## Using and extending
 
@@ -62,4 +62,4 @@ as the worked example of authoring your own spool
 - Every spool exposes `install!` metadata (fns as symbol maps) for trusted
   registration by name.
 - To author and load your own spool from a workspace-local root, follow
-  [Authoring your own spool code](../../../docs/skein.md#authoring-your-own-spool-code).
+  [Authoring your own spool code](../docs/skein.md#authoring-your-own-spool-code).

@@ -96,6 +96,6 @@ The spool also registers `stalled-gates` and `blocked-deliveries` named queries 
 
 ## See also
 
-- [`skein.spools.workflow`](../../src/skein/spools/workflow.md) — workflow gates and runtime API.
+- [`skein.spools.workflow`](../workflow.md) — workflow gates and runtime API.
 - [`skein.spools.shuttle`](./README.md) — shuttle run lifecycle and harness registry.
 - [`test/skein/treadle_test.clj`](../../test/skein/treadle_test.clj) — executable contract tests.

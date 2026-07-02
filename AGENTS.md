@@ -13,11 +13,11 @@ Canonical shipped contracts live in root specs:
 - [REPL API](./devflow/specs/repl-api.md)
 - [Weaver Runtime](./devflow/specs/daemon-runtime.md)
 
-Userland reference spools are indexed in [`src/skein/spools/`](./src/skein/spools/README.md), each with a contract doc beside its code:
+Userland reference spools are indexed in [`spools/`](./spools/README.md), with shipped sources under `spools/src` and contract docs beside them:
 
-- [Workflow Engine](./src/skein/spools/workflow.md)
-- [Devflow Lifecycle](./src/skein/spools/devflow.md)
-- [Ephemeral Strands](./src/skein/spools/ephemeral.md)
+- [Workflow Engine](./spools/workflow.md)
+- [Devflow Lifecycle](./spools/devflow.md)
+- [Ephemeral Strands](./spools/ephemeral.md)
 - [Agent Shuttle](./spools/shuttle/README.md) (approved local-root spool)
 - [Treadle Gate Bridge](./spools/shuttle/treadle.md) (approved local-root spool)
 

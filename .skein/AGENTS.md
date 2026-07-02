@@ -25,9 +25,9 @@ and `skein.spools.devflow` from the weaver classpath, plus
   runs (manual: `strand op agent about`). Workflow `:subagent` gates are
   fulfilled automatically by the treadle (`spools/shuttle/treadle.md`).
 
-Contracts for the underlying spools live beside their code:
-[`src/skein/spools/workflow.md`](../src/skein/spools/workflow.md) (engine) and
-[`src/skein/spools/devflow.md`](../src/skein/spools/devflow.md) (lifecycle).
+Contracts for the underlying spools live in the repo-root spools area:
+[`spools/workflow.md`](../spools/workflow.md) (engine) and
+[`spools/devflow.md`](../spools/devflow.md) (lifecycle).
 Run `strand op devflow-conventions` for the live installed surface.
 
 ## Driving the devflow lifecycle
