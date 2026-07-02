@@ -46,7 +46,14 @@
   [target]
   (.mkdirs (io/file target))
   (doseq [name ["init.clj" "config.clj" "spools.edn"]]
-    (io/copy (io/file ".skein" name) (io/file target name))))
+    (io/copy (io/file ".skein" name) (io/file target name)))
+  ;; The shipped spools.edn approves spools/shuttle relative to the config dir,
+  ;; which does not resolve from a copy. Rewrite it to the repo's canonical
+  ;; spool root so the whole test JVM syncs one root for the lib (tools.deps
+  ;; add-libs state is JVM-global; see skein.test-runner's ordering note).
+  (spit (io/file target "spools.edn")
+        (pr-str {:spools {'skein.spools/shuttle
+                          {:local/root (.getCanonicalPath (io/file "spools/shuttle"))}}})))
 
 (defn- with-startup-config-runtime
   "Run f with an isolated runtime started through copied .skein/init.clj."
@@ -218,10 +225,20 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot complete a checkpoint"
                               (op! "devflow-complete" ["checkpoint-feature"])))))))
 
+(defn- assert-treadle-installed-after-config
+  "Assert treadle loaded and declares :config in :after — its install! runs an
+  initial gate scan, so config.clj's harness aliases must already exist or a
+  durable ready gate would be stamped treadle/error on every cold start."
+  [rt]
+  (let [use (get (api/uses rt) :skein/spools-treadle)]
+    (is (= :loaded (:status use)))
+    (is (some #{:config} (get-in use [:opts :after])))))
+
 (deftest repo-local-startup-and-reload-preserve-registrations
   (with-startup-config-runtime
     (fn [rt]
       (assert-config-registrations rt)
+      (assert-treadle-installed-after-config rt)
       (op! "devflow-start" ["startup-feature" "already-in-worktree-ok"])
       (is (= :loaded (:status (runtime-alpha/reload!))))
       (assert-config-registrations rt)

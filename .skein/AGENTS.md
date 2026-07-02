@@ -2,8 +2,9 @@ Always read `docs/skein.md` from the repository root before changing this Skein 
 
 This repo's `.skein` world is thin glue over the shipped reference spools.
 `.skein/init.clj` activates `skein.spools.ephemeral`, `skein.spools.workflow`,
-and `skein.spools.devflow` from the weaver classpath, then loads
-`.skein/config.clj`, which registers:
+and `skein.spools.devflow` from the weaver classpath, plus
+`skein.spools.shuttle` and `skein.spools.treadle` from the approved
+`spools/shuttle` local root, then loads `.skein/config.clj`, which registers:
 
 - ops: `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`,
   `devflow-complete`, `devflow-advance`, `devflow-describe`,
@@ -12,6 +13,10 @@ and `skein.spools.devflow` from the weaver classpath, then loads
 - queries: `work`, `feature-active`, `feature-work`, `feature-owner-work`,
   `feature-run`, `workflow-runs`, `devflow-runs`
 - patterns: `agent-plan`
+- shuttle harness aliases: `pi-main` (delegation default; `strand op agent
+  harnesses` lists all). Delegate agent work with `strand op agent spawn`
+  (manual: `strand op agent about`); workflow `:subagent` gates are fulfilled
+  automatically by the treadle (`spools/shuttle/treadle.md`).
 
 Contracts for the underlying spools live beside their code:
 [`src/skein/spools/workflow.md`](../src/skein/spools/workflow.md) (engine) and

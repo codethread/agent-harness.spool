@@ -5,13 +5,15 @@
   lifecycle and `skein.spools.workflow` is the engine (both activated from
   init.clj). This config only adds CLI-facing `strand op` wrappers over the
   devflow spool commands, a few named queries, the generic `agent-plan` weave
-  pattern, and the `current-dags` graph projection."
+  pattern, the `current-dags` graph projection, and repo-local shuttle harness
+  aliases."
   (:require [clojure.data.json :as json]
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.patterns.alpha :as patterns]
             [skein.spools.devflow :as devflow]
+            [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
             [skein.weaver.api :as api]
             [skein.weaver.runtime :as runtime]))
@@ -525,11 +527,21 @@
          'devflow-runs devflow-runs-query
          'work work-query}))
 
+(defn- register-harness-aliases!
+  "Register repo-local shuttle harness aliases (weaver-lifetime state, so
+  startup config re-registers them like queries and ops)."
+  []
+  [(shuttle/defalias! :pi-main
+     {:alias-of :pi
+      :extra-args ["--agent" "main"]
+      :doc "pi main agent with scout subagents; preferred delegation harness."})])
+
 (defn install!
   "Install repo-local Skein runtime configuration."
   []
   {:installed true
    :namespace 'config
+   :harnesses (register-harness-aliases!)
    :patterns [(patterns/register-pattern!
                'agent-plan
                "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?}]}. Use body for delegated work context."

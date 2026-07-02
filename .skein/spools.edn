@@ -1,1 +1,1 @@
-{:spools {}}
+{:spools {skein.spools/shuttle {:local/root "../spools/shuttle"}}}
