@@ -139,9 +139,9 @@
         {:claude {:argv ["claude" "-p" "--output-format" "json" "--dangerously-skip-permissions"]
                   :parse :claude-json
                   :doc "Claude Code headless. Skips permission prompts so the run can drive the strand CLI; redefine with your own argv to tighten."}
-         :pi {:argv ["pi" "-p" "--mode" "json"]
-              :parse :pi-json
-              :doc "pi headless JSON mode."}
+         :pi {:argv ["pi" "-p"]
+              :parse :raw
+              :doc "pi headless; stdout carries only the final assistant message, so :raw parses cleanly. Redefine with --mode json and :parse :pi-json to also capture shuttle/session-id."}
          :sh {:argv ["sh" "-c"]
               :parse :raw
               :preamble? false
