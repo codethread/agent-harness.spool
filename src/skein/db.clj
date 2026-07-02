@@ -31,7 +31,12 @@
   ([] (datasource default-db-file))
   ([db-file]
    (io/make-parents db-file)
-   (jdbc/get-datasource {:jdbcUrl (str "jdbc:sqlite:" db-file)})))
+   ;; Concurrent writers (socket connections, event handlers, spool worker
+   ;; threads) must queue on the lock rather than fail SQLITE_BUSY. IMMEDIATE
+   ;; transactions take the write lock at BEGIN, where busy_timeout applies;
+   ;; DEFERRED transactions upgrading mid-transaction fail fast by design.
+   (jdbc/get-datasource {:jdbcUrl (str "jdbc:sqlite:" db-file
+                                       "?busy_timeout=5000&transaction_mode=IMMEDIATE")})))
 
 (defn execute!
   "Execute SQL params against ds and return unqualified lower-case map rows."

@@ -286,25 +286,35 @@
         running? (atom true)]
     (try
       (.bind server address)
-      (let [thread (Thread.
+      (let [serve-connection!
+            (fn [ch]
+              (try
+                (with-open [ch ^java.nio.channels.SocketChannel ch
+                            rdr (BufferedReader. (InputStreamReader. (Channels/newInputStream ch)))
+                            wrt (BufferedWriter. (OutputStreamWriter. (Channels/newOutputStream ch)))]
+                  (let [line (.readLine rdr)
+                        [response stop?] (if line
+                                           (handle-request @runtime-state line)
+                                           [(protocol-error nil "protocol/malformed-request" "Empty request" {}) false])]
+                    (.write wrt (json/write-str response :key-fn db/json-key))
+                    (.newLine wrt)
+                    (.flush wrt)
+                    (when stop?
+                      (future (stop-fn)))))
+                (catch ClosedChannelException _)
+                (catch Exception _)))
+            ;; each connection gets its own thread so a long-running trusted
+            ;; operation (e.g. a blocking op) cannot starve other clients —
+            ;; agent runs must be able to issue requests while their caller
+            ;; blocks awaiting them.
+            thread (Thread.
                     (fn []
                       (while @running?
                         (try
-                          (with-open [ch (.accept server)
-                                      rdr (BufferedReader. (InputStreamReader. (Channels/newInputStream ch)))
-                                      wrt (BufferedWriter. (OutputStreamWriter. (Channels/newOutputStream ch)))]
-                            (let [line (.readLine rdr)
-                                  [response stop?] (if line
-                                                     (handle-request @runtime-state line)
-                                                     [(protocol-error nil "protocol/malformed-request" "Empty request" {}) false])]
-                              ;; db/json-key keeps namespaced keyword keys
-                              ;; (:workflow/role and friends from keywordized
-                              ;; attribute reads) faithful in client JSON
-                              (.write wrt (json/write-str response :key-fn db/json-key))
-                              (.newLine wrt)
-                              (.flush wrt)
-                              (when stop?
-                                (future (stop-fn)))))
+                          (let [ch (.accept server)]
+                            (doto (Thread. #(serve-connection! ch) "skein-weaver-json-conn")
+                              (.setDaemon true)
+                              (.start)))
                           (catch ClosedChannelException _)
                           (catch Exception _))))
                     "skein-weaver-json-socket")]

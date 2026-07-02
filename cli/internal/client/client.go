@@ -136,7 +136,14 @@ func (c *SocketClient) Call(operation string, arguments map[string]any) (any, er
 		return nil, fmt.Errorf("weaver socket unreachable for state dir %s: %w", c.Config.StateDir, err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(c.RequestDeadline))
+	deadline := c.RequestDeadline
+	if operation == "op" {
+		// Registered weaver operations run arbitrary trusted code (e.g. a
+		// blocking await over agent runs); the transport must not cap them
+		// at the short protocol deadline used for core CRUD requests.
+		deadline = 30 * time.Minute
+	}
+	_ = conn.SetDeadline(time.Now().Add(deadline))
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return nil, fmt.Errorf("weaver socket write failed: %w", err)
 	}

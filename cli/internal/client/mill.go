@@ -72,7 +72,14 @@ func MillCallPayload(operation string, world MillWorldRequest, payload map[strin
 		return nil, fmt.Errorf("mill socket unreachable; start one with: mill start: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	deadline := 5 * time.Second
+	if operation == "op" {
+		// Registered weaver operations run arbitrary trusted code (e.g. a
+		// blocking await over agent runs); match the long weaver-leg deadline
+		// instead of the short protocol deadline used for core requests.
+		deadline = 30 * time.Minute
+	}
+	_ = conn.SetDeadline(time.Now().Add(deadline))
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return nil, fmt.Errorf("mill socket write failed: %w", err)
 	}

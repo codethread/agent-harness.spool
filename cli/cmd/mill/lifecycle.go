@@ -107,7 +107,9 @@ func (s *server) startWeaver(req client.MillWorldRequest) (map[string]any, error
 	done := make(chan error, 1)
 	s.children[world.ConfigDir] = &weaverChild{cmd: cmd, world: world, name: name, done: done}
 	go func() { done <- cmd.Wait() }()
-	status, err := waitForReadyStatus(world, cmd.Process.Pid, done, 15*time.Second)
+	// Weaver startup includes JVM boot plus trusted config evaluation
+	// (spool sync and module loads), which can far exceed a bare boot.
+	status, err := waitForReadyStatus(world, cmd.Process.Pid, done, 60*time.Second)
 	if err != nil {
 		terminateProcess(cmd.Process)
 		select {
