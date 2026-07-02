@@ -1313,10 +1313,20 @@
                             (api/register-pattern! rt 'bad-doc "" 'skein.weaver-test/test-pattern ::pattern-input)))
       (is (clojure.string/includes? (:spec-form (api/pattern-explain rt :dev-task))
                                     "clojure.spec.alpha/keys"))
+      (reset! delivered-events [])
+      (api/register-event-handler! rt :capture-weave #{:batch/applied}
+                                   'skein.weaver-test/capture-event {})
       (let [result (api/weave! rt :dev-task {:title "Implement weave"})]
         (is (= ["Implement weave" "Review: Implement weave"] (mapv :title (:created result))))
         (is (= #{"impl" "review"} (set (keys (:refs result)))))
-        (is (= 1 (count (db/execute! (:datasource rt) ["SELECT * FROM strand_edges"])))))
+        (is (= 1 (count (db/execute! (:datasource rt) ["SELECT * FROM strand_edges"]))))
+        ;; a weave is a batch apply: event-driven spools must see the created
+        ;; strands without waiting for an unrelated mutation
+        (let [event (do (Thread/sleep 300) (first @delivered-events))]
+          (is (= :batch/applied (:event/type event)))
+          (is (= "dev-task" (str (:pattern/name event))))
+          (is (= 2 (count (:batch/created event))))))
+      (api/unregister-event-handler! rt :capture-weave)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Pattern input failed spec validation"
                             (api/weave! rt :dev-task {})))

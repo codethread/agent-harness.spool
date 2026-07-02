@@ -1191,6 +1191,14 @@
                                             :batch/apply-before-commit
                                             (weave-batch-context req-ctx canonical-name input normalized-payload result))
                      result))]
+      ;; a weave is a create-only batch apply; without this event, event-driven
+      ;; spools (shuttle, treadle) never see pattern-created strands until an
+      ;; unrelated mutation happens to trigger their next scan
+      (enqueue-event! runtime (assoc (event-base :batch/applied)
+                                     :batch/id (str (UUID/randomUUID))
+                                     :pattern/name canonical-name
+                                     :batch/refs (:refs result)
+                                     :batch/created (:created result)))
       (select-keys result [:created :refs])))))
 
 (declare data-first-value?)
