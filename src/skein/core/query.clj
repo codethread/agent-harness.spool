@@ -1,4 +1,4 @@
-(ns skein.query
+(ns skein.core.query
   "Compile trusted EDN query definitions into SQL fragments for strand selection.
 
   Query definitions are data-shaped expressions used by the daemon and REPL query
@@ -8,7 +8,7 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.specs :as specs]))
+            [skein.core.specs :as specs]))
 
 (def ^:private field-columns
   {:id "id"

@@ -41,7 +41,7 @@ func TestInitBootstrapsConfigDirWorkspaceThroughMill(t *testing.T) {
 	if _, err := os.Stat(initPath); err != nil {
 		t.Fatalf("expected init.clj bootstrap: %v", err)
 	}
-	if got := string(mustReadFile(t, initPath)); got != "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n" {
+	if got := string(mustReadFile(t, initPath)); got != "(require '[skein.api.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n" {
 		t.Fatalf("unexpected init.clj bootstrap contents: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(cfg, ".git")); !os.IsNotExist(err) {
@@ -105,7 +105,7 @@ func TestWeaverReplStdinAttachesThroughMillMetadata(t *testing.T) {
 		t.Fatalf("weaver start failed: %v\n%s", err, out)
 	}
 	waitForStatus(t, bin, dir, runDir, &bytes.Buffer{})
-	out, err := outputStrandWithInput(bin, dir, runDir, "@skein.weaver.runtime/current-runtime\n", "weaver", "repl", "--stdin")
+	out, err := outputStrandWithInput(bin, dir, runDir, "@skein.core.weaver.runtime/current-runtime\n", "weaver", "repl", "--stdin")
 	if err != nil {
 		t.Fatalf("repl stdin failed: %v\n%s", err, out)
 	}
@@ -252,7 +252,7 @@ func TestTaskAndQueryCommandsRunOutsideCheckoutWithoutSource(t *testing.T) {
 	dir := shortTempDir(t)
 	writeClientConfig(t, dir)
 	initPath := filepath.Join(dir, "init.clj")
-	init := `(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])
+	init := `(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime])
 (api/register-query @runtime/current-runtime 'by-owner {:params [:owner] :where [:= [:attr :owner] [:param :owner]]})`
 	if err := os.WriteFile(initPath, []byte(init), 0644); err != nil {
 		t.Fatal(err)

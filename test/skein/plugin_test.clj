@@ -1,10 +1,10 @@
 (ns skein.plugin-test
   (:require [clojure.test :refer [deftest is]]
-            [skein.runtime.alpha :as runtime-alpha]
-            [skein.weaver.api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]
-            [skein.db-test :as db-test]))
+            [skein.api.runtime.alpha :as runtime-alpha]
+            [skein.api.weaver.alpha]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db-test :as db-test]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")
@@ -26,10 +26,10 @@
   (is (thrown? java.io.FileNotFoundException (require 'atom.plugin.alpha)))
   (is (thrown? java.io.FileNotFoundException (require 'atom.bootstrap.alpha)))
   (is (thrown? java.io.FileNotFoundException (require 'atom.prelude.alpha)))
-  (is (nil? (ns-resolve 'skein.client 'load-plugin)))
-  (is (nil? (ns-resolve 'skein.weaver.api 'load-plugin)))
-  (is (nil? (ns-resolve 'skein.weaver.api 'plugins)))
-  (is (nil? (ns-resolve 'skein.weaver.api 'plugin))))
+  (is (nil? (ns-resolve 'skein.core.client 'load-plugin)))
+  (is (nil? (ns-resolve 'skein.api.weaver.alpha 'load-plugin)))
+  (is (nil? (ns-resolve 'skein.api.weaver.alpha 'plugins)))
+  (is (nil? (ns-resolve 'skein.api.weaver.alpha 'plugin))))
 
 (deftest runtime-loader-state-is-the-public-path
   (with-runtime

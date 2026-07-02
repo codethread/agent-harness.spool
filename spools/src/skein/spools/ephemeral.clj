@@ -2,9 +2,9 @@
   "Userland helpers for temporary, parent-owned work strands.
 
   This namespace is intentionally authorable example code: it composes the
-  documented `skein.repl` and `skein.graph.alpha` helper surfaces and owns no
+  documented `skein.repl` and `skein.api.graph.alpha` helper surfaces and owns no
   privileged loader/config/runtime implementation."
-  (:require [skein.graph.alpha :as graph]
+  (:require [skein.api.graph.alpha :as graph]
             [skein.repl :as repl]))
 
 (defn ephemeral!

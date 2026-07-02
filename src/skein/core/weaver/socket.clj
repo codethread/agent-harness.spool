@@ -1,11 +1,11 @@
-(ns skein.weaver.socket
+(ns skein.core.weaver.socket
   "Serve the weaver JSON protocol over a Unix-domain socket."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.walk :as walk]
-            [skein.db :as db]
-            [skein.query :as query])
+            [skein.core.db :as db]
+            [skein.core.query :as query])
   (:import [java.io BufferedReader BufferedWriter InputStreamReader OutputStreamWriter]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels ClosedChannelException ServerSocketChannel]
@@ -164,7 +164,7 @@
      "nrepl" {"host" (get-in m [:endpoint :host]) "port" (get-in m [:endpoint :port])}}))
 
 (defn- api [sym]
-  (requiring-resolve (symbol "skein.weaver.api" (name sym))))
+  (requiring-resolve (symbol "skein.api.weaver.alpha" (name sym))))
 
 (defn- run-payload-hooks! [runtime req]
   (when (payload-hook-operations (get req "operation"))

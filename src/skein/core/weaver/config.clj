@@ -1,4 +1,4 @@
-(ns skein.weaver.config
+(ns skein.core.weaver.config
   "Resolve Skein weaver workspace directories from an explicit selected workspace."
   (:require [clojure.java.io :as io]))
 

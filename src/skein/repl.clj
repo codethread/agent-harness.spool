@@ -9,11 +9,11 @@
             [clojure.string :as str]
             [nrepl.cmdline]
             [nrepl.core :as nrepl]
-            [skein.client :as client]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as weaver-runtime]
-            [skein.query :as query]))
+            [skein.core.client :as client]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as weaver-runtime]
+            [skein.core.query :as query]))
 
 (def ^:private no-connection ::no-connection)
 (defonce ^:private active-config-dir (atom no-connection))

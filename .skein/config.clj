@@ -11,12 +11,12 @@
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.patterns.alpha :as patterns]
+            [skein.api.patterns.alpha :as patterns]
             [skein.spools.devflow :as devflow]
             [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]
+            [skein.api.runtime.alpha :as runtime-alpha]))
 
 ;; ---------------------------------------------------------------------------
 ;; Delegation policy and agent-plan weave patterns
@@ -319,7 +319,7 @@
   projects roots, hierarchy edges, dependency edges, and compact strand rows
   into one JSON-compatible structure for agents and humans."
   [_ctx]
-  (let [rt @runtime/current-runtime
+  (let [rt (runtime-alpha/current-runtime)
         active-by-id (active-strands-by-id rt)
         active-ids (set (keys active-by-id))
         all-active-ids (sort active-ids)
@@ -627,7 +627,7 @@
 (defn- config-dir
   "Return the active weaver config directory."
   []
-  (or (get-in @runtime/current-runtime [:metadata :config-dir])
+  (or (get-in (runtime-alpha/current-runtime) [:metadata :config-dir])
       (throw (ex-info "agent-delegate requires an active weaver runtime" {}))))
 
 (defn- repo-root-dir
@@ -745,7 +745,7 @@
                         "--max-attempts" :single "--spawned-by" :single})
         [task-id] (require-argv-range! "agent-delegate" positional 1 1 usage)
         _ (require-non-blank! :task-id task-id)
-        rt @runtime/current-runtime
+        rt (runtime-alpha/current-runtime)
         task (active-task! rt task-id)
         harness (or (get flags "--harness") (task-attr-string task :harness) "pi-main")
         cwd (or (get flags "--cwd") (task-attr-string task :cwd) (repo-root-dir))

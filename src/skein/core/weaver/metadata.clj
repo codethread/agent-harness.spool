@@ -1,4 +1,4 @@
-(ns skein.weaver.metadata
+(ns skein.core.weaver.metadata
   "Publish, read, and clean up weaver runtime metadata files."
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]

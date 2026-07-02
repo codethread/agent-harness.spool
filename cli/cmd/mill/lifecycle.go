@@ -41,7 +41,7 @@ func resolveLaunchSource(cwd string) (string, error) {
 }
 
 func weaverArgs(world config.World, name string) []string {
-	args := []string{"-M:skein", "-m", "skein.weaver.runtime", "--workspace", world.ConfigDir, "--state-dir", world.StateDir, "--data-dir", world.DataDir}
+	args := []string{"-M:skein", "-m", "skein.core.weaver.runtime", "--workspace", world.ConfigDir, "--state-dir", world.StateDir, "--data-dir", world.DataDir}
 	if name != "" {
 		args = append(args, "--name", name)
 	}

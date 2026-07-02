@@ -3,8 +3,8 @@
   explain, compile semantics (calls, conditions, loops, splicing), and the
   run-driving surface (start!/complete!/choose!, gates, checkpoints, bonds)."
   (:require [clojure.test :refer [deftest is testing]]
-            [skein.batch.alpha :as batch]
-            [skein.graph.alpha :as graph]
+            [skein.api.batch.alpha :as batch]
+            [skein.api.graph.alpha :as graph]
             [skein.spools.test-support :refer [with-runtime]]
             [skein.spools.workflow :as workflow]
             [skein.repl :as repl]))
@@ -138,7 +138,7 @@
 
 ;; binding keys ride workflow/context across routed loop rounds: map keys come
 ;; back keywordized and are written with their full ns/name form
-;; (skein.db/json-key), so keyword keys round-trip faithfully. Simple keyword
+;; (skein.core.db/json-key), so keyword keys round-trip faithfully. Simple keyword
 ;; keys stay the convention here; bind-attrs maps them onto the canonical
 ;; string attribute vocabulary.
 (def ^:private github-pr-bindings

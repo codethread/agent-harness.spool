@@ -6,9 +6,9 @@
             [skein.spools.treadle :as treadle]
             [skein.spools.workflow :as workflow]
             [skein.spools.test-support :refer [with-runtime]]
-            [skein.db :as db]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.core.db :as db]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- reset-engines! []
   (reset! @#'shuttle/in-flight {}))

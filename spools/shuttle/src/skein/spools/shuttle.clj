@@ -13,15 +13,15 @@
   `shuttle/max-attempts`. Run memory is append-only note strands linked by
   `notes` annotation edges plus `shuttle/note-for` attributes.
 
-  The whole spool composes public surfaces (`skein.weaver.api` inside the
+  The whole spool composes public surfaces (`skein.api.weaver.alpha` inside the
   weaver JVM) and owns no privileged runtime state. Low-trust CLI agents drive
   it through `strand op agent ...`; `strand op agent about` is the complete,
   harness-agnostic manual."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime])
+            [skein.api.weaver.alpha :as api]
+            [skein.api.runtime.alpha :as runtime-alpha])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.time Instant]))
 
@@ -36,9 +36,12 @@
 (defn- fail! [message data]
   (throw (ex-info message data)))
 
+(def ^:dynamic *runtime*
+  "Runtime captured for asynchronous shuttle worker threads."
+  nil)
+
 (defn- rt []
-  (or @runtime/current-runtime
-      (fail! "Shuttle requires an in-process weaver runtime" {})))
+  (or *runtime* (runtime-alpha/current-runtime)))
 
 (defn- sattr
   "Read the `shuttle/<k>` attribute from a normalized strand."
@@ -328,9 +331,10 @@
   [^Process process]
   (some-> (.info process) (.startInstant) (.orElse nil) str))
 
-(defn- launch-run! [run]
-  (let [id (:id run)
-        process-ref (atom nil)]
+(defn- launch-run! [runtime run]
+  (binding [*runtime* runtime]
+    (let [id (:id run)
+          process-ref (atom nil)]
     (try
       (let [harness (resolve-harness (sattr run "harness"))
             prompt (effective-prompt harness run)
@@ -362,7 +366,10 @@
       (catch Throwable t
         (some-> ^Process @process-ref (.destroy))
         (swap! in-flight dissoc id)
-        (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " "))))))))
+        (try
+          (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " "))))
+          (catch Throwable _
+            nil)))))))
 
 (defn- claim! [id]
   (let [[old _new] (swap-vals! in-flight (fn [m]
@@ -374,10 +381,11 @@
 (defn scan!
   "Spawn every ready pending run not already claimed. Returns claimed run ids."
   []
-  (let [ready-runs (api/ready (rt) pending-query {})
+  (let [runtime (rt)
+        ready-runs (api/ready runtime pending-query {})
         claimed (filterv (comp claim! :id) ready-runs)]
     (doseq [run claimed]
-      (doto (Thread. #(launch-run! run) (str "shuttle-run-" (:id run)))
+      (doto (Thread. #(launch-run! runtime run) (str "shuttle-run-" (:id run)))
         (.setDaemon true)
         (.start)))
     (mapv :id claimed)))

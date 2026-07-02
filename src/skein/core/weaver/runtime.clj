@@ -1,11 +1,11 @@
-(ns skein.weaver.runtime
+(ns skein.core.weaver.runtime
   "Start, stop, and supervise the in-process weaver daemon runtime."
   (:require [clojure.string :as str]
             [nrepl.server :as nrepl]
-            [skein.weaver.config :as config]
-            [skein.weaver.metadata :as metadata]
-            [skein.weaver.socket :as socket]
-            [skein.db :as db])
+            [skein.core.weaver.config :as config]
+            [skein.core.weaver.metadata :as metadata]
+            [skein.core.weaver.socket :as socket]
+            [skein.core.db :as db])
   (:import [java.lang ProcessHandle]
            [java.time Instant]
            [java.util.concurrent ArrayBlockingQueue TimeUnit]))
@@ -208,7 +208,7 @@
                runtime (assoc runtime-base :socket-runtime socket-runtime)]
            (reset! runtime-state runtime)
            (reset! current-runtime runtime)
-           ((requiring-resolve 'skein.weaver.api/register-built-in-ops!) runtime)
+           ((requiring-resolve 'skein.api.weaver.alpha/register-built-in-ops!) runtime)
            (load-startup-files! runtime world)
            (let [published-runtime (assoc runtime :metadata-file (metadata/publish! meta))]
              (reset! runtime-state published-runtime)
@@ -270,7 +270,7 @@
                   (when (str/blank? name)
                     (throw (ex-info "--name requires a non-blank value" {:args args})))
                   (recur more (assoc opts :name name)))
-      (throw (ex-info "Usage: skein.weaver.runtime --workspace <dir> --state-dir <dir> --data-dir <dir> [--name <name>]" {:args args})))))
+      (throw (ex-info "Usage: skein.core.weaver.runtime --workspace <dir> --state-dir <dir> --data-dir <dir> [--name <name>]" {:args args})))))
 
 (defn -main
   "Start a foreground weaver process from command-line arguments."

@@ -1,13 +1,13 @@
-(ns skein.graph.alpha
+(ns skein.api.graph.alpha
   "Public helper API for query selection, strand hydration, and graph traversal.
 
   Calls route directly when executing inside a weaver runtime, otherwise through
   an explicit connected client world. The weaver API owns validation, persistence,
   query evaluation, and relation traversal semantics."
-  (:require [skein.client :as client]
+  (:require [skein.core.client :as client]
             [skein.repl :as repl]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- call-daemon [op & args]
   (if-let [rt @runtime/current-runtime]

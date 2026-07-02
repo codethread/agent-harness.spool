@@ -1,4 +1,4 @@
-(ns skein.weaver.api
+(ns skein.api.weaver.alpha
   "Trusted in-process API for manipulating strands and weaver runtime registries."
   (:refer-clojure :exclude [list update use])
   (:require [clojure.java.io :as io]
@@ -6,9 +6,9 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [next.jdbc :as jdbc]
-            [skein.weaver.runtime :as runtime]
-            [skein.db :as db]
-            [skein.query :as query])
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db :as db]
+            [skein.core.query :as query])
   (:import [java.time Instant]
            [java.util UUID]))
 
@@ -513,7 +513,7 @@
   {:event/type type
    :event/id (str (UUID/randomUUID))
    :event/at (str (Instant/now))
-   :event/source :skein.weaver.api})
+   :event/source :skein.api.weaver.alpha})
 
 (defn- hooks-for-type [runtime hook-type]
   (filter #(contains? (:types %) hook-type)
@@ -989,14 +989,14 @@
   {:summary "strand op invokes trusted weaver-side operations by name."
    :usage "strand op <name> [args...]"
    :details ["The Go CLI stops parsing after the operation name and forwards the remaining arguments as strings."
-             "Register handlers from trusted init.clj, activated spools, or the live REPL with skein.weaver.api/register-op!."
+             "Register handlers from trusted init.clj, activated spools, or the live REPL with skein.api.weaver.alpha/register-op!."
              "Handlers receive {:op/name <canonical-name> :op/argv [<strings>...]} and return JSON-compatible data."]
    :registered (ops (current-runtime))})
 
 (defn register-built-in-ops!
   "Install Skein-provided CLI operations into the runtime op registry."
   [runtime]
-  (register-op! runtime 'help "Explain how strand op invokes custom weaver operations" 'skein.weaver.api/op-help-handler))
+  (register-op! runtime 'help "Explain how strand op invokes custom weaver operations" 'skein.api.weaver.alpha/op-help-handler))
 
 (defn- canonical-pattern-name [pattern-name]
   (query/canonical-query-name pattern-name))

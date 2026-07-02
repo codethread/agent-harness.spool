@@ -1,14 +1,14 @@
 (ns skein.alpha-test
-  (:require [skein.batch.alpha :as batch]
-            [skein.graph.alpha :as graph]
-            [skein.hooks.alpha :as hooks]
-            [skein.views.alpha :as views]
+  (:require [skein.api.batch.alpha :as batch]
+            [skein.api.graph.alpha :as graph]
+            [skein.api.hooks.alpha :as hooks]
+            [skein.api.views.alpha :as views]
             [clojure.test :refer [deftest is]]
-            [skein.client]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]
-            [skein.db-test :as db-test]
+            [skein.core.client]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db-test :as db-test]
             [skein.repl :as repl]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
@@ -148,7 +148,7 @@
   (with-redefs [runtime/current-runtime (atom nil)
                 repl/connected-config-dir (constantly "/tmp/skein-connected-world")
                 repl/connected-opts (constantly {:state-dir "/tmp/skein-state-world"})
-                skein.client/call-world (fn [config-dir opts op & args]
+                skein.core.client/call-world (fn [config-dir opts op & args]
                                          {:config-dir config-dir
                                           :opts opts
                                           :op op

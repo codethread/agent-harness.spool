@@ -4,16 +4,16 @@
   connected-client calls, daemon init, and the ephemeral helper spool."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [skein.client :as client]
-            [skein.db-test :as db-test]
-            [skein.events.alpha :as events]
-            [skein.graph.alpha :as graph]
+            [skein.core.client :as client]
+            [skein.core.db-test :as db-test]
+            [skein.api.events.alpha :as events]
+            [skein.api.graph.alpha :as graph]
             [skein.spools.ephemeral :as ephemeral]
             [skein.spools.test-support :refer [temp-config-dir test-world with-runtime]]
             [skein.repl :as repl]
-            [skein.runtime.alpha :as runtime-alpha]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.runtime.alpha :as runtime-alpha]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- delete-recursive [file]
   (doseq [child (reverse (file-seq file))]
@@ -177,7 +177,7 @@
 (deftest approved-routes-through-connected-helper-context
   (with-redefs [runtime/current-runtime (atom nil)
                 repl/connected-config-dir (constantly "/tmp/skein-connected-world")
-                skein.client/call-world (fn [config-dir opts op & args]
+                skein.core.client/call-world (fn [config-dir opts op & args]
                                          {:config-dir config-dir
                                           :opts opts
                                           :op op
@@ -220,7 +220,7 @@
 
 
 (deftest ephemeral-spool-composes-public-helper-surfaces
-  (is (= '#{skein.graph.alpha skein.repl}
+  (is (= '#{skein.api.graph.alpha skein.repl}
          (ns-requires "skein/spools/ephemeral.clj")))
   (with-runtime
     (fn [_ _]
@@ -238,7 +238,7 @@
 (deftest event-helpers-route-through-connected-helper-context
   (with-redefs [runtime/current-runtime (atom nil)
                 repl/connected-config-dir (constantly "/tmp/skein-connected-world")
-                skein.client/call-world (fn [config-dir opts op & args]
+                skein.core.client/call-world (fn [config-dir opts op & args]
                                          {:config-dir config-dir
                                           :opts opts
                                           :op op
@@ -379,7 +379,7 @@
       (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/init-demo"}}}))
       (spit (io/file config-dir "init.clj")
             (str "(do\n"
-                 "  (require '[skein.runtime.alpha :as runtime-alpha])\n"
+                 "  (require '[skein.api.runtime.alpha :as runtime-alpha])\n"
                  "  (runtime-alpha/sync!)\n"
                  "  (require '" ns-sym ")\n"
                  "  (spit " (pr-str (str result-file))
@@ -485,7 +485,7 @@
   (with-runtime
     (fn [_ config-dir]
       (spit (io/file config-dir "init.clj")
-            "(require '[skein.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n")
+            "(require '[skein.api.runtime.alpha :as runtime-alpha])\n\n(runtime-alpha/sync!)\n")
       (binding [*ns* (the-ns 'skein.repl)]
         (is (= :loaded (:status (runtime-alpha/reload!))))))))
 
@@ -506,7 +506,7 @@
       (Thread/sleep 250)
       (is (seq (api/recent-event-failures rt)))
       (spit (io/file config-dir "init.clj")
-            "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n(api/register-event-handler! @runtime/current-runtime :fresh #{:strand/added} 'skein.spools-test/fresh-reload-handler {})\n")
+            "(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime])\n(api/register-query @runtime/current-runtime 'fresh [:= [:attr :owner] \"fresh\"])\n(api/register-event-handler! @runtime/current-runtime :fresh #{:strand/added} 'skein.spools-test/fresh-reload-handler {})\n")
       (is (= :loaded (:status (runtime-alpha/reload!))))
       (is (nil? (runtime-alpha/use :stale)))
       (is (nil? (get (api/queries rt) "stale")))

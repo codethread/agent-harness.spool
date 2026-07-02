@@ -8,11 +8,11 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.db-test :as db-test]
+            [skein.core.db-test :as db-test]
             [skein.spools.shuttle :as shuttle]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- temp-config-dir []
   (doto (.toFile (java.nio.file.Files/createTempDirectory
@@ -356,8 +356,8 @@
             (pr-str {:spools {'skein.spools/shuttle {:local/root repo-root}}}))
       (let [rt (runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))})]
         (try
-          (let [synced ((requiring-resolve 'skein.runtime.alpha/sync!))
-                used ((requiring-resolve 'skein.runtime.alpha/use!)
+          (let [synced ((requiring-resolve 'skein.api.runtime.alpha/sync!))
+                used ((requiring-resolve 'skein.api.runtime.alpha/use!)
                       :shuttle {:ns 'skein.spools.shuttle
                                 :spools ['skein.spools/shuttle]
                                 :call 'skein.spools.shuttle/install!

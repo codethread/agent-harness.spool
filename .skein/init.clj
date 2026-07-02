@@ -1,4 +1,4 @@
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 
 (runtime-alpha/sync!)
 (runtime-alpha/use! :skein/spools-ephemeral

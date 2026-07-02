@@ -1,13 +1,13 @@
-(ns skein.events.alpha
+(ns skein.api.events.alpha
   "Public helper API for registering and inspecting weaver event handlers.
 
   Calls route directly when executing inside a weaver runtime, otherwise through
   an explicit connected client world. The weaver API owns event handler validation,
   function resolution, registry state, and asynchronous failure capture."
-  (:require [skein.client :as client]
+  (:require [skein.core.client :as client]
             [skein.repl :as repl]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- call-daemon [op & args]
   (if-let [rt @runtime/current-runtime]

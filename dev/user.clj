@@ -1,5 +1,5 @@
 (ns user
-  (:require [skein.weaver.runtime :as weaver-runtime]
+  (:require [skein.core.weaver.runtime :as weaver-runtime]
             [skein.repl :refer :all]))
 
 (defonce ^:private demo-runtime (atom nil))

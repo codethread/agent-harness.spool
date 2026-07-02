@@ -1,4 +1,4 @@
-(ns skein.db
+(ns skein.core.db
   "SQLite persistence for strands, edges, relation metadata, and graph queries."
   (:import [java.security SecureRandom])
   (:require [clojure.data.json :as json]
@@ -7,8 +7,8 @@
             [clojure.string :as str]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
-            [skein.query :as query]
-            [skein.specs :as specs]))
+            [skein.core.query :as query]
+            [skein.core.specs :as specs]))
 
 (def ^:private default-db-file "skein.sqlite")
 

@@ -171,7 +171,7 @@ should never name the tool. Instead:
   keys (TEN-003); the engine anticipates nothing.
 - **Round-trip note:** bindings ride `workflow/context` across routed loop
   rounds. The JSON layer keywordizes map keys on read and writes keyword
-  keys with their full `ns/name` form (`skein.db/json-key`), so keyword keys
+  keys with their full `ns/name` form (`skein.core.db/json-key`), so keyword keys
   round-trip faithfully. Binding keys conventionally stay simple
   (`:pr.ci.wait`, `:instruction`), and the definition maps them onto the
   canonical string attribute vocabulary (`"workflow/instruction"`) when

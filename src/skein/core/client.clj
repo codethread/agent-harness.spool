@@ -1,4 +1,4 @@
-(ns skein.client
+(ns skein.core.client
   "Thin Clojure client for calling a running Skein weaver over nREPL.
 
   This namespace validates published weaver metadata, verifies daemon identity,
@@ -6,62 +6,62 @@
   (:refer-clojure :exclude [list update])
   (:require [clojure.edn :as edn]
             [nrepl.core :as nrepl]
-            [skein.weaver.config :as config]
-            [skein.weaver.metadata :as metadata])
+            [skein.core.weaver.config :as config]
+            [skein.core.weaver.metadata :as metadata])
   (:import [java.net InetAddress]))
 
 (def ^:private default-timeout-ms 2000)
 
 (def ^:private api-symbols
-  {:init 'skein.weaver.api/init
-   :add 'skein.weaver.api/add
-   :update 'skein.weaver.api/update
-   :show 'skein.weaver.api/show
-   :burn-by-id 'skein.weaver.api/burn-by-id
-   :burn-by-ids 'skein.weaver.api/burn-by-ids
-   :list 'skein.weaver.api/list
-   :ready 'skein.weaver.api/ready
-   :supersede 'skein.weaver.api/supersede
-   :declare-acyclic-relation! 'skein.weaver.api/declare-acyclic-relation!
-   :acyclic-relations 'skein.weaver.api/acyclic-relations
-   :register-query 'skein.weaver.api/register-query
-   :load-queries 'skein.weaver.api/load-queries
-   :queries 'skein.weaver.api/queries
-   :query-explain 'skein.weaver.api/query-explain
-   :resolve-query 'skein.weaver.api/resolve-query
-   :list-query 'skein.weaver.api/list-query
-   :ready-query 'skein.weaver.api/ready-query
-   :query-ids 'skein.weaver.api/query-ids
-   :strands-by-ids 'skein.weaver.api/strands-by-ids
-   :ancestor-root-ids 'skein.weaver.api/ancestor-root-ids
-   :subgraph 'skein.weaver.api/subgraph
-   :register-view! 'skein.weaver.api/register-view!
-   :view! 'skein.weaver.api/view!
-   :views 'skein.weaver.api/views
-   :register-event-handler! 'skein.weaver.api/register-event-handler!
-   :unregister-event-handler! 'skein.weaver.api/unregister-event-handler!
-   :event-handlers 'skein.weaver.api/event-handlers
-   :recent-event-failures 'skein.weaver.api/recent-event-failures
-   :register-hook! 'skein.weaver.api/register-hook!
-   :unregister-hook! 'skein.weaver.api/unregister-hook!
-   :hooks 'skein.weaver.api/hooks
-   :register-pattern! 'skein.weaver.api/register-pattern!
-   :register-op! 'skein.weaver.api/register-op!
-   :ops 'skein.weaver.api/ops
-   :resolve-op 'skein.weaver.api/resolve-op
-   :op! 'skein.weaver.api/op!
-   :patterns 'skein.weaver.api/patterns
-   :resolve-pattern 'skein.weaver.api/resolve-pattern
-   :pattern-explain 'skein.weaver.api/pattern-explain
-   :weave! 'skein.weaver.api/weave!
-   :apply-batch 'skein.weaver.api/apply-batch
-   :approved-spools 'skein.weaver.api/approved-spools
-   :sync-approved-spools 'skein.weaver.api/sync-approved-spools
-   :approved-spool-syncs 'skein.weaver.api/approved-spool-syncs
-   :reload-config! 'skein.weaver.api/reload-config!
-   :use! 'skein.weaver.api/use!
-   :uses 'skein.weaver.api/uses
-   :use 'skein.weaver.api/use})
+  {:init 'skein.api.weaver.alpha/init
+   :add 'skein.api.weaver.alpha/add
+   :update 'skein.api.weaver.alpha/update
+   :show 'skein.api.weaver.alpha/show
+   :burn-by-id 'skein.api.weaver.alpha/burn-by-id
+   :burn-by-ids 'skein.api.weaver.alpha/burn-by-ids
+   :list 'skein.api.weaver.alpha/list
+   :ready 'skein.api.weaver.alpha/ready
+   :supersede 'skein.api.weaver.alpha/supersede
+   :declare-acyclic-relation! 'skein.api.weaver.alpha/declare-acyclic-relation!
+   :acyclic-relations 'skein.api.weaver.alpha/acyclic-relations
+   :register-query 'skein.api.weaver.alpha/register-query
+   :load-queries 'skein.api.weaver.alpha/load-queries
+   :queries 'skein.api.weaver.alpha/queries
+   :query-explain 'skein.api.weaver.alpha/query-explain
+   :resolve-query 'skein.api.weaver.alpha/resolve-query
+   :list-query 'skein.api.weaver.alpha/list-query
+   :ready-query 'skein.api.weaver.alpha/ready-query
+   :query-ids 'skein.api.weaver.alpha/query-ids
+   :strands-by-ids 'skein.api.weaver.alpha/strands-by-ids
+   :ancestor-root-ids 'skein.api.weaver.alpha/ancestor-root-ids
+   :subgraph 'skein.api.weaver.alpha/subgraph
+   :register-view! 'skein.api.weaver.alpha/register-view!
+   :view! 'skein.api.weaver.alpha/view!
+   :views 'skein.api.weaver.alpha/views
+   :register-event-handler! 'skein.api.weaver.alpha/register-event-handler!
+   :unregister-event-handler! 'skein.api.weaver.alpha/unregister-event-handler!
+   :event-handlers 'skein.api.weaver.alpha/event-handlers
+   :recent-event-failures 'skein.api.weaver.alpha/recent-event-failures
+   :register-hook! 'skein.api.weaver.alpha/register-hook!
+   :unregister-hook! 'skein.api.weaver.alpha/unregister-hook!
+   :hooks 'skein.api.weaver.alpha/hooks
+   :register-pattern! 'skein.api.weaver.alpha/register-pattern!
+   :register-op! 'skein.api.weaver.alpha/register-op!
+   :ops 'skein.api.weaver.alpha/ops
+   :resolve-op 'skein.api.weaver.alpha/resolve-op
+   :op! 'skein.api.weaver.alpha/op!
+   :patterns 'skein.api.weaver.alpha/patterns
+   :resolve-pattern 'skein.api.weaver.alpha/resolve-pattern
+   :pattern-explain 'skein.api.weaver.alpha/pattern-explain
+   :weave! 'skein.api.weaver.alpha/weave!
+   :apply-batch 'skein.api.weaver.alpha/apply-batch
+   :approved-spools 'skein.api.weaver.alpha/approved-spools
+   :sync-approved-spools 'skein.api.weaver.alpha/sync-approved-spools
+   :approved-spool-syncs 'skein.api.weaver.alpha/approved-spool-syncs
+   :reload-config! 'skein.api.weaver.alpha/reload-config!
+   :use! 'skein.api.weaver.alpha/use!
+   :uses 'skein.api.weaver.alpha/uses
+   :use 'skein.api.weaver.alpha/use})
 
 (defn- fail
   "Throw an ExceptionInfo with message and structured client error data."
@@ -87,16 +87,16 @@
                  (config/world config-dir))
          meta (metadata/read-metadata world)]
      (when (metadata/stale-or-missing? meta)
-       (fail "Weaver metadata is missing or stale" {:type :skein.client/missing-or-stale-metadata
+       (fail "Weaver metadata is missing or stale" {:type :skein.core.client/missing-or-stale-metadata
                                                      :config-dir (:config-dir world)
                                                      :metadata meta}))
      (when-not (= (:config-dir world) (:config-dir meta))
-       (fail "Weaver metadata config dir does not match requested world" {:type :skein.client/metadata-config-mismatch
+       (fail "Weaver metadata config dir does not match requested world" {:type :skein.core.client/metadata-config-mismatch
                                                                            :expected (:config-dir world)
                                                                            :actual (:config-dir meta)
                                                                            :metadata meta}))
      (when-not (loopback-host? (get-in meta [:endpoint :host]))
-       (fail "Weaver metadata endpoint is not loopback" {:type :skein.client/non-local-endpoint
+       (fail "Weaver metadata endpoint is not loopback" {:type :skein.core.client/non-local-endpoint
                                                           :endpoint (:endpoint meta)}))
      meta)))
 
@@ -113,27 +113,27 @@
   "Return an nREPL form that invokes a known weaver API operation with args."
   [op args]
   (let [api-symbol (or (api-symbols op)
-                       (fail "Unknown weaver API operation" {:type :skein.client/unknown-operation
+                       (fail "Unknown weaver API operation" {:type :skein.core.client/unknown-operation
                                                               :operation op}))
         call-args (cond-> (vec args)
                     (contains? hooked-operation-request-contexts op)
                     (conj (hooked-operation-request-contexts op)))]
     (str "(do "
-         "(require '[skein.weaver.api] '[skein.weaver.runtime]) "
+         "(require '[skein.api.weaver.alpha] '[skein.core.weaver.runtime]) "
          "(let [args '" (pr-str call-args) "] "
-         "(try {:ok true :value (apply " api-symbol " @skein.weaver.runtime/current-runtime args)} "
+         "(try {:ok true :value (apply " api-symbol " @skein.core.weaver.runtime/current-runtime args)} "
          "(catch Throwable t {:ok false :class (str (class t)) :message (ex-message t) :data (ex-data t)})))"
          ")")))
 
 (defn- identity-form
   "Return an nREPL form that reads the connected weaver runtime metadata."
   []
-  "(do (require '[skein.weaver.runtime]) (:metadata @skein.weaver.runtime/current-runtime))")
+  "(do (require '[skein.core.weaver.runtime]) (:metadata @skein.core.weaver.runtime/current-runtime))")
 
 (defn- stop-form
   "Return an nREPL form that schedules the connected weaver to stop."
   []
-  "(do (require '[skein.weaver.runtime]) (let [rt @skein.weaver.runtime/current-runtime] (future (Thread/sleep 50) (skein.weaver.runtime/stop! rt)) {:stopped true}))")
+  "(do (require '[skein.core.weaver.runtime]) (let [rt @skein.core.weaver.runtime/current-runtime] (future (Thread/sleep 50) (skein.core.weaver.runtime/stop! rt)) {:stopped true}))")
 
 (defn- connect
   "Open an nREPL connection to the endpoint in validated weaver metadata."
@@ -142,7 +142,7 @@
     (try
       (nrepl/connect :host host :port port :timeout timeout-ms)
       (catch Exception e
-        (throw (ex-info "Unable to connect to weaver nREPL endpoint" {:type :skein.client/connection-failed
+        (throw (ex-info "Unable to connect to weaver nREPL endpoint" {:type :skein.core.client/connection-failed
                                                                        :endpoint (:endpoint metadata)}
                         e))))))
 
@@ -157,17 +157,17 @@
         responses (try
                     (doall (nrepl/message session {:op "eval" :code form}))
                     (catch java.net.SocketTimeoutException e
-                      (throw (ex-info "Weaver nREPL request timed out" (assoc context :type :skein.client/timeout) e)))
+                      (throw (ex-info "Weaver nREPL request timed out" (assoc context :type :skein.core.client/timeout) e)))
                     (catch Exception e
-                      (throw (ex-info "Weaver nREPL request failed" (assoc context :type :skein.client/request-failed) e))))
+                      (throw (ex-info "Weaver nREPL request failed" (assoc context :type :skein.core.client/request-failed) e))))
         statuses (set (mapcat :status responses))]
     (when (contains? statuses "eval-error")
       (let [err (some :err responses)]
-        (fail "Weaver API call failed" (assoc context :type :skein.client/weaver-error
+        (fail "Weaver API call failed" (assoc context :type :skein.core.client/weaver-error
                                              :err err
                                              :responses responses))))
     (when (contains? statuses "error")
-      (fail "Weaver nREPL returned an error" (assoc context :type :skein.client/nrepl-error
+      (fail "Weaver nREPL returned an error" (assoc context :type :skein.core.client/nrepl-error
                                                    :responses responses)))
     (if-let [value (some :value responses)]
       (let [result (edn/read-string value)]
@@ -175,15 +175,15 @@
           (if (:ok result)
             (:value result)
             (fail "Weaver API call failed" (assoc context
-                                             :type :skein.client/weaver-error
+                                             :type :skein.core.client/weaver-error
                                              :weaver-class (:class result)
                                              :weaver-message (:message result)
                                              :weaver-data (:data result))))
           result))
       (if (empty? responses)
-        (fail "Weaver nREPL request timed out" (assoc context :type :skein.client/timeout
+        (fail "Weaver nREPL request timed out" (assoc context :type :skein.core.client/timeout
                                                    :responses responses))
-        (fail "Weaver nREPL returned no value" (assoc context :type :skein.client/no-value
+        (fail "Weaver nREPL returned no value" (assoc context :type :skein.core.client/no-value
                                                      :responses responses))))))
 
 (defn- verify-identity!
@@ -191,15 +191,15 @@
   [conn expected timeout-ms]
   (let [actual (eval-form conn (identity-form) timeout-ms {:operation :identity})]
     (when-not (= (:config-dir expected) (:config-dir actual))
-      (fail "Connected weaver serves a different config dir" {:type :skein.client/config-mismatch
+      (fail "Connected weaver serves a different config dir" {:type :skein.core.client/config-mismatch
                                                                :expected (:config-dir expected)
                                                                :actual (:config-dir actual)}))
     (when-not (= (:nonce expected) (:nonce actual))
-      (fail "Connected weaver identity does not match runtime metadata" {:type :skein.client/identity-mismatch
+      (fail "Connected weaver identity does not match runtime metadata" {:type :skein.core.client/identity-mismatch
                                                                          :expected (:nonce expected)
                                                                          :actual (:nonce actual)}))
     (when-not (= (:protocol-version expected) (:protocol-version actual))
-      (fail "Connected weaver protocol does not match runtime metadata" {:type :skein.client/protocol-mismatch
+      (fail "Connected weaver protocol does not match runtime metadata" {:type :skein.core.client/protocol-mismatch
                                                                          :expected (:protocol-version expected)
                                                                          :actual (:protocol-version actual)}))
     actual))

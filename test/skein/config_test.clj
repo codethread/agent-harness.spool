@@ -5,11 +5,11 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.db-test :as db-test]
-            [skein.runtime.alpha :as runtime-alpha]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]))
+            [skein.core.db-test :as db-test]
+            [skein.api.runtime.alpha :as runtime-alpha]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- delete-directory!
   "Delete a directory tree rooted at `path` if it exists."

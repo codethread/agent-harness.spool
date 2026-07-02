@@ -408,7 +408,7 @@ func (a *App) call(o Options, op string, args map[string]any) error {
 	return err
 }
 func weaverArgs(o Options) []string {
-	args := []string{"-M:skein", "-m", "skein.weaver.runtime"}
+	args := []string{"-M:skein", "-m", "skein.core.weaver.runtime"}
 	if o.ConfigDir != "" {
 		args = append(args, "--workspace", o.ConfigDir)
 	}

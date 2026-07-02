@@ -1,4 +1,4 @@
-(ns skein.specs
+(ns skein.core.specs
   "Shared clojure.spec contracts for Skein boundary data.
 
   These specs describe public data shapes consumed by the database, query,

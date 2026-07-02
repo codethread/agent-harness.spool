@@ -4,10 +4,10 @@
             [clojure.test :refer [deftest is]]
             [nrepl.cmdline]
             [nrepl.core :as nrepl]
-            [skein.client]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]
-            [skein.db-test :as db-test]
+            [skein.core.client]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db-test :as db-test]
             [skein.repl :as repl]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
@@ -51,7 +51,7 @@
 
 (deftest connect-without-arg-fails-loudly-without-selected-world
   (let [calls (atom [])]
-    (with-redefs [skein.client/status-world (fn [config-dir]
+    (with-redefs [skein.core.client/status-world (fn [config-dir]
                                              (swap! calls conj config-dir)
                                              {:ok true})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -171,7 +171,7 @@
     (fn [rt _]
       (let [{:keys [endpoint]} (:metadata rt)
             out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(+ 1 2)\n(str \"a\" \"b\")\n@skein.weaver.runtime/current-runtime\n")
+        (binding [*in* (java.io.StringReader. "(+ 1 2)\n(str \"a\" \"b\")\n@skein.core.weaver.runtime/current-runtime\n")
                   *out* out
                   *err* (java.io.StringWriter.)]
           ((ns-resolve 'skein.repl 'attach-stdin!) (:host endpoint) (str (:port endpoint))))
@@ -231,7 +231,7 @@
   (with-runtime
     (fn [rt _]
       (let [out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/approved)\n(runtime-alpha/syncs)\n(runtime-alpha/uses)\n")
+        (binding [*in* (java.io.StringReader. "(require '[skein.api.runtime.alpha :as runtime-alpha])\n(runtime-alpha/approved)\n(runtime-alpha/syncs)\n(runtime-alpha/uses)\n")
                   *out* out
                   *err* (java.io.StringWriter.)
                   *ns* (the-ns 'user)]

@@ -9,8 +9,8 @@
   (:require [clojure.string :as str]
             [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]
+            [skein.api.runtime.alpha :as runtime-alpha]))
 
 (def ^:private event-types
   #{:strand/added :strand/updated :batch/applied :strand/burned :strand/superseded})
@@ -21,8 +21,7 @@
   (throw (ex-info message data)))
 
 (defn- rt []
-  (or @runtime/current-runtime
-      (fail! "Treadle requires an in-process weaver runtime" {})))
+  (runtime-alpha/current-runtime))
 
 (defn- attr
   "Read attribute `k` tolerating keyword- or string-keyed maps (mirrors

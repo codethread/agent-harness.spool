@@ -8,8 +8,8 @@
   (:refer-clojure :exclude [compile])
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.batch.alpha :as batch]
-            [skein.graph.alpha :as graph]
+            [skein.api.batch.alpha :as batch]
+            [skein.api.graph.alpha :as graph]
             [skein.repl :as repl]))
 
 (defn- non-blank-string? [value]
@@ -1282,7 +1282,7 @@
 (defn- detail-view
   "Return a checkpoint choice's stored detail map with string keys. The nested
   `input` declaration (a vector of maps) is string-keyed too, because the JSON
-  round-trip keywordizes nested map keys on read (`skein.db/<-json`)."
+  round-trip keywordizes nested map keys on read (`skein.core.db/<-json`)."
   [detail]
   (reduce-kv (fn [acc k v]
                (let [k (if (keyword? k) (name k) k)]

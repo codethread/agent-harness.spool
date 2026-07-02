@@ -1,9 +1,9 @@
-(ns skein.db-test
+(ns skein.core.db-test
   (:require [clojure.spec.alpha :as s]
             [clojure.test :refer [deftest is testing]]
-            [skein.db :as db]
-            [skein.query :as query]
-            [skein.specs :as specs]))
+            [skein.core.db :as db]
+            [skein.core.query :as query]
+            [skein.core.specs :as specs]))
 
 (defn delete-sqlite-family! [db-file]
   (doseq [suffix ["" "-journal" "-wal" "-shm"]]

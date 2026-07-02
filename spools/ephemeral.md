@@ -11,7 +11,7 @@ It is deliberately a userland convention, not a core lifecycle: an
 ephemeral strand is an ordinary persistent strand carrying the attribute
 `ephemeral "true"` and a `parent-of` edge from its owner. Nothing in the
 engine treats it specially — the spool composes only the documented
-`skein.repl` and `skein.graph.alpha` surfaces, which also makes it the
+`skein.repl` and `skein.api.graph.alpha` surfaces, which also makes it the
 smallest worked example of attribute-convention spool design.
 
 ## 2. Usage

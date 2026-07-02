@@ -1,4 +1,4 @@
-(ns skein.relations.alpha
+(ns skein.api.relations.alpha
   "Advisory relation catalog for common Skein relation vocabulary.
 
   The catalog is source-visible data for agents, config, and REPL workflows. It

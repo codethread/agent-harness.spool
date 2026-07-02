@@ -1,4 +1,4 @@
-(ns skein.runtime.alpha
+(ns skein.api.runtime.alpha
   "Privileged helper API for trusted weaver runtime loader/config workflows.
 
   This namespace routes approved-root inspection, sync, config reload, and
@@ -6,13 +6,23 @@
   process calls use the in-process runtime; from an explicit connected client they
   route through the active weaver client connection."
   (:refer-clojure :exclude [sync use])
-  (:require [skein.client :as client]
+  (:require [skein.core.client :as client]
             [skein.repl :as repl]
-            [skein.weaver.runtime :as runtime]))
+            [skein.core.weaver.runtime :as runtime]))
+
+(defn current-runtime
+  "Return the active in-process weaver runtime.
+
+  Intended for trusted config, spool, and REPL workflows that must pass the
+  runtime explicitly to `skein.api.weaver.alpha` functions. Throws when called
+  outside an active weaver runtime instead of falling back to client state."
+  []
+  (or @runtime/current-runtime
+      (throw (ex-info "No active Skein weaver runtime" {}))))
 
 (defn- call-daemon [op & args]
   (if-let [rt @runtime/current-runtime]
-    (apply (requiring-resolve (symbol "skein.weaver.api" (name op))) rt args)
+    (apply (requiring-resolve (symbol "skein.api.weaver.alpha" (name op))) rt args)
     (apply client/call-world (repl/connected-config-dir) (repl/connected-opts) op args)))
 
 (defn approved

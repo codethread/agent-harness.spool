@@ -1,13 +1,13 @@
-(ns skein.client-test
+(ns skein.core.client-test
   (:refer-clojure :exclude [list update])
   (:require [clojure.test :refer [deftest is]]
             [nrepl.core :as nrepl]
-            [skein.client :as client]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.metadata :as metadata]
-            [skein.weaver.runtime :as runtime]
-            [skein.db-test :as db-test]))
+            [skein.core.client :as client]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.metadata :as metadata]
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db-test :as db-test]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")
@@ -109,9 +109,9 @@
     (fn [rt world db-file]
       (call-world world :init)
       (reset! client-hook-contexts [])
-      (api/register-hook! rt :client-normalize #{:attributes/normalize} 'skein.client-test/client-normalize-hook {})
-      (api/register-hook! rt :client-add #{:strand/add-before-commit} 'skein.client-test/client-capture-hook {})
-      (api/register-hook! rt :client-update #{:strand/update-before-commit} 'skein.client-test/client-capture-hook {})
+      (api/register-hook! rt :client-normalize #{:attributes/normalize} 'skein.core.client-test/client-normalize-hook {})
+      (api/register-hook! rt :client-add #{:strand/add-before-commit} 'skein.core.client-test/client-capture-hook {})
+      (api/register-hook! rt :client-update #{:strand/update-before-commit} 'skein.core.client-test/client-capture-hook {})
       (let [created (call-world world :add {:title "Hooked client" :attributes {:owner "agent"}})]
         (call-world world :update (:id created) {:attributes {:owner "agent" :phase "updated"}}))
       (is (= [:client-normalize :client-add :client-normalize :client-update]
@@ -132,9 +132,9 @@
         (is (= [] (call-world world :ancestor-root-ids [(:id agent)] {:where [:= [:attr :kind] "feature"]})))
         (is (= {:root-ids [(:id agent)] :strands [agent] :edges []}
                (call-world world :subgraph [(:id agent)])))
-        (is (= {:name "client" :fn 'skein.client-test/client-test-view}
-               (call-world world :register-view! 'client 'skein.client-test/client-test-view)))
-        (is (= [{:name "client" :fn 'skein.client-test/client-test-view}]
+        (is (= {:name "client" :fn 'skein.core.client-test/client-test-view}
+               (call-world world :register-view! 'client 'skein.core.client-test/client-test-view)))
+        (is (= [{:name "client" :fn 'skein.core.client-test/client-test-view}]
                (call-world world :views)))
         (is (= {:client-view {:ok true}}
                (call-world world :view! 'client {:ok true})))))))
@@ -215,7 +215,7 @@
         (is false "expected daemon domain error")
         (catch clojure.lang.ExceptionInfo e
           (is (= "Weaver API call failed" (ex-message e)))
-          (is (= :skein.client/weaver-error (:type (ex-data e))))
+          (is (= :skein.core.client/weaver-error (:type (ex-data e))))
           (is (= "Invalid strand" (:weaver-message (ex-data e))))
           (is (re-find #"non-blank" (:explain (:weaver-data (ex-data e))))))))))
 

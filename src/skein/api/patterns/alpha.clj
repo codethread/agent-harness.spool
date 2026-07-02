@@ -1,12 +1,12 @@
-(ns skein.patterns.alpha
+(ns skein.api.patterns.alpha
   "Public helper API for registering, inspecting, and invoking weave patterns.
 
   Calls route directly when executing inside a weaver runtime, otherwise through
   an explicit connected client world. The weaver API owns pattern validation,
   function resolution, input spec validation, and transactional batch creation."
-  (:require [skein.client :as client]
-            [skein.weaver.api :as api]
-            [skein.weaver.runtime :as runtime]))
+  (:require [skein.core.client :as client]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn- call-daemon [op & args]
   (if-let [rt @runtime/current-runtime]

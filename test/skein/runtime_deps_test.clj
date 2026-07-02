@@ -2,8 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [nrepl.core :as nrepl]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]))
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")

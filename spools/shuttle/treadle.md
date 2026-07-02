@@ -11,7 +11,7 @@ The workflow engine remains forge/tool agnostic: workflow authors declare an ord
 Load shuttle first, then treadle from the same approved local-root spool:
 
 ```clojure
-(require '[skein.runtime.alpha :as runtime-alpha])
+(require '[skein.api.runtime.alpha :as runtime-alpha])
 
 (runtime-alpha/sync!)
 (runtime-alpha/use! :shuttle

@@ -4,13 +4,13 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.test :refer [deftest is testing]]
-            [skein.batch.alpha :as batch]
-            [skein.weaver.api :as api]
-            [skein.weaver.config :as weaver-config]
-            [skein.weaver.metadata :as metadata]
-            [skein.weaver.runtime :as runtime]
-            [skein.db :as db]
-            [skein.db-test :as db-test])
+            [skein.api.batch.alpha :as batch]
+            [skein.api.weaver.alpha :as api]
+            [skein.core.weaver.config :as weaver-config]
+            [skein.core.weaver.metadata :as metadata]
+            [skein.core.weaver.runtime :as runtime]
+            [skein.core.db :as db]
+            [skein.core.db-test :as db-test])
   (:import [java.io BufferedReader BufferedWriter InputStreamReader OutputStreamWriter]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels SocketChannel]))
@@ -265,7 +265,7 @@
         (delete-tree! (io/file (:config-dir world) ".."))))))
 
 (deftest startup-fails-clearly-when-required-main-dirs-are-missing
-  (let [parse-main-args (ns-resolve 'skein.weaver.runtime 'parse-main-args)]
+  (let [parse-main-args (ns-resolve 'skein.core.weaver.runtime 'parse-main-args)]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--workspace is required"
                           (parse-main-args [])))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--state-dir is required"
@@ -368,7 +368,7 @@
         (api/register-event-handler! rt :prior #{:strand/added} 'skein.weaver-test/capture-event {})
         (api/register-hook! rt :prior #{:payload/received} 'skein.weaver-test/capture-hook {})
         (spit (io/file workspace "init.clj")
-              "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime] '[skein.events.alpha :as events])\n(api/register-query @runtime/current-runtime 'shared [:= [:attr :owner] \"shared\"])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(api/enqueue-event! @runtime/current-runtime {:event/type :strand/added :event/id \"shared-only\" :event/at \"2026-06-29T00:00:00Z\" :event/source :test})\n")
+              "(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime] '[skein.api.events.alpha :as events])\n(api/register-query @runtime/current-runtime 'shared [:= [:attr :owner] \"shared\"])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(api/enqueue-event! @runtime/current-runtime {:event/type :strand/added :event/id \"shared-only\" :event/at \"2026-06-29T00:00:00Z\" :event/source :test})\n")
         (spit (io/file workspace "init.local.clj")
               "(throw (ex-info \"local boom\" {:source :local}))\n")
         (try
@@ -395,9 +395,9 @@
         (Thread/sleep 250)
         (is (seq (api/recent-event-failures rt)))
         (spit (io/file workspace "init.clj")
-              "(require '[skein.events.alpha :as events] '[skein.hooks.alpha :as hooks])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(hooks/register! :shared #{:payload/received} 'skein.weaver-test/capture-hook)\n")
+              "(require '[skein.api.events.alpha :as events] '[skein.api.hooks.alpha :as hooks])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(hooks/register! :shared #{:payload/received} 'skein.weaver-test/capture-hook)\n")
         (spit (io/file workspace "init.local.clj")
-              "(require '[skein.events.alpha :as events] '[skein.hooks.alpha :as hooks])\n(events/register! :local #{:strand/updated} 'skein.weaver-test/capture-event)\n(hooks/register! :local #{:strand/add-before-commit} 'skein.weaver-test/capture-hook)\n")
+              "(require '[skein.api.events.alpha :as events] '[skein.api.hooks.alpha :as hooks])\n(events/register! :local #{:strand/updated} 'skein.weaver-test/capture-event)\n(hooks/register! :local #{:strand/add-before-commit} 'skein.weaver-test/capture-hook)\n")
         (api/reload-config! rt)
         (is (= #{:shared :local} (set (mapv :key (api/event-handlers rt)))))
         (is (= #{:shared :local} (set (mapv :key (api/hooks rt)))))
@@ -580,7 +580,7 @@
         (is (= :strand/added (:event/type add-event)))
         (is (string? (:event/id add-event)))
         (is (string? (:event/at add-event)))
-        (is (= :skein.weaver.api (:event/source add-event)))
+        (is (= :skein.api.weaver.alpha (:event/source add-event)))
         (is (= (:id added) (:strand/id add-event)))
         (is (= added (:strand add-event)))
         (let [updated (api/update rt (:id added) {:state "closed" :attributes {:phase "done"}})
@@ -671,7 +671,7 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"queue is full"
                             (api/enqueue-event! rt (test-event :x "full"))))
       (let [init (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
-        (spit init "(require '[skein.events.alpha :as events])\n(events/register! :after-reload #{:x} 'skein.weaver-test/capture-event)\n")
+        (spit init "(require '[skein.api.events.alpha :as events])\n(events/register! :after-reload #{:x} 'skein.weaver-test/capture-event)\n")
         (api/reload-config! rt)
         (deliver @handler-release true)
         (is (= [:after-reload] (mapv :key (api/event-handlers rt))))
@@ -903,7 +903,7 @@
     (fn [rt _]
       (let [init (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
         (api/register-hook! rt :stale #{:payload/received} 'skein.weaver-test/capture-hook {})
-        (spit init "(require '[skein.hooks.alpha :as hooks])\n(hooks/register! :fresh #{:payload/received} 'skein.weaver-test/capture-hook {:order 2})\n")
+        (spit init "(require '[skein.api.hooks.alpha :as hooks])\n(hooks/register! :fresh #{:payload/received} 'skein.weaver-test/capture-hook {:order 2})\n")
         (api/reload-config! rt)
         (is (= [{:key :fresh
                  :types #{:payload/received}
@@ -1428,7 +1428,7 @@
   (with-runtime
     (fn [rt _]
       (let [init-file (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
-        (spit init-file "(require '[skein.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n")
+        (spit init-file "(require '[skein.api.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n")
         (api/register-pattern! rt 'dev-task 'skein.weaver-test/test-pattern ::pattern-input)
         (is (= 1 (count (api/patterns rt))))
         (api/reload-config! rt)
@@ -1700,7 +1700,7 @@
   (let [world (temp-world)
         init (io/file (:config-dir world) "init.clj")]
     (try
-      (spit init "(require '[skein.weaver.api :as api] '[skein.weaver.runtime :as runtime]) (api/register-query @runtime/current-runtime 'trusted [:= :state \"active\"])")
+      (spit init "(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime]) (api/register-query @runtime/current-runtime 'trusted [:= :state \"active\"])")
       (let [rt (runtime/start! nil {:world world})]
         (try
           (is (= {"trusted" [:= :state "active"]} (api/queries rt)))
@@ -1753,7 +1753,7 @@
                    :name "  "})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"--name requires a non-blank value"
-                            ((ns-resolve 'skein.weaver.runtime 'parse-main-args)
+                            ((ns-resolve 'skein.core.weaver.runtime 'parse-main-args)
                              ["--workspace" (:config-dir world)
                               "--state-dir" (:state-dir world)
                               "--data-dir" (:data-dir world)

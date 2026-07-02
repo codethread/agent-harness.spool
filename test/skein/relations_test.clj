@@ -1,6 +1,6 @@
 (ns skein.relations-test
   (:require [clojure.test :refer [deftest is]]
-            [skein.relations.alpha :as relations]))
+            [skein.api.relations.alpha :as relations]))
 
 (deftest catalog-shape-and-lookups
   (is (= #{"related-to" "duplicates" "references" "implements" "verifies" "tracks" "caused-by"}

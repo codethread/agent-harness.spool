@@ -3,9 +3,9 @@
   workspaces and a started weaver runtime wrapper, used by skein.spools-test,
   skein.spools.workflow-test, and skein.spools.devflow-test."
   (:require [clojure.java.io :as io]
-            [skein.db-test :as db-test]
-            [skein.weaver.config :as daemon-config]
-            [skein.weaver.runtime :as runtime]))
+            [skein.core.db-test :as db-test]
+            [skein.core.weaver.config :as daemon-config]
+            [skein.core.weaver.runtime :as runtime]))
 
 (defn test-world [config-dir]
   (daemon-config/world config-dir
