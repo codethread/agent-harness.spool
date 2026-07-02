@@ -4,7 +4,8 @@
   These helpers encode the agent-facing devflow checkpoints as Skein workflow
   data. They intentionally produce ordinary workflow definitions that callers
   can inspect, compose, pour as molecules, or materialize as wisps."
-  (:require [skein.spools.workflow :as workflow]))
+  (:require [clojure.string :as str]
+            [skein.spools.workflow :as workflow]))
 
 (defn- titled
   ([prefix]
@@ -16,6 +17,75 @@
 (defn- param-value [k]
   (fn [params]
     (get params k)))
+
+(defn- task-value
+  "Return task field `k`, accepting keyword or string keyed task maps."
+  [task k]
+  (or (get task k) (get task (name k))))
+
+(def ^:private afk-task-id-pattern
+  "AFK task ids become workflow step ids (`:task-<id>`), so they must be
+  token-safe: no whitespace, slashes, colons, or leading punctuation."
+  #"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+(defn- non-blank-string? [v]
+  (and (string? v) (not (str/blank? v))))
+
+(defn- validate-afk-tasks
+  "Return validated AFK delegation tasks or nil when delegation is not requested."
+  [tasks]
+  (when (some? tasks)
+    (when-not (vector? tasks)
+      (throw (ex-info "AFK tasks must be a vector" {:tasks tasks})))
+    (when (empty? tasks)
+      (throw (ex-info "AFK tasks must not be empty" {:tasks tasks})))
+    (doseq [task tasks]
+      (when-not (map? task)
+        (throw (ex-info "AFK task must be a map" {:task task})))
+      (let [id (task-value task :id)]
+        (when-not (and (non-blank-string? id) (re-matches afk-task-id-pattern id))
+          (throw (ex-info "AFK task id must be a token-safe string"
+                          {:task task :id id :pattern (str afk-task-id-pattern)}))))
+      (when-not (non-blank-string? (task-value task :title))
+        (throw (ex-info "AFK task title must be a non-blank string" {:task task})))
+      (let [harness (task-value task :harness)]
+        (when (and (some? harness) (not (non-blank-string? harness)))
+          (throw (ex-info "AFK task harness must be a non-blank string"
+                          {:task task :harness harness})))))
+    (let [ids (map #(task-value % :id) tasks)]
+      (when-not (= (count ids) (count (distinct ids)))
+        (throw (ex-info "AFK task ids must be unique" {:ids ids}))))
+    tasks))
+
+(defn- validate-afk-harnesses
+  "Fail loudly unless every delegated AFK task resolves a harness."
+  [tasks delegate-harness]
+  (doseq [task tasks]
+    (when-not (non-blank-string? (or (task-value task :harness) delegate-harness))
+      (throw (ex-info "AFK task missing harness resolution"
+                      {:task task :delegate-harness delegate-harness})))))
+
+(defn- afk-task-step-id [task]
+  (keyword (str "task-" (task-value task :id))))
+
+(defn- afk-task-prompt [feature task]
+  (str "Devflow AFK task for " feature ": " (task-value task :title) "\n\n"
+       (or (task-value task :body) (task-value task :title))))
+
+(defn- afk-task-gate [task previous-id delegate-harness delegate-cwd]
+  (workflow/gate (afk-task-step-id task)
+                 (fn [{:keys [feature]}]
+                   (str "Delegate AFK task " (task-value task :id) " for " feature))
+                 :subagent
+                 :depends-on (if previous-id [previous-id] [])
+                 ;; the prompt renders from resolved params like the title, so
+                 ;; direct compile/pour! usage with :feature supplied only as a
+                 ;; workflow param cannot bake "nil" into shuttle/prompt
+                 :attributes (cond-> {"devflow/task" (task-value task :id)
+                                      "shuttle/harness" (or (task-value task :harness) delegate-harness)
+                                      "shuttle/prompt" (fn [{:keys [feature]}]
+                                                         (afk-task-prompt feature task))}
+                               delegate-cwd (assoc "shuttle/cwd" delegate-cwd))))
 
 (def ^:private abort-reason-input
   "Declared choice input for every abort choice: a required `:reason` recorded on
@@ -208,17 +278,57 @@
                          :attributes {"workflow/decision-point" "plan-signed-off"})))
 
 (defn run-afk-loop-workflow
-  "Return the post-task-signoff AFK loop workflow."
-  [_opts]
-  (workflow/workflow
-    (titled "Devflow AFK execution: ")
-    {:params {:feature (workflow/param :required true)}
-     :attributes {"devflow/stage" "afk"
-                  "devflow/feature" (param-value :feature)}}
-    (workflow/step :run-afk-loop
-                   (titled "Run or hand off AFK task loop for ")
-                   :attributes {"workflow/action-ref" "devflow.tasks.run-afk-loop"
-                                "workflow/instruction" "Run or hand off the devflow AFK task loop for this feature after task sign-off."})))
+  "Return the post-task-signoff AFK loop workflow.
+
+  With no `:tasks` opt, returns the legacy single manual AFK step. With `:tasks`,
+  returns a sequential chain of `:subagent` gates for treadle fulfillment, then a
+  HITL acceptance checkpoint. Task maps may be keyword- or string-keyed."
+  [{:keys [tasks delegate-harness delegate-cwd] :as opts}]
+  (let [tasks (validate-afk-tasks (or tasks (get opts "tasks")))
+        delegate-harness (or delegate-harness (get opts "delegate-harness"))
+        delegate-cwd (or delegate-cwd (get opts "delegate-cwd"))]
+    (when tasks
+      (validate-afk-harnesses tasks delegate-harness))
+    (apply workflow/workflow
+           (titled "Devflow AFK execution: ")
+           {:params {:feature (workflow/param :required true)
+                     :tasks (workflow/param :default tasks)
+                     :delegate-harness (workflow/param :default delegate-harness)
+                     :delegate-cwd (workflow/param :default delegate-cwd)}
+            :attributes {"devflow/stage" "afk"
+                         "devflow/feature" (param-value :feature)}}
+           (if tasks
+             (let [gate-steps (loop [remaining tasks
+                                     previous nil
+                                     steps []]
+                                (if-let [task (first remaining)]
+                                  (let [id (afk-task-step-id task)]
+                                    (recur (rest remaining)
+                                           id
+                                           (conj steps (afk-task-gate task previous delegate-harness delegate-cwd))))
+                                  steps))]
+               (conj gate-steps
+                     (workflow/checkpoint :human-acceptance-afk
+                                          (titled "Human acceptance for " " AFK task execution")
+                                          :depends-on [(afk-task-step-id (last tasks))]
+                                          :kind :human
+                                          :choices [{:key :accepted
+                                                     :label "Accept"
+                                                     :description "AFK task execution is accepted; the run is done."}
+                                                    {:key :revise
+                                                     :label "Revise"
+                                                     :description "AFK task execution needs changes; re-run the delegated AFK stage."
+                                                     :revise {:params {:revision true}}}
+                                                    {:key :abort
+                                                     :label "Abort"
+                                                     :description "Stop or abandon this feature after AFK execution."
+                                                     :next :abort
+                                                     :input abort-reason-input}]
+                                          :attributes {"workflow/decision-point" "afk-accepted"})))
+             [(workflow/step :run-afk-loop
+                             (titled "Run or hand off AFK task loop for ")
+                             :attributes {"workflow/action-ref" "devflow.tasks.run-afk-loop"
+                                          "workflow/instruction" "Run or hand off the devflow AFK task loop for this feature after task sign-off."})]))))
 
 (defn task-breakdown-workflow
   "Return the reviewed task queue workflow.
@@ -247,7 +357,10 @@
                          :choices [{:key :approved
                                     :label "Approve"
                                     :description "Task queue is accepted; run or hand off the AFK loop next."
-                                    :next :run-afk-loop}
+                                    :next :run-afk-loop
+                                    :input [{:key :tasks
+                                             :required false
+                                             :description "Optional vector of AFK task maps to delegate as sequential subagent gates."}]}
                                    {:key :revise
                                     :label "Revise"
                                     :description "Task queue needs changes; revise the task-breakdown stage and re-review before execution."
@@ -426,6 +539,15 @@
   ([feature opts]
    (add-current-stage feature (workflow/complete! feature opts))))
 
+(defn- keywordize-choice-input
+  "Return choice input with top-level string keys converted to keywords."
+  [input]
+  (if-not (map? input)
+    input
+    (into {}
+          (map (fn [[k v]] [(if (string? k) (keyword k) k) v]))
+          input)))
+
 (defn choose!
   "Record a devflow checkpoint choice and return the engine
   `{:ready [step-view ...] :done boolean}` result shape.
@@ -434,9 +556,9 @@
   ([feature choice]
    (add-current-stage feature (workflow/choose! feature choice)))
   ([feature choice input]
-   (add-current-stage feature (workflow/choose! feature choice input)))
+   (add-current-stage feature (workflow/choose! feature choice (keywordize-choice-input input))))
   ([feature choice input opts]
-   (add-current-stage feature (workflow/choose! feature choice input opts))))
+   (add-current-stage feature (workflow/choose! feature choice (keywordize-choice-input input) opts))))
 
 (defn advance!
   "Advance the current devflow step or checkpoint for `feature`.

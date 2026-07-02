@@ -56,7 +56,14 @@ start! ─▶ intake
                  revise   ─▶ task-breakdown (revision)
                  abort    ─▶ abort
           run-afk-loop
-             :run-afk-loop step ─▶ (run auto-closes: done)
+             no delegated task data:
+               :run-afk-loop step ─▶ (run auto-closes: done)
+             delegated task data:
+               :task-<id> subagent gates (sequential, one per task)
+                  ─▶ :human-acceptance-afk  (HITL)
+                        accepted ─▶ (run auto-closes: done)
+                        revise   ─▶ run-afk-loop (revision)
+                        abort    ─▶ abort
           direct-implementation
              :human-acceptance  (HITL)
                  accepted ─▶ (run auto-closes: done)
@@ -70,7 +77,9 @@ Notes:
 
 - **Two terminal paths** reach a done run without routing: `run-afk-loop`
   (after the task queue is approved) and `direct-implementation` on `:accepted`.
-  The route-after-plan checkpoint chooses between them.
+  The route-after-plan checkpoint chooses between them. In delegated AFK mode,
+  `run-afk-loop` first pours one sequential `workflow/gate "subagent"` per
+  approved task, then requires the `:human-acceptance-afk` HITL checkpoint.
 - **`:abort` is reachable from every HITL (`:human`) checkpoint** — the intake
   worktree checkpoint and the four sign-off checkpoints. The two `:agent`
   checkpoints (`:discuss-scope`, `:route-after-plan`) offer no abort. Aborting
@@ -181,6 +190,24 @@ Driving example with one revise round:
 ;; => {:ready [{:artifact "specs/*.delta.md" :skills "devflow" ...}] :done false}
 ```
 
+Delegating approved AFK tasks through treadle is opt-in at task sign-off. Pass
+`:tasks` and a harness when approving the task queue; task maps may be keyword-
+or string-keyed (choice input often round-trips through JSON). Task `:id`
+values must be token-safe strings (`[A-Za-z0-9][A-Za-z0-9._-]*`) because they
+become step ids (`:task-<id>`); anything else fails loudly before any pour:
+
+```clojure
+(devflow/choose! "search-filters" :approved
+  {:tasks [{:id "impl" :title "Implement filters" :body "Use the signed-off plan."}
+           {:id "tests" :title "Add regression tests"}]
+   :delegate-harness "pi-main"
+   :delegate-cwd "/path/to/feature/worktree"})
+;; => {:ready [{:gate "subagent" :title "Delegate AFK task impl for search-filters" ...}]
+;;     :done false}
+```
+
+Without `:tasks`, approval keeps the legacy single `:run-afk-loop` manual step.
+
 ## 5. Registries
 
 Devflow exposes its constructors and commands as data (stringified symbols) for
@@ -215,9 +242,14 @@ molecule; the rest sit on individual step/checkpoint strands.
 | `devflow/stage` | Lifecycle stage: `"intake"`, `"proposal"`, `"spec-plan"`, `"route-after-plan"`, `"tasks"`, `"afk"`, `"implementation"`, `"abort"`. | Root molecule, by each stage constructor. |
 | `devflow/feature` | The feature name (same value as the run-id). | Root molecule, by each stage constructor. |
 | `devflow/artifact` | Artifact a step produces (`"brief"`, `"proposal.md"`, `"specs/*.delta.md"`, `"<feature>.plan.md"`, `"tasks/index.yml"`). `step-view` surfaces it as `:artifact` (via the engine's `workflow/artifact` → `devflow/artifact` fallback). | Artifact-writing steps. |
+| `devflow/task` | Stable approved AFK task id attached to delegated `run-afk-loop` task gates. | `:task-<id>` subagent gates in delegated AFK mode. |
 | `workflow/hitl` | `"true"` marking a human-in-the-loop checkpoint. | Auto-stamped by the engine `checkpoint` builder for every `:kind :human` checkpoint (workflow.md §7); devflow no longer sets it by hand. |
-| `workflow/decision-point` | Freeform label for what the checkpoint decides (`"worktree-ready"`, `"scope-ready"`, `"proposal-signed-off"`, `"choose-tasks-or-implementation"`, `"plan-signed-off"`, `"tasks-signed-off"`, `"implementation-accepted"`). | Each checkpoint. |
+| `workflow/decision-point` | Freeform label for what the checkpoint decides (`"worktree-ready"`, `"scope-ready"`, `"proposal-signed-off"`, `"choose-tasks-or-implementation"`, `"plan-signed-off"`, `"tasks-signed-off"`, `"afk-accepted"`, `"implementation-accepted"`). | Each checkpoint. |
 | `workflow/action-ref` | Pointer to the action/skill an agent should invoke (`"devflow.worktree.ensure"`, `"devflow.proposal.orient"`, `"devflow.tasks.run-afk-loop"`, `"devflow.implementation.direct"`, `"devflow.implementation.validate"`, `"devflow.abort.record"`). Surfaced by `step-view`. | Steps/checkpoints that hand off to a named action. |
+| `workflow/gate` | `"subagent"` on delegated AFK task gates; the treadle consumes these gates when installed, otherwise they remain ordinary external wait-points. | `:task-<id>` gates in delegated AFK mode. |
+| `shuttle/harness` | Harness or alias requested for the delegated task run. Required for each delegated AFK gate, via task `:harness` or `:delegate-harness`. | `:task-<id>` gates in delegated AFK mode. |
+| `shuttle/prompt` | Prompt sent to the delegated shuttle run, prefixed with feature/task context and then the task body or title. | `:task-<id>` gates in delegated AFK mode. |
+| `shuttle/cwd` | Optional working directory for delegated AFK task runs, from `:delegate-cwd`. | `:task-<id>` gates in delegated AFK mode. |
 | `workflow/instruction` | Freeform instruction text surfaced in `step-view`. | Steps/checkpoints needing explicit guidance. |
 | `skills` | Skill/tool hint (`"devflow"`), surfaced in `step-view`. | The four `write-*` artifact steps (`:capture-brief` produces `"brief"` without it). |
 

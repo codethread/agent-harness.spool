@@ -119,6 +119,108 @@
           (is (= "Capture user brief for workflow-loop" (:title ready)))
           (is (= "intake" (:stage ready))))))))
 
+(deftest devflow-afk-loop-delegation-shapes-gates-and-legacy-step
+  (let [legacy (workflow/describe (devflow/run-afk-loop-workflow {}) {:feature "widgets"})
+        delegated (workflow/describe
+                   (devflow/run-afk-loop-workflow
+                    {:feature "widgets"
+                     :tasks [{:id "a" :title "Do A" :body "Body A"}
+                             {:id "b" :title "Do B"}]
+                     :delegate-harness "pi-main"
+                     :delegate-cwd "/tmp/widgets"})
+                   {:feature "widgets"})
+        steps (into {} (map (juxt :id identity)) (:steps delegated))]
+    (is (= [:run-afk-loop] (mapv :id (:steps legacy))))
+    (is (= [:task-a :task-b :human-acceptance-afk]
+           (mapv :id (:steps delegated))))
+    (is (= "subagent" (:gate (steps :task-a))))
+    (is (= "subagent" (:gate (steps :task-b))))
+    (is (= [] (:depends-on (steps :task-a))))
+    (is (= [:task-a] (:depends-on (steps :task-b))))
+    (is (= [:task-b] (:depends-on (steps :human-acceptance-afk))))
+    (is (= ["accepted" "revise" "abort"]
+           (mapv :key (:choices (steps :human-acceptance-afk))))))
+  (let [payload (workflow/compile
+                 (devflow/run-afk-loop-workflow
+                  {:feature "widgets"
+                   :tasks [{:id "a" :title "Do A" :body "Body A"}
+                           {:id "b" :title "Do B" :harness "pi-alt"}]
+                   :delegate-harness "pi-main"
+                   :delegate-cwd "/tmp/widgets"})
+                 {:feature "widgets"})
+        by-local-id (into {} (map (juxt :ref identity)) (:strands payload))]
+    (is (= {"workflow/gate" "subagent"
+            "devflow/task" "a"
+            "shuttle/harness" "pi-main"
+            "shuttle/cwd" "/tmp/widgets"}
+           (select-keys (get-in by-local-id [:task-a :attributes])
+                        ["workflow/gate" "devflow/task" "shuttle/harness" "shuttle/cwd"])))
+    (is (= "Devflow AFK task for widgets: Do A\n\nBody A"
+           (get-in by-local-id [:task-a :attributes "shuttle/prompt"])))
+    (is (= "pi-alt"
+           (get-in by-local-id [:task-b :attributes "shuttle/harness"])))))
+
+(deftest devflow-afk-loop-prompt-renders-from-params
+  ;; feature supplied only as a workflow param, not a constructor opt: the
+  ;; prompt must render at compile time like the title instead of baking nil
+  (let [payload (workflow/compile
+                 (devflow/run-afk-loop-workflow
+                  {:tasks [{:id "a" :title "Do A" :body "Body A"}]
+                   :delegate-harness "pi-main"})
+                 {:feature "widgets"})
+        task-a (first (filter #(= :task-a (:ref %)) (:strands payload)))]
+    (is (= "Devflow AFK task for widgets: Do A\n\nBody A"
+           (get-in task-a [:attributes "shuttle/prompt"])))))
+
+(deftest devflow-afk-loop-delegation-fails-loudly
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must not be empty"
+                        (devflow/run-afk-loop-workflow {:tasks [] :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"token-safe"
+                        (devflow/run-afk-loop-workflow {:tasks [{:title "No id"}]
+                                                       :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"token-safe"
+                        (devflow/run-afk-loop-workflow {:tasks [{:id "has space" :title "Bad id"}]
+                                                       :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"token-safe"
+                        (devflow/run-afk-loop-workflow {:tasks [{:id :kw-id :title "Bad id"}]
+                                                       :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"harness must be a non-blank string"
+                        (devflow/run-afk-loop-workflow {:tasks [{:id "a" :title "A" :harness :pi}]
+                                                       :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ids must be unique"
+                        (devflow/run-afk-loop-workflow {:tasks [{:id "a" :title "A"}
+                                                                {:id "a" :title "Again"}]
+                                                       :delegate-harness "pi"})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"missing harness resolution"
+                        (devflow/run-afk-loop-workflow {:tasks [{:id "a" :title "A"}]}))))
+
+(deftest devflow-afk-loop-routing-and-revision-pour-delegated-gates
+  (with-runtime
+    (fn [_ _]
+      (workflow/start! "afk-route"
+                       (devflow/task-breakdown-workflow {:feature "afk-route"})
+                       {:feature "afk-route"}
+                       {:family "devflow"
+                        :definition 'skein.spools.devflow/task-breakdown-workflow
+                        :context {:feature "afk-route"}})
+      (dotimes [_ 2] (workflow/complete! "afk-route"))
+      (let [ready (:ready (devflow/choose! "afk-route" :approved
+                                           {"tasks" [{"id" "one" "title" "One" "body" "Do one"}
+                                                      {"id" "two" "title" "Two"}]
+                                            "delegate-harness" "sh"}))]
+        (is (= [{:title "Delegate AFK task one for afk-route" :gate "subagent"}]
+               (mapv #(select-keys % [:title :gate]) ready)))
+        (is (= "afk" (get-in (workflow/current-root "afk-route") [:attributes :devflow/stage]))))
+      (let [after-first (:ready (devflow/complete! "afk-route" {:by "run-one"}))]
+        (is (= [{:title "Delegate AFK task two for afk-route" :gate "subagent"}]
+               (mapv #(select-keys % [:title :gate]) after-first))))
+      (devflow/complete! "afk-route" {:by "run-two"})
+      (is (= "human-acceptance-afk" (:checkpoint (devflow/next-step "afk-route"))))
+      (let [revised (:ready (devflow/choose! "afk-route" :revise))]
+        (is (= [{:title "Delegate AFK task one for afk-route" :gate "subagent"}]
+               (mapv #(select-keys % [:title :gate]) revised)))
+        (is (= "afk-route" (:run-id (first revised))))))))
+
 (deftest devflow-registered-routes-cover-later-stage-runtime-paths
   (with-runtime
     (fn [_ _]

@@ -54,6 +54,7 @@ Rules of the road:
   marked `workflow/hitl` are human decisions: stop and ask the user, do not
   choose for them.
 - Aborting requires a reason: `strand op devflow-choose <feature> abort '{"reason":"..."}'`.
+- To delegate the AFK loop through treadle, approve task sign-off with task data: `strand op devflow-choose <feature> approved '{"tasks":[...],"delegate-harness":"pi-main","delegate-cwd":"/path/to/worktree"}'`.
 - A routed choice closes out the current stage's remaining steps — it is a hard
   cutover, not a pause (workflow.md §5).
 - The same commands are available in the trusted REPL via
