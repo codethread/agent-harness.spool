@@ -9,14 +9,16 @@ and `skein.spools.devflow` from the weaver classpath, plus
 - ops: `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`,
   `devflow-complete`, `devflow-advance`, `devflow-describe`,
   `devflow-history`, `devflow-archive`, `devflow-status`, `workflow-runs`,
-  `current-dags`, `devflow-conventions`
+  `current-dags`, `agent-delegate`, `devflow-conventions`
 - queries: `work`, `feature-active`, `feature-work`, `feature-owner-work`,
   `feature-run`, `workflow-runs`, `devflow-runs`
 - patterns: `agent-plan`
 - shuttle harness aliases: `pi-main` (delegation default; `strand op agent
-  harnesses` lists all). Delegate agent work with `strand op agent spawn`
-  (manual: `strand op agent about`); workflow `:subagent` gates are fulfilled
-  automatically by the treadle (`spools/shuttle/treadle.md`).
+  harnesses` lists all). Delegate existing task strands with `strand op
+  agent-delegate <task-id>`; raw `strand op agent spawn` remains the escape
+  hatch for custom shuttle runs (manual: `strand op agent about`). Workflow
+  `:subagent` gates are fulfilled automatically by the treadle
+  (`spools/shuttle/treadle.md`).
 
 Contracts for the underlying spools live beside their code:
 [`src/skein/spools/workflow.md`](../src/skein/spools/workflow.md) (engine) and
@@ -100,11 +102,16 @@ strand ready --query feature-work --param feature=<slug>
 
 Any strand delegated to another agent must include a descriptive `body`
 attribute. Use `owner` plus `branch` together when assigning ready work so
-other agents avoid duplicating it. Delegated agents must read their assigned
-strand, append `progress` attributes while working, set `status=implemented`
-when their scoped work is ready for coordinator verification, never close their
-own assigned strand, and never mutate sibling or parent strands unless the
-assignment explicitly says so.
+other agents avoid duplicating it. Prefer the repo-local delegation op:
+
+```sh
+strand op agent-delegate <task-id> --prompt "Extra implementation constraints if needed"
+```
+
+Delegated agents must read their assigned strand, append `progress` attributes
+while working, set `status=implemented` when their scoped work is ready for
+coordinator verification, never close their own assigned strand, and never
+mutate sibling or parent strands unless the assignment explicitly says so.
 
 ## Config changes
 

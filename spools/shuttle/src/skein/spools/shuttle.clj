@@ -470,7 +470,9 @@
         (api/update (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
       run)))
 
-(defn- run-summary [run]
+(defn run-summary
+  "Project a run strand into the compact summary shape the op surface returns."
+  [run]
   (cond-> {:id (:id run)
            :title (:title run)
            :state (:state run)

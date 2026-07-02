@@ -491,7 +491,8 @@
          {:name "devflow-archive" :usage "strand op devflow-archive <feature>"}
          {:name "devflow-status" :usage "strand op devflow-status <feature>"}
          {:name "workflow-runs" :usage "strand op workflow-runs [family]"}
-         {:name "current-dags" :usage "strand op current-dags"}]
+         {:name "current-dags" :usage "strand op current-dags"}
+         {:name "agent-delegate" :usage "strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]"}]
    :patterns [{:name "agent-plan"
                :purpose "Lightweight CLI-created plan/task DAG for general agent work outside the devflow lifecycle."}]
    :queries [{:name "feature-active"
@@ -508,6 +509,128 @@
               :usage "strand list --query devflow-runs"}
              {:name "work"
               :usage "strand ready --query work"}]})
+
+;; ---------------------------------------------------------------------------
+;; agent-delegate op: repo-local delegated-agent contract over shuttle
+;; ---------------------------------------------------------------------------
+
+(defn- config-dir
+  "Return the active weaver config directory."
+  []
+  (or (get-in @runtime/current-runtime [:metadata :config-dir])
+      (throw (ex-info "agent-delegate requires an active weaver runtime" {}))))
+
+(defn- repo-root-dir
+  "Return the repo root for this config workspace."
+  []
+  (-> (java.io.File. (config-dir))
+      .getParentFile
+      .getCanonicalPath))
+
+(defn- parse-op-argv
+  "Parse op argv into positional args and single-value flags."
+  [op argv flag-spec]
+  (loop [remaining argv
+         positional []
+         flags {}]
+    (if-let [arg (first remaining)]
+      (if (str/starts-with? arg "--")
+        (let [kind (or (get flag-spec arg)
+                       (throw (ex-info (str op " unknown flag")
+                                       {:flag arg :allowed (sort (keys flag-spec))})))
+              value (or (second remaining)
+                        (throw (ex-info (str op " flag requires a value")
+                                        {:flag arg})))]
+          (when-not (= :single kind)
+            (throw (ex-info (str op " unsupported flag kind")
+                            {:flag arg :kind kind})))
+          (recur (drop 2 remaining) positional (assoc flags arg value)))
+        (recur (rest remaining) (conj positional arg) flags))
+      {:positional positional :flags flags})))
+
+(defn- parse-long-flag!
+  "Parse a long-valued flag, failing loudly on malformed input."
+  [flag value]
+  (try
+    (Long/parseLong value)
+    (catch NumberFormatException _
+      (throw (ex-info (str flag " must be an integer")
+                      {:flag flag :value value})))))
+
+(defn- active-task!
+  "Return task-id's active strand, failing loudly when missing or inactive."
+  [rt task-id]
+  (let [task (or (api/show rt task-id)
+                 (throw (ex-info "agent-delegate task not found" {:task-id task-id})))]
+    (when-not (= "active" (:state task))
+      (throw (ex-info "agent-delegate task must be active"
+                      {:task-id task-id :state (:state task)})))
+    task))
+
+(defn- validation-text
+  "Return the task validation attribute as prompt text."
+  [validation]
+  (cond
+    (nil? validation) nil
+    (sequential? validation) (str/join "\n" validation)
+    :else (str validation)))
+
+(defn- agent-delegate-prompt
+  "Build the repo-local delegated-agent prompt for an active task strand.
+
+  The shuttle engine prepends its pinned-command run preamble; this prompt only
+  supplies task context, validation, and the repo delegated-agent contract. A
+  task with no body requires explicit extra prompt text, so accidental context-
+  free delegations fail loudly."
+  [task extra]
+  (let [task-id (:id task)
+        title (:title task)
+        attrs (:attributes task)
+        body-text (some-> (:body attrs) str str/trim not-empty)
+        validation (:validation attrs)
+        extra (some-> extra str/trim not-empty)]
+    (when (and (nil? body-text) (nil? extra))
+      (throw (ex-info "agent-delegate requires task body or --prompt"
+                      {:task-id task-id})))
+    (str "You are the delegated implementer for strand `" task-id "` (`" title "`) in the skein-src repo.\n"
+         "Read the assigned strand first with `strand show " task-id "` using the pinned command from the shuttle preamble.\n\n"
+         (when body-text
+           (str "Task body:\n" body-text "\n\n"))
+         (when-let [gate (validation-text validation)]
+           (str "Validation gate:\n" gate "\n\n"))
+         "Repo delegated-agent contract:\n"
+         "- Record progress with a `progress` attribute on the task strand and notes on the run.\n"
+         "- Set `status=implemented` on the task only when validation is green.\n"
+         "- Never close the assigned strand.\n"
+         "- Never mutate sibling or parent strands unless the body says so.\n"
+         "- Do not commit unless the body says so.\n"
+         (when extra
+           (str "\nExtra instructions:\n" extra "\n")))))
+
+(defn agent-delegate-op
+  "Spawn a shuttle run to implement an existing active task strand.
+
+  Usage: `strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]`."
+  [ctx]
+  (let [usage "strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]"
+        {:keys [positional flags]}
+        (parse-op-argv "agent-delegate" (:op/argv ctx)
+                       {"--harness" :single "--prompt" :single "--cwd" :single
+                        "--max-attempts" :single "--spawned-by" :single})
+        [task-id] (require-argv-range! "agent-delegate" positional 1 1 usage)
+        _ (require-non-blank! :task-id task-id)
+        rt @runtime/current-runtime
+        task (active-task! rt task-id)
+        max-attempts (some->> (get flags "--max-attempts")
+                              (parse-long-flag! "--max-attempts"))]
+    (shuttle/run-summary
+     (shuttle/spawn-run! (cond-> {:harness (or (get flags "--harness") "pi-main")
+                                  :prompt (agent-delegate-prompt task (get flags "--prompt"))
+                                  :parent task-id
+                                  :cwd (or (get flags "--cwd") (repo-root-dir))
+                                  :title (str "Delegate: " (:title task))}
+                           max-attempts (assoc :max-attempts max-attempts)
+                           (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; install!
@@ -599,4 +722,8 @@
          (api/register-op!
           'devflow-conventions
           "Show repo-local spools, ops, patterns, and queries"
-          'config/devflow-conventions-op)]})
+          'config/devflow-conventions-op)
+         (api/register-op!
+          'agent-delegate
+          "Delegate an active task strand to a shuttle agent run"
+          'config/agent-delegate-op)]})

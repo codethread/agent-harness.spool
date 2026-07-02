@@ -3,6 +3,7 @@
   agent-plan weave pattern, and the devflow op wrappers over
   skein.spools.devflow."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [skein.db-test :as db-test]
             [skein.runtime.alpha :as runtime-alpha]
@@ -33,6 +34,10 @@
     (.mkdirs (java.io.File. config-dir))
     (let [rt (runtime/start! db-file {:world (test-world config-dir)})]
       (try
+        ;; config.clj's pi-main alias layers over the shipped :pi harness,
+        ;; which shuttle/install! registers in real startups; this fixture
+        ;; loads config.clj alone, so register the defaults here.
+        ((requiring-resolve 'skein.spools.shuttle/register-default-harnesses!))
         (load-file ".skein/config.clj")
         ((requiring-resolve 'config/install!))
         (f rt)
@@ -83,7 +88,8 @@
   (doseq [op-name ["current-dags" "devflow-start" "devflow-next" "devflow-choices"
                    "devflow-choose" "devflow-complete" "devflow-advance"
                    "devflow-describe" "devflow-history" "devflow-archive"
-                   "devflow-status" "workflow-runs" "devflow-conventions"]]
+                   "devflow-status" "workflow-runs" "devflow-conventions"
+                   "agent-delegate"]]
     (is (some #(= op-name (:name %)) (api/ops rt))))
   (is (some #(= "agent-plan" (:name %)) (api/patterns rt))))
 
@@ -139,6 +145,53 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"agent-plan"
                             (api/weave! rt :agent-plan
                                         {:feature "bad" :title "Bad" :tasks []}))))))
+
+(deftest agent-delegate-op-registers-and-fails-before-creating-runs
+  (with-config-runtime
+    (fn [rt]
+      (is (some #(= "agent-delegate" (:name %)) (api/ops rt)))
+      (is (some? (some #(= "agent-delegate" (:name %)) (:ops ((requiring-resolve 'config/install!))))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"expects between"
+                            (op! "agent-delegate" [])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"task not found"
+                            (op! "agent-delegate" ["missing"])))
+      (let [closed (api/add rt {:title "Closed task" :state "closed" :attributes {:body "Do it"}})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be active"
+                              (op! "agent-delegate" [(:id closed)]))))
+      (is (empty? (api/list rt [:= [:attr "shuttle/run"] "true"] {}))))))
+
+(deftest agent-delegate-op-validates-context-and-spawns-run
+  (with-config-runtime
+    (fn [rt]
+      (let [empty-task (api/add rt {:title "Empty task" :attributes {}})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires task body or --prompt"
+                              (op! "agent-delegate" [(:id empty-task)]))))
+      (let [task (api/add rt {:title "Implement delegate"
+                              :attributes {:body "Build the delegate op."
+                                           :validation ["clojure -M:test"]}})
+            run (op! "agent-delegate" [(:id task)])
+            stored (api/show rt (:id run))
+            attrs (:attributes stored)
+            edges (:edges (api/subgraph rt [(:id task)] {:type "parent-of"}))]
+        ;; the op returns shuttle's run summary, not the raw strand
+        (is (= "pending" (:phase run)))
+        (is (= "pi-main" (:harness run)))
+        (is (= "pi-main" (get attrs :shuttle/harness)))
+        (is (= (.getCanonicalPath (.getParentFile (io/file (get-in rt [:metadata :config-dir]))))
+               (get attrs :shuttle/cwd)))
+        (is (= #{(:id stored)}
+               (set (map :to_strand_id edges))))
+        (is (str/includes? (get attrs :shuttle/prompt) "Build the delegate op."))
+        (is (str/includes? (get attrs :shuttle/prompt) "clojure -M:test"))
+        (is (str/includes? (get attrs :shuttle/prompt) "status=implemented"))
+        (is (str/includes? (get attrs :shuttle/prompt) "Never close")))
+      (let [task (api/add rt {:title "Prompt-only task" :attributes {}})
+            run (op! "agent-delegate" [(:id task) "--prompt" "Use only this prompt." "--max-attempts" "5"])
+            attrs (:attributes (api/show rt (:id run)))]
+        (is (= 5 (get attrs :shuttle/max-attempts))))
+      (let [task (api/add rt {:title "Bad attempts" :attributes {:body "Try"}})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be an integer"
+                              (op! "agent-delegate" [(:id task) "--max-attempts" "nope"])))))))
 
 (deftest devflow-ops-drive-intake-into-proposal
   (with-config-runtime
