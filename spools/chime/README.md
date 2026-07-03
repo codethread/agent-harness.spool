@@ -2,15 +2,19 @@
 
 ## Overview
 
-`skein.spools.chime` is a local human-attention notification bridge for Skein
-workflows. It watches graph mutations and runs small rules that decide when a
-human should notice: HITL checkpoints becoming ready, shuttle agent failures,
-and treadle gate errors.
+`skein.spools.chime` is a local notification engine for Skein graph events.
+It watches strand mutations, evaluates small user-registered rules, and sends
+matching notices through a user-bound local notifier command.
 
-Chime spawns a user-configured local notifier process with the user's authority,
-so it is an approved local-root spool like shuttle rather than a shipped
-classpath spool. It owns only weaver-lifetime state: notifier binding, rules,
-deduplication, and recent failures.
+Chime knows nothing about any particular workflow or attribute vocabulary: it
+ships **no rules and no notifier**. A workspace's trusted config decides what
+deserves attention (rules) and each developer decides how to be told
+(notifier). It owns only weaver-lifetime state: the notifier binding, rules,
+deduplication memory, and recent failures.
+
+Chime spawns a user-configured local process with the user's authority, so it
+is an approved local-root spool like shuttle rather than a shipped classpath
+spool.
 
 ## Loading
 
@@ -33,10 +37,14 @@ Activate it from trusted startup config after syncing approved roots:
    :required? true})
 ```
 
-Install ordering matters when startup config also binds the notifier: load and
-install chime before calling `skein.spools.chime/set-notifier!`. Chime does not
-require shuttle or treadle to be installed; it only reads their public attribute
-vocabulary when those spools write it.
+`install!` registers only the graph-event handler. A useful setup then layers
+two things on top:
+
+- shared config (`init.clj` / a workspace spool) registers the workspace's
+  rules with `defrule!`, so the repo decides what needs attention;
+- each developer binds their notifier in gitignored `init.local.clj` with
+  `set-notifier!`, so how you get told (a notification daemon, `osascript`,
+  a bell) stays a personal choice.
 
 ## Notifier binding
 
@@ -45,21 +53,18 @@ Bind the notifier with plain data:
 ```clojure
 (require '[skein.spools.chime :as chime])
 
-(chime/set-notifier! {:argv ["cc-notify"]})
+(chime/set-notifier! {:argv ["my-notify"]})
 (chime/notifier)
 ```
 
-For each notification, chime appends the title as the final argv element and
-writes the body to stdin. The intended production command shape is:
+For each notification, chime spawns `:argv` with the title appended as the
+final argument and the body written to stdin — any command with the shape
+`my-notify <title>` (body on stdin) works, including a small wrapper script
+around whatever your platform uses.
 
-```sh
-cc-notify <title>
-# body on stdin
-```
-
-Chime does not hardcode `cc-notify`; tests and workspaces can bind any local
-command. Missing notifier bindings are loud: a fired rule records a failure in
-`(chime/failures)` instead of silently dropping the event.
+Notifier state is weaver-lifetime: re-bind on every startup/reload (which
+`init.local.clj` does naturally). With no notifier bound, a fired rule records
+a loud failure in `(chime/failures)` instead of silently dropping the event.
 
 Manual sends use the same path:
 
@@ -69,54 +74,54 @@ Manual sends use the same path:
 
 ## Rules
 
-Rule functions receive a context map containing at least `:event`, `:strand`,
-and `:ready-ids` (the set of ready strand ids, computed once per scan).
-Chime scans current strands after graph mutation events so readiness changes caused by
-another strand closing can be observed; batch events and their per-strand fanout
-share a `:batch/id` and trigger only one scan. Rule functions return nil for no
-notification or `{:title "..." :body "..."}` to send one.
+A rule is a named function registered by fully qualified symbol. On every
+graph mutation chime scans current strands and calls each rule with a context
+map containing at least:
+
+- `:strand` — the candidate strand being evaluated;
+- `:event` — the triggering graph event;
+- `:ready-ids` — the set of ready strand ids, computed once per scan, so
+  readiness rules need no extra queries.
+
+The rule returns nil for no notification or `{:title "..." :body "..."}` to
+send one. Scans are whole-graph on purpose — the strand worth notifying about
+is often not the strand that changed (closing one strand is what makes another
+ready). Batch events and their per-strand fanout share a `:batch/id` and
+trigger only one scan.
+
+Worked example — notify when a strand that parents other work is closed:
 
 ```clojure
-(chime/defrule! :my-rule 'my.workspace/rule-fn)
-(chime/rules)
-(chime/remove-rule! :my-rule)
+(ns my.rules
+  "Workspace notification rules."
+  (:require [skein.repl :as repl]))
+
+(defn parent-completed
+  "Notify when a strand with parent-of children reaches closed."
+  [{:keys [strand]}]
+  (when (and (= "closed" (:state strand))
+             (seq (repl/query [:edge/in "parent-of" [:= :id (:id strand)]])))
+    {:title (str "Plan complete: " (:title strand))
+     :body (str "Strand " (:id strand) " and the work it parents are finished.")}))
 ```
 
-`install!` registers three removable defaults:
-
-- `:hitl-checkpoint-ready` — an active `workflow/role "checkpoint"` strand with
-  truthy `workflow/hitl` that is currently ready.
-- `:agent-failure` — a strand whose `shuttle/phase` is `"failed"` or
-  `"exhausted"`; the body includes `shuttle/error` when present.
-- `:treadle-error` — a strand carrying `treadle/error`.
+```clojure
+(chime/defrule! :parent-completed 'my.rules/parent-completed)
+(chime/rules)
+(chime/remove-rule! :parent-completed)
+```
 
 Chime deduplicates notifications per `[rule strand]` while the rule keeps
 matching: a strand is marked seen only after the notifier process starts, so a
-missing or failing notifier does not swallow the alert, and the mark clears when
-the rule stops matching so a recurrence (a checkpoint blocked and made ready
-again) notifies again. Use `(chime/reset-seen!)` from tests or config to clear
-that memory.
+missing or failing notifier does not swallow the alert, and the mark clears
+when the rule stops matching so a recurrence notifies again. Use
+`(chime/reset-seen!)` from tests or config to clear that memory.
 
-Rule, notifier, and process failures are recorded by `(chime/failures)` and event
-handler failures remain visible through the Skein event failure surface.
-
-## Attribute-or-state vocabulary
-
-Chime observes only existing strand state and attributes:
-
-| Vocabulary | Meaning |
-|---|---|
-| `state "active"` | Candidate work still participates in readiness. |
-| `depends-on` edge | Blocks HITL checkpoint readiness while the target is active. |
-| `workflow/role "checkpoint"` | Marks a workflow checkpoint. |
-| `workflow/hitl true` or `"true"` | Marks a human-in-the-loop checkpoint. |
-| `shuttle/phase "failed"` / `"exhausted"` | Marks a failed agent run. |
-| `shuttle/error` | Failure detail included in agent-failure notification body. |
-| `treadle/error` | Gate bridge error detail included in treadle-error notification body. |
+Rule, notifier, and process failures are recorded by `(chime/failures)` and
+event handler failures remain visible through the Skein event failure surface.
 
 ## See also
 
 - [`../README.md`](../README.md) — shipped and approved local-root spool index.
 - [`../shuttle/README.md`](../shuttle/README.md) — local-root layout and loading pattern.
-- [`../shuttle/treadle.md`](../shuttle/treadle.md) — gate bridge install-ordering pattern.
 - [`../../docs/skein.md#authoring-your-own-spool-code`](../../docs/skein.md#authoring-your-own-spool-code) — authoring and loading local spools.

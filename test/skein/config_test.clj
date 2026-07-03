@@ -107,7 +107,10 @@
   (is (some #(= "delegate-pipeline" (:name %)) (api/patterns rt)))
   ;; agent review must consume the one authoritative policy text by default
   (is (= (var-get (requiring-resolve 'config/delegation-policy-text))
-         @@(requiring-resolve 'skein.spools.shuttle/default-review-contract))))
+         @@(requiring-resolve 'skein.spools.shuttle/default-review-contract)))
+  ;; the repo owns chime's attention rules; the chime engine ships none
+  (is (= [:agent-failure :hitl-checkpoint-ready :treadle-error]
+         (mapv :name ((requiring-resolve 'skein.spools.chime/rules))))))
 
 (deftest agent-plan-weave-creates-plan-and-task-dag
   (with-config-runtime

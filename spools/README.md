@@ -47,7 +47,7 @@ as the worked example of authoring your own spool
 |---|---|---|
 | `skein.spools.shuttle` | [shuttle/README.md](./shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
 | `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
-| `skein.spools.chime` | [chime/README.md](./chime/README.md) | Human-attention notification bridge: watches graph mutations and fires a configured local notifier command for ready HITL checkpoints, agent failures, and stalled gates. |
+| `skein.spools.chime` | [chime/README.md](./chime/README.md) | Notification engine: watches graph mutations, evaluates user-registered rules, and sends matches through a user-bound local notifier command. |
 
 ## Reference examples
 

@@ -15,10 +15,11 @@
    :spools ['skein.spools/shuttle]
    :call 'skein.spools.shuttle/install!
    :required? true})
-;; Chime installs here with no notifier bound: the notifier command is a
-;; personal choice, so each developer binds their own in gitignored
-;; init.local.clj (loaded after this file on startup and reload). Unbound
-;; chime records loud notifier-missing failures instead of notifying.
+;; Chime is a vocabulary-agnostic notification engine: it installs bare here,
+;; config.clj registers this repo's attention rules (HITL checkpoints, agent
+;; failures, treadle errors), and each developer binds how they are notified
+;; in gitignored init.local.clj (loaded after this file on startup and
+;; reload). Unbound chime records loud notifier-missing failures.
 (runtime-alpha/use! :skein/spools-chime
   {:ns 'skein.spools.chime
    :spools ['skein.spools/chime]

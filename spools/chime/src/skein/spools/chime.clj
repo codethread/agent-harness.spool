@@ -34,16 +34,6 @@
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
 
-(defn- attr
-  "Read attribute `k` from strand, accepting keyword or string keys."
-  [strand k]
-  (let [attrs (:attributes strand)
-        string-key (if (keyword? k) (subs (str k) 1) (str k))
-        keyword-key (if (keyword? k) k (keyword k))]
-    (if (contains? attrs keyword-key)
-      (get attrs keyword-key)
-      (get attrs string-key))))
-
 (defn- record-failure! [entry]
   (let [full (assoc entry :at (now))]
     (swap! failure-log #(->> (conj (vec %) full) (take-last 100) vec))
@@ -201,45 +191,6 @@
                                   (vec (take-last scanned-batch-memory (conj ids batch-id))))))]
       (boolean (some #(= batch-id %) old)))))
 
-(defn- checkpoint-hitl? [strand]
-  (let [value (attr strand :workflow/hitl)]
-    (and (= "checkpoint" (attr strand :workflow/role))
-         (or (= true value) (= "true" value)))))
-
-(defn hitl-checkpoint-ready
-  "Return a notification when a HITL checkpoint strand is currently ready.
-
-  Reads the scan-shared `:ready-ids` set so readiness is computed once per
-  scan rather than once per candidate strand."
-  [{:keys [strand ready-ids]}]
-  (when (and strand
-             (= "active" (:state strand))
-             (checkpoint-hitl? strand)
-             (contains? (or ready-ids (ready-id-set)) (:id strand)))
-    {:title (str "HITL checkpoint ready: " (:title strand))
-     :body (str "Checkpoint " (:id strand) " is ready for human attention.")}))
-
-(defn agent-failure
-  "Return a notification when a shuttle run has failed or exhausted."
-  [{:keys [strand]}]
-  (when (contains? #{"failed" "exhausted"} (attr strand :shuttle/phase))
-    {:title (str "Agent run " (attr strand :shuttle/phase) ": " (:title strand))
-     :body (str "Strand " (:id strand) " entered shuttle/phase " (attr strand :shuttle/phase)
-                (when-let [error (attr strand :shuttle/error)]
-                  (str "\n\n" error)))}))
-
-(defn treadle-error
-  "Return a notification when a strand carries a treadle/error attribute."
-  [{:keys [strand]}]
-  (when-let [error (attr strand :treadle/error)]
-    {:title (str "Treadle error: " (:title strand))
-     :body (str "Strand " (:id strand) " has treadle/error:\n\n" error)}))
-
-(defn- install-default-rules! []
-  (defrule! :hitl-checkpoint-ready 'skein.spools.chime/hitl-checkpoint-ready)
-  (defrule! :agent-failure 'skein.spools.chime/agent-failure)
-  (defrule! :treadle-error 'skein.spools.chime/treadle-error))
-
 (defn- dispatch-rule! [context strand {:keys [name fn]}]
   (let [seen-key [name (:id strand)]
         rule-fn @(resolve-rule-fn fn)
@@ -288,10 +239,12 @@
   (scan! event))
 
 (defn install!
-  "Install chime's event handler and default rules into the active weaver."
+  "Install chime's event handler into the active weaver.
+
+  Chime ships no rules and no notifier: trusted config supplies rules with
+  `defrule!` and a notifier with `set-notifier!`."
   []
   (let [runtime (rt)]
-    (install-default-rules!)
     (api/register-event-handler! runtime :chime/engine event-types
                                  'skein.spools.chime/on-event
                                  {:spool "chime"})

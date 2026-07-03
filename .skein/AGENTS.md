@@ -5,11 +5,7 @@ This repo's `.skein` world is thin glue over the shipped reference spools.
 and `skein.spools.devflow` from the weaver classpath, plus
 `skein.spools.shuttle` and `skein.spools.treadle` from the approved
 `spools/shuttle` local root and `skein.spools.chime` from the approved
-`spools/chime` local root (HITL checkpoints, agent failures, and stalled
-gates raise notifications; each developer binds their own notifier command
-in gitignored `init.local.clj`, e.g. `(chime/set-notifier! {:argv
-["cc-notify"]})` — unbound chime records loud notifier-missing failures
-instead), then loads `.skein/config.clj`, which registers:
+`spools/chime` local root, then loads `.skein/config.clj`, which registers:
 
 - ops: `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`,
   `devflow-complete`, `devflow-advance`, `devflow-describe`,
@@ -30,6 +26,14 @@ instead), then loads `.skein/config.clj`, which registers:
   notes on the target strand. Raw `strand op agent spawn` remains the escape hatch for custom shuttle
   runs (manual: `strand op agent about`). Workflow `:subagent` gates are
   fulfilled automatically by the treadle (`spools/shuttle/treadle.md`).
+- chime attention rules: `hitl-checkpoint-ready`, `agent-failure`, and
+  `treadle-error`. Notification is already set up for everything a human
+  needs to action; each developer only binds how they are told, in
+  gitignored `.skein/init.local.clj`, e.g. `(require '[skein.spools.chime
+  :as chime]) (chime/set-notifier! {:argv ["cc-notify"]})` — swap the argv
+  for `osascript` or anything with the `cmd <title>` + body-on-stdin shape.
+  Unbound chime records loud notifier-missing failures in
+  `(chime/failures)`.
 
 Contracts for the underlying spools live in the repo-root spools area:
 [`spools/workflow.md`](../spools/workflow.md) (engine) and

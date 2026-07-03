@@ -1,13 +1,17 @@
 (ns skein.chime-test
-  "Tests for the chime local notification spool against a real weaver runtime."
+  "Tests for the chime local notification spool against a real weaver runtime.
+
+  Chime ships no rules, so these tests register their own small rules over a
+  neutral attribute vocabulary; the parent-completed rule mirrors the worked
+  example in spools/chime/README.md."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.api.batch.alpha :as batch]
             [skein.api.weaver.alpha :as api]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]
+            [skein.repl :as repl]
             [skein.spools.chime :as chime]))
 
 (defn- temp-config-dir []
@@ -71,6 +75,51 @@
     (chime/set-notifier! {:argv [script]})
     out-file))
 
+;; --- test rules over a neutral attribute vocabulary ------------------------
+
+(defn- test-attr [strand k]
+  (let [attrs (:attributes strand)]
+    (or (get attrs (keyword k)) (get attrs k))))
+
+(defn phase-failed-rule
+  "Notify when a strand's phase attribute is failed."
+  [{:keys [strand]}]
+  (when (= "failed" (test-attr strand "phase"))
+    {:title (str "Run failed: " (:title strand))
+     :body (str "Strand " (:id strand)
+                (when-let [error (test-attr strand "error")]
+                  (str "\n\n" error)))}))
+
+(defn needs-human-ready-rule
+  "Notify when an active strand flagged needs-human is ready."
+  [{:keys [strand ready-ids]}]
+  (when (and (= "active" (:state strand))
+             (= "true" (test-attr strand "needs-human"))
+             (contains? ready-ids (:id strand)))
+    {:title (str "Needs human: " (:title strand))
+     :body (str "Strand " (:id strand) " is ready for attention.")}))
+
+(defn parent-completed-rule
+  "README worked example: notify when a strand with parent-of children closes."
+  [{:keys [strand]}]
+  (when (and (= "closed" (:state strand))
+             (seq (repl/query [:edge/in "parent-of" [:= :id (:id strand)]])))
+    {:title (str "Plan complete: " (:title strand))
+     :body (str "Strand " (:id strand) " and the work it parents are finished.")}))
+
+(defn- throwing-rule [_]
+  (throw (ex-info "rule boom" {:why :test})))
+
+(defn- invalid-notification-rule [_]
+  {:body "missing title"})
+
+;; --- tests ------------------------------------------------------------------
+
+(deftest install-registers-no-rules
+  (with-chime
+    (fn [_ _]
+      (is (= [] (chime/rules))))))
+
 (deftest notifier-binding-and-manual-notify
   (with-chime
     (fn [_ config-dir]
@@ -97,92 +146,100 @@
                             (chime/defrule! :bad 'not-qualified)))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cannot be resolved"
                             (chime/defrule! :bad 'missing.ns/fn)))
-      (is (= :agent-failure (:rule (chime/defrule! "agent-failure" 'skein.spools.chime/agent-failure))))
-      (is (= :agent-failure (:removed (chime/remove-rule! :agent-failure))))
+      (is (= :phase-failed (:rule (chime/defrule! "phase-failed" 'skein.chime-test/phase-failed-rule))))
+      (is (= :phase-failed (:removed (chime/remove-rule! :phase-failed))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Rule not found"
-                            (chime/remove-rule! :agent-failure))))))
+                            (chime/remove-rule! :phase-failed))))))
 
 (deftest missing-notifier-is-recorded-loudly
   (with-chime
     (fn [rt _]
-      (let [run (api/add rt {:title "failed agent"
-                             :attributes {"shuttle/phase" "failed"
-                                          "shuttle/error" "boom"}})]
+      (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
+      (let [run (api/add rt {:title "failed run"
+                             :attributes {"phase" "failed"
+                                          "error" "boom"}})]
         (chime/scan! {:strand/id (:id run)})
         (is (= :notifier-missing (:kind (last (chime/failures)))))
-        (is (= "Agent run failed: failed agent" (:title (last (chime/failures)))))))))
+        (is (= "Run failed: failed run" (:title (last (chime/failures)))))))))
 
-(deftest default-agent-and-treadle-rules-fire-end-to-end
+(deftest registered-rules-fire-end-to-end
   (with-chime
     (fn [rt config-dir]
+      (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
+      (chime/defrule! :parent-completed 'skein.chime-test/parent-completed-rule)
       (let [out-file (bind-file-notifier! config-dir)
-            failed (api/add rt {:title "agent a"
-                                :attributes {"shuttle/phase" "failed"
-                                             "shuttle/error" "stacktrace"}})
-            errored (api/add rt {:title "gate b"
-                                 :attributes {"treadle/error" "no harness"}})]
+            failed (api/add rt {:title "run a"
+                                :attributes {"phase" "failed"
+                                             "error" "stacktrace"}})
+            child (api/add rt {:title "child work"})
+            parent (api/add rt {:title "plan p"
+                                :edges [{:type "parent-of" :to (:id child)}]})]
         (chime/scan! {:strand/id (:id failed)})
-        (chime/scan! {:strand/id (:id errored)})
-        (eventually #(file-contains? out-file "Agent run failed: agent a"))
-        (eventually #(file-contains? out-file "Treadle error: gate b"))
+        (eventually #(file-contains? out-file "Run failed: run a"))
         ;; titles and bodies land in separate appends, so bodies need their own wait
         (is (eventually #(file-contains? out-file "stacktrace")))
-        (is (eventually #(file-contains? out-file "no harness")))))))
+        (testing "parent-completed matches only once the parent closes"
+          (Thread/sleep 150)
+          (is (not (file-contains? out-file "Plan complete: plan p")))
+          (api/update rt (:id parent) {:state "closed"})
+          (chime/scan! {:strand/id (:id parent)})
+          (is (eventually #(file-contains? out-file "Plan complete: plan p"))))))))
 
-(deftest hitl-checkpoint-ready-born-ready-and-unblocked
+(deftest ready-rule-fires-born-ready-and-when-unblocked
   (with-chime
     (fn [rt config-dir]
+      (chime/defrule! :needs-human 'skein.chime-test/needs-human-ready-rule)
       (let [out-file (bind-file-notifier! config-dir)
             born (api/add rt {:title "Approve proposal"
-                              :attributes {"workflow/role" "checkpoint"
-                                           "workflow/hitl" "true"}})]
+                              :attributes {"needs-human" "true"}})]
         (chime/scan! {:strand/id (:id born)})
-        (eventually #(file-contains? out-file "HITL checkpoint ready: Approve proposal"))
+        (eventually #(file-contains? out-file "Needs human: Approve proposal"))
         (let [blocker (api/add rt {:title "blocker"})
               blocked (:id (api/add rt {:title "Approve blocked"
-                                        :attributes {"workflow/role" "checkpoint"
-                                                     "workflow/hitl" "true"}
+                                        :attributes {"needs-human" "true"}
                                         :edges [{:type "depends-on" :to (:id blocker)}]}))]
           (chime/scan! {:strand/id blocked})
           (Thread/sleep 150)
-          (is (not (file-contains? out-file "HITL checkpoint ready: Approve blocked")))
+          (is (not (file-contains? out-file "Needs human: Approve blocked")))
           (api/update rt (:id blocker) {:state "closed"})
           (chime/scan! {:strand/id (:id blocker)})
-          (eventually #(file-contains? out-file "HITL checkpoint ready: Approve blocked")))))))
+          (eventually #(file-contains? out-file "Needs human: Approve blocked")))))))
 
 (deftest dedup-and-reset-seen
   (with-chime
     (fn [rt config-dir]
+      (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
       (let [out-file (bind-file-notifier! config-dir)
-            run (api/add rt {:title "flaky agent"
-                             :attributes {"shuttle/phase" "failed"
-                                          "shuttle/error" "boom"}})]
+            run (api/add rt {:title "flaky run"
+                             :attributes {"phase" "failed"
+                                          "error" "boom"}})]
         (chime/scan! {:strand/id (:id run)})
-        (eventually #(file-contains? out-file "flaky agent"))
+        (eventually #(file-contains? out-file "flaky run"))
         (let [once (slurp out-file)]
           (chime/scan! {:strand/id (:id run)})
           (Thread/sleep 150)
           (is (= once (slurp out-file)))
           (is (= {:seen 0} (chime/reset-seen!)))
           (chime/scan! {:strand/id (:id run)})
-          (eventually #(> (count (re-seq #"flaky agent" (slurp out-file))) 1)))))))
+          (eventually #(> (count (re-seq #"flaky run" (slurp out-file))) 1)))))))
 
 (deftest dedup-rearms-when-rule-stops-matching
   (with-chime
     (fn [rt config-dir]
+      (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
       (let [out-file (bind-file-notifier! config-dir)
-            run (api/add rt {:title "retried agent"
-                             :attributes {"shuttle/phase" "failed"
-                                          "shuttle/error" "first crash"}})]
+            run (api/add rt {:title "retried run"
+                             :attributes {"phase" "failed"
+                                          "error" "first crash"}})]
         (chime/scan! {:strand/id (:id run)})
-        (eventually #(file-contains? out-file "retried agent"))
+        (eventually #(file-contains? out-file "retried run"))
         ;; recovery clears the seen mark, so a later recurrence notifies again
-        (api/update rt (:id run) {:attributes {"shuttle/phase" "done"}})
+        (api/update rt (:id run) {:attributes {"phase" "done"}})
         (chime/scan! {:strand/id (:id run)})
-        (api/update rt (:id run) {:attributes {"shuttle/phase" "failed"
-                                               "shuttle/error" "second crash"}})
+        (api/update rt (:id run) {:attributes {"phase" "failed"
+                                               "error" "second crash"}})
         (chime/scan! {:strand/id (:id run)})
-        (eventually #(> (count (re-seq #"retried agent" (slurp out-file))) 1))))))
+        (eventually #(> (count (re-seq #"retried run" (slurp out-file))) 1))))))
 
 (deftest rule-failures-are-recorded
   (with-chime
@@ -196,12 +253,6 @@
         (chime/scan! {:strand/id (:id strand)})
         (is (= :rule (:kind (last (chime/failures)))))
         (is (= :invalid (:rule (last (chime/failures)))))))))
-
-(defn- throwing-rule [_]
-  (throw (ex-info "rule boom" {:why :test})))
-
-(defn- invalid-notification-rule [_]
-  {:body "missing title"})
 
 (deftest spool-loads-through-approved-spool-workspace-flow
   (let [db-file (db-test/temp-db-file)

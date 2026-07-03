@@ -12,6 +12,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.patterns.alpha :as patterns]
+            [skein.spools.chime :as chime]
             [skein.spools.devflow :as devflow]
             [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
@@ -879,6 +880,48 @@
      :dev/mermaid (flow-status-mermaid gates ready-ids)}))
 
 ;; ---------------------------------------------------------------------------
+;; chime attention rules: what this repo's devflow considers worth a human's
+;; attention. The chime engine is vocabulary-agnostic; these rules own the
+;; workflow/shuttle/treadle knowledge. Developers bind how they are notified
+;; in gitignored init.local.clj with (chime/set-notifier! {:argv [...]}).
+;; ---------------------------------------------------------------------------
+
+(defn hitl-checkpoint-ready-rule
+  "Notify when a human-in-the-loop workflow checkpoint is ready to decide."
+  [{:keys [strand ready-ids]}]
+  (let [hitl (config-attr strand :workflow/hitl)]
+    (when (and (= "active" (:state strand))
+               (= "checkpoint" (config-attr strand :workflow/role))
+               (or (= true hitl) (= "true" hitl))
+               (contains? ready-ids (:id strand)))
+      {:title (str "HITL checkpoint ready: " (:title strand))
+       :body (str "Checkpoint " (:id strand) " is ready for human attention.")})))
+
+(defn agent-failure-rule
+  "Notify when a shuttle run has failed or exhausted its attempts."
+  [{:keys [strand]}]
+  (let [phase (config-attr strand :shuttle/phase)]
+    (when (contains? #{"failed" "exhausted"} phase)
+      {:title (str "Agent run " phase ": " (:title strand))
+       :body (str "Strand " (:id strand) " entered shuttle/phase " phase
+                  (when-let [error (config-attr strand :shuttle/error)]
+                    (str "\n\n" error)))})))
+
+(defn treadle-error-rule
+  "Notify when a workflow gate is stamped with a treadle error."
+  [{:keys [strand]}]
+  (when-let [error (config-attr strand :treadle/error)]
+    {:title (str "Treadle error: " (:title strand))
+     :body (str "Strand " (:id strand) " has treadle/error:\n\n" error)}))
+
+(defn- register-chime-rules!
+  "Register the repo's attention rules with the chime engine."
+  []
+  [(chime/defrule! :hitl-checkpoint-ready 'config/hitl-checkpoint-ready-rule)
+   (chime/defrule! :agent-failure 'config/agent-failure-rule)
+   (chime/defrule! :treadle-error 'config/treadle-error-rule)])
+
+;; ---------------------------------------------------------------------------
 ;; install!
 ;; ---------------------------------------------------------------------------
 
@@ -927,6 +970,7 @@
    :harnesses (register-harness-aliases!)
    ;; agent review consumes the one authoritative policy text by default
    :review-contract (shuttle/set-default-review-contract! delegation-policy-text)
+   :chime-rules (register-chime-rules!)
    :patterns [(patterns/register-pattern!
                'agent-plan
                "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?,harness?,cwd?,max-attempts?}]}. Use body for delegated work context."
