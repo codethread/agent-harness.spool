@@ -947,6 +947,16 @@
      {:alias-of :pi
       :extra-args ["--agent" "main"]
       :doc "pi main agent with scout subagents; preferred delegation harness."})
+   ;; codex exec prints only the final message on stdout (activity log goes to
+   ;; stderr), so :raw parses cleanly; --ephemeral skips session files the
+   ;; disposable run never resumes. The bypass flag mirrors the shipped claude
+   ;; harness: runs must reach the weaver socket outside any codex sandbox —
+   ;; redefine with --sandbox workspace-write to tighten.
+   (shuttle/defharness! :codex
+     {:argv ["codex" "exec" "--skip-git-repo-check" "--ephemeral" "--color" "never"
+             "--dangerously-bypass-approvals-and-sandbox"]
+      :parse :raw
+      :doc "Codex CLI (gpt-5.5) headless; final message on stdout."})
    ;; claude tiers mirror how we use agents: haiku explores, sonnet does
    ;; tests/grunt work, opus builds features and sits on councils
    (shuttle/defalias! :explore
