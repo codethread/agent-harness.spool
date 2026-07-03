@@ -19,8 +19,12 @@ Userland reference spools are indexed in [`spools/`](./spools/README.md), with s
 - [Devflow Lifecycle](./spools/devflow.md)
 - [Ephemeral Strands](./spools/ephemeral.md)
 - [Weaver Guild](./spools/guild.md)
+- [Bobbin Context Packs](./spools/bobbin.md)
+- [Selvage Attribute Lint](./spools/selvage.md)
+- [Carder Graph Hygiene](./spools/carder.md)
 - [Agent Shuttle](./spools/shuttle/README.md) (approved local-root spool)
 - [Treadle Gate Bridge](./spools/shuttle/treadle.md) (approved local-root spool)
+- [Chime Notifications](./spools/chime/README.md) (approved local-root spool)
 
 Namespace tiers are intentional: `skein.api.*.alpha` is the blessed spool-facing API with accretion-based compatibility within each subnamespace, `skein.core.*` is internal and may change freely, `skein.spools.*` is the authorable/reference spool layer, and `skein.repl` is the human interactive surface.
 

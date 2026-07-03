@@ -27,6 +27,9 @@ to discover and invoke same-machine sibling weavers.
 | `skein.spools.devflow` | [devflow.md](./devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
 | `skein.spools.ephemeral` | [ephemeral.md](./ephemeral.md) | Small helper for temporary, parent-owned strands marked and burned via a userland attribute. |
 | `skein.spools.guild` | [guild.md](./guild.md) | Versioned public weaver op API declarations, `guild.describe` introspection, and loud structured deprecation for local peer coordination. |
+| `skein.spools.bobbin` | [bobbin.md](./bobbin.md) | Context-pack assembler: one self-contained JSON bundle of a strand's blockers, dependents, provenance, notes, and workflow context, plus deterministic prompt-text rendering. |
+| `skein.spools.selvage` | [selvage.md](./selvage.md) | Opt-in attribute vocabulary lint: data-first checks per attribute namespace, on-demand `check`/`check-all`, and post-hoc watch-mode violation recording. |
+| `skein.spools.carder` | [carder.md](./carder.md) | Read-only graph hygiene reports: stale active work, orphaned strands, and work blocked behind failed agent runs. |
 
 ## Approved local-root examples
 
@@ -44,6 +47,7 @@ as the worked example of authoring your own spool
 |---|---|---|
 | `skein.spools.shuttle` | [shuttle/README.md](./shuttle/README.md) | Agent shuttle: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and `strand op agent`. |
 | `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
+| `skein.spools.chime` | [chime/README.md](./chime/README.md) | Human-attention notification bridge: watches graph mutations and fires a configured local notifier command for ready HITL checkpoints, agent failures, and stalled gates. |
 
 ## Reference examples
 
