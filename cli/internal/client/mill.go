@@ -73,7 +73,13 @@ func MillCallPayload(operation string, world MillWorldRequest, payload map[strin
 	}
 	defer conn.Close()
 	deadline := 5 * time.Second
-	if operation == "op" {
+	switch operation {
+	case "weaver-start":
+		// Weaver startup waits for the child process to publish ready metadata.
+		// The mill side allows 60s for JVM boot plus trusted startup config, so
+		// the client protocol deadline must cover that whole request.
+		deadline = 65 * time.Second
+	case "op":
 		// Registered weaver operations run arbitrary trusted code (e.g. a
 		// blocking await over agent runs); match the long weaver-leg deadline
 		// instead of the short protocol deadline used for core requests.

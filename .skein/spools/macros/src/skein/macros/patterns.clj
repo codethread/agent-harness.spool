@@ -1,6 +1,7 @@
 (ns skein.macros.patterns
   "Macros for defining Skein weave patterns with concise input schemas."
   (:require [clojure.spec.alpha :as s]
+            [skein.api.current.alpha :as current]
             [skein.api.patterns.alpha :as patterns]))
 
 (defonce ^:private pattern-registry (atom {}))
@@ -83,9 +84,10 @@
   ([]
    (install-patterns! (ns-name *ns*)))
   ([ns-sym]
-   (let [entries (vals (get @pattern-registry ns-sym))]
+   (let [runtime (current/runtime)
+         entries (vals (get @pattern-registry ns-sym))]
      (doseq [{:keys [name doc fn input-spec]} entries]
-       (patterns/register-pattern! name doc fn input-spec))
+       (patterns/register-pattern! runtime name doc fn input-spec))
      {:installed (count entries)
       :patterns (mapv :name entries)})))
 

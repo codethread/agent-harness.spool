@@ -13,9 +13,7 @@ _No active items currently listed here._
 ## Ready
 
 - [ ] Complete library author testing support: isolated daemon-world test helpers, docs, explicit storage selection, and narrow dogfooding migration. Source: `devflow/rfcs/2026-06-26-library-author-testing.md` (`RFC-005.OUT1`); active feature folder: `devflow/feat/library-author-testing-support/`.
-- [ ] Add real Xerial SQLite in-memory daemon-world support with explicit storage metadata/status semantics, not a fake filesystem path. Source: `RFC-005.REC7`, `RFC-005.C8`, `RFC-005.C9`; spikes: `devflow/spikes/2026-06-26-sqlite-memory-lifecycle.md`, `devflow/spikes/2026-06-26-storage-metadata-contract.md`.
 - [ ] Document library author setup and testing tiers, including local-root dependency guidance and daemon/test JVM classpath boundaries. Source: `RFC-005.C1`, `RFC-005.C7`, `devflow/spikes/2026-06-26-library-author-classpath.md`.
-- [ ] Design and implement a minimal weaver scheduler primitive for proactive durable wakeups: `wake-at` + handler symbol, restart re-arm, reload-safe lifecycle, and data-first introspection. Source: `devflow/rfcs/2026-06-29-weaver-scheduler.md` (`RFC-009.OUT1`). Note: storage shape has been decided in `RFC-009.Q1.OUT`: use dedicated weaver-owned SQLite tables, not first-class strand records.
 - [ ] Build the shared roster/backlog-style feature tracking spool for active work: consistent attributes, `track!`/`finish!`, roster query, and `await-quiet!`. Source: `devflow/rfcs/2026-07-02-feature-tracking-registry.md` (`RFC-014.REC1`, `RFC-014.REC3`).
 
 ## Refinement
@@ -27,8 +25,11 @@ _No active items currently listed here._
 - [ ] Integrate active-work tracking with workflow/devflow roots, AFK loops, and ad hoc sessions so registry presence is automatic where possible and one explicit call elsewhere. Source: `RFC-014.REC2`, `RFC-014.C1`. Note: retain as roster-spool integration scope; auto-stamp workflow/devflow roots where possible and require explicit `track!`/`finish!` for AFK/ad hoc sessions.
 - [ ] Decide active-work heartbeat/staleness semantics and finished-entry lifecycle for the roster spool. Source: `RFC-014.Q1`, `RFC-014.Q2`, `RFC-014.C4`. Note: retain as roster design slice; define heartbeat threshold, stale display, and deliberate cleanup/finish behavior without auto-hiding stale entries.
 - [ ] Expose roster entries through weaver-guild peering so manager weavers can inspect in-flight work across repos. Source: `RFC-014.C3`; related stable feature: `spools/guild.md`. Note: retain as post-roster/guild integration; once roster exists, publish a versioned guild op such as `guild.roster.v1` or include roster in a describe-compatible repo API.
+- [ ] Design and implement a minimal weaver scheduler primitive for proactive durable wakeups: `wake-at` + handler symbol, restart re-arm, reload-safe lifecycle, and data-first introspection. Source: `devflow/rfcs/2026-06-29-weaver-scheduler.md` (`RFC-009.OUT1`). Note: storage shape has been decided in `RFC-009.Q1.OUT`: use dedicated weaver-owned SQLite tables, not first-class strand records.
+- [ ] Add real Xerial SQLite in-memory daemon-world support with explicit storage metadata/status semantics, not a fake filesystem path. Source: `RFC-005.REC7`, `RFC-005.C8`, `RFC-005.C9`; spikes: `devflow/spikes/2026-06-26-sqlite-memory-lifecycle.md`, `devflow/spikes/2026-06-26-storage-metadata-contract.md`.
 
 ## Completed
 
 - [x] `8kisd` Investigate refinement backlog items: audited refinement entries for current relevance; results synthesized from delegated run `4z4f9`. Outdated delegated-agent failure visibility item was removed; retained items now carry notes.
 - [x] `h5lcx` Decide scheduler durable wake storage shape: delegated run `osia1` recommended dedicated weaver-owned SQLite storage; decision recorded in `devflow/rfcs/2026-06-29-weaver-scheduler.md`.
+  - amend: user does not agree, veto
