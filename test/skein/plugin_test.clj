@@ -17,7 +17,7 @@
     (.mkdirs (java.io.File. config-dir))
     (let [rt (runtime/start! db-file {:world (test-world config-dir)})]
       (try
-        (f)
+        (f rt)
         (finally
           (runtime/stop! rt)
           (db-test/delete-sqlite-family! db-file))))))
@@ -33,8 +33,8 @@
 
 (deftest runtime-loader-state-is-the-public-path
   (with-runtime
-    (fn []
-      (is (= {:spools {}} (runtime-alpha/approved)))
-      (is (= {:spools {}} (runtime-alpha/syncs)))
-      (is (= {} (runtime-alpha/uses))))))
+    (fn [rt]
+      (is (= {:spools {}} (runtime-alpha/approved rt)))
+      (is (= {:spools {}} (runtime-alpha/syncs rt)))
+      (is (= {} (runtime-alpha/uses rt))))))
 

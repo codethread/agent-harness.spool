@@ -5,7 +5,7 @@
   attention notices through a workspace-bound local notifier command. It owns
   only weaver-lifetime runtime state and composes the public weaver/event API."
   (:require [clojure.string :as str]
-            [skein.api.runtime.alpha :as runtime-alpha]
+            [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as api])
   (:import [java.io OutputStreamWriter]
            [java.time Instant]))
@@ -24,7 +24,7 @@
   nil)
 
 (defn- rt []
-  (or *runtime* (runtime-alpha/current-runtime)))
+  (or *runtime* (current/runtime)))
 
 (defn- fail! [message data]
   (throw (ex-info message data)))

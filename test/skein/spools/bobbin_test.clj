@@ -15,7 +15,7 @@
 
 (deftest pack-projects-small-context-graph
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [root (repl/strand! "Feature")
             target (repl/strand! "Implement" {:body "Do the full implementation.\nKeep it tested."})
             blocker (repl/strand! "Design")
@@ -42,7 +42,7 @@
 
 (deftest pack-section-edges-are-self-contained
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [target (repl/strand! "Target")
             active-blocker (repl/strand! "Active blocker")
             closed-blocker (repl/strand! "Closed blocker" {} {:state "closed"})]
@@ -57,7 +57,7 @@
 
 (deftest include-selection-and-failure-are-explicit
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [target (repl/strand! "Target")]
         (is (= #{:bobbin/version :include :strand :notes}
                (set (keys (bobbin/pack (:id target) {:include #{:strand :notes}})))))
@@ -70,14 +70,14 @@
 
 (deftest missing-strand-id-fails-loudly
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Bobbin target strand was not found"
                             (bobbin/pack "missing-strand"))))))
 
 (deftest render-is-deterministic-and-includes-target-body
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [target (repl/strand! "Target" {:body "Line one\nLine two" :owner "agent"})
             blocker (repl/strand! "Blocker")]
         (repl/update! (:id target) {:edges [{:type "depends-on" :to (:id blocker)}]})
@@ -89,7 +89,7 @@
 
 (deftest workflow-section-appears-for-workflow-strands
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [root (repl/strand! "Run" {"workflow/run-id" "run-1"
                                       "workflow/role" "molecule"})
             target (repl/strand! "Step" {"workflow/run-id" "run-1"

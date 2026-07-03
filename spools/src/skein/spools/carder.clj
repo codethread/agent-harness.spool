@@ -8,10 +8,9 @@
   or registered operations."
   (:require [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]
+            [skein.api.current.alpha :as current]
             [skein.api.graph.alpha :as graph]
-            [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]
-            [skein.repl :as repl])
+            [skein.api.weaver.alpha :as api])
   (:import [java.time Duration Instant LocalDateTime ZoneOffset]))
 
 (def default-days
@@ -68,13 +67,14 @@
 (defn- summary [strand]
   (select-keys strand [:id :title :state :attributes :updated_at]))
 
-(defn- all-strands []
-  (if-let [rt @runtime/current-runtime]
-    (api/list rt)
-    (repl/strands)))
+(defn- runtime []
+  (current/runtime))
+
+(defn- all-strands [rt]
+  (api/list rt))
 
 (defn- active-strands [opts]
-  (->> (all-strands)
+  (->> (all-strands (runtime))
        (filter #(= "active" (:state %)))
        (remove #(excluded? opts %))
        vec))
@@ -108,12 +108,12 @@
           reverse
           vec))))
 
-(defn- datasource []
-  (or (:datasource @runtime/current-runtime)
+(defn- datasource [rt]
+  (or (:datasource rt)
       (fail! "Carder edge inspection requires an active in-process weaver runtime" {})))
 
-(defn- edge-incidence []
-  (let [rows (jdbc/execute! (datasource)
+(defn- edge-incidence [rt]
+  (let [rows (jdbc/execute! (datasource rt)
                             ["SELECT from_strand_id, to_strand_id, edge_type FROM strand_edges"]
                             {:builder-fn rs/as-unqualified-lower-maps})]
     (reduce (fn [acc {:keys [from_strand_id to_strand_id]}]
@@ -135,8 +135,9 @@
   ([]
    (orphans {}))
   ([opts]
-   (let [opts (normalize-opts opts :orphans)
-         incidence (edge-incidence)]
+   (let [rt (runtime)
+         opts (normalize-opts opts :orphans)
+         incidence (edge-incidence rt)]
      (->> (active-strands opts)
           (remove workflow-attr-carrier?)
           (remove #(pos? (get incidence (:id %) 0)))
@@ -152,8 +153,8 @@
     (attr strand :shuttle/phase) (assoc :shuttle/phase (attr strand :shuttle/phase))
     (attr strand :shuttle/error) (assoc :shuttle/error (attr strand :shuttle/error))))
 
-(defn- depends-on-edges []
-  (jdbc/execute! (datasource)
+(defn- depends-on-edges [rt]
+  (jdbc/execute! (datasource rt)
                  ["SELECT from_strand_id, to_strand_id FROM strand_edges WHERE edge_type = 'depends-on'"]
                  {:builder-fn rs/as-unqualified-lower-maps}))
 
@@ -166,12 +167,13 @@
   ([]
    (blocked-by-failure {}))
   ([opts]
-   (let [opts (normalize-opts opts :blocked-by-failure)
+   (let [rt (runtime)
+         opts (normalize-opts opts :blocked-by-failure)
          candidates (active-strands opts)
          candidate-ids (set (map :id candidates))
-         edges (filter #(contains? candidate-ids (:from_strand_id %)) (depends-on-edges))
+         edges (filter #(contains? candidate-ids (:from_strand_id %)) (depends-on-edges rt))
          blocker-ids (distinct (map :to_strand_id edges))
-         blockers-by-id (->> (graph/strands-by-ids blocker-ids)
+         blockers-by-id (->> (graph/strands-by-ids rt blocker-ids)
                              (filter #(= "active" (:state %)))
                              (filter failed-blocker?)
                              (map (juxt :id identity))

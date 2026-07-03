@@ -21,7 +21,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [skein.api.weaver.alpha :as api]
-            [skein.api.runtime.alpha :as runtime-alpha])
+            [skein.api.current.alpha :as current])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.time Instant]))
 
@@ -41,7 +41,7 @@
   nil)
 
 (defn- rt []
-  (or *runtime* (runtime-alpha/current-runtime)))
+  (or *runtime* (current/runtime)))
 
 (defn- sattr
   "Read the `shuttle/<k>` attribute from a normalized strand."
@@ -977,7 +977,7 @@
     (api/register-op! runtime 'agent
                       "Spawn and manage coding-agent runs; `strand op agent about` is the manual"
                       'skein.spools.shuttle/agent-op)
-    (api/register-query! 'agent-failures
+    (api/register-query! runtime 'agent-failures
                          [:and [:= :state "active"]
                           [:= [:attr "shuttle/run"] "true"]
                           [:in [:attr "shuttle/phase"] ["failed" "exhausted"]]])

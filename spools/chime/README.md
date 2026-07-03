@@ -27,10 +27,12 @@ Approve the local root from the selected workspace's `spools.edn`:
 Activate it from trusted startup config after syncing approved roots:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
 
-(runtime-alpha/sync!)
-(runtime-alpha/use! :chime
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(runtime-alpha/use! runtime :chime
   {:ns 'skein.spools.chime
    :spools ['skein.spools/chime]
    :call 'skein.spools.chime/install!

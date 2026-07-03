@@ -16,8 +16,8 @@
             [skein.spools.devflow :as devflow]
             [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
-            [skein.api.weaver.alpha :as api]
-            [skein.api.runtime.alpha :as runtime-alpha]))
+            [skein.api.current.alpha :as current]
+            [skein.api.weaver.alpha :as api]))
 
 ;; ---------------------------------------------------------------------------
 ;; Delegation policy and agent-plan weave patterns
@@ -320,7 +320,7 @@
   projects roots, hierarchy edges, dependency edges, and compact strand rows
   into one JSON-compatible structure for agents and humans."
   [_ctx]
-  (let [rt (runtime-alpha/current-runtime)
+  (let [rt (current/runtime)
         active-by-id (active-strands-by-id rt)
         active-ids (set (keys active-by-id))
         all-active-ids (sort active-ids)
@@ -629,7 +629,7 @@
 (defn- config-dir
   "Return the active weaver config directory."
   []
-  (or (get-in (runtime-alpha/current-runtime) [:metadata :config-dir])
+  (or (get-in (current/runtime) [:metadata :config-dir])
       (throw (ex-info "agent-delegate requires an active weaver runtime" {}))))
 
 (defn- repo-root-dir
@@ -747,7 +747,7 @@
                         "--max-attempts" :single "--spawned-by" :single})
         [task-id] (require-argv-range! "agent-delegate" positional 1 1 usage)
         _ (require-non-blank! :task-id task-id)
-        rt (runtime-alpha/current-runtime)
+        rt (current/runtime)
         task (active-task! rt task-id)
         harness (or (get flags "--harness") (task-attr-string task :harness) "pi-main")
         cwd (or (get flags "--cwd") (task-attr-string task :cwd) (repo-root-dir))
@@ -849,7 +849,7 @@
   [ctx]
   (let [usage "strand op flow-status <workflow-run-id>"
         [run-id] (require-argv-range! "flow-status" (:op/argv ctx) 1 1 usage)
-        rt (runtime-alpha/current-runtime)
+        rt (current/runtime)
         history (workflow/run-history run-id)
         frontier (workflow/next-steps run-id)
         done (workflow/done? run-id)
@@ -927,10 +927,10 @@
 
 (defn- register-query-map!
   "Register repo-local named queries and return registration metadata."
-  []
+  [rt]
   (into {}
         (map (fn [[query-name query-def]]
-               [query-name (api/register-query! query-name query-def)]))
+               [query-name (api/register-query! rt query-name query-def)]))
         {'feature-active feature-active-query
          'feature-work feature-work-query
          'feature-owner-work feature-owner-work-query
@@ -965,84 +965,103 @@
 (defn install!
   "Install repo-local Skein runtime configuration."
   []
-  {:installed true
+  (let [runtime (current/runtime)]
+    {:installed true
    :namespace 'config
    :harnesses (register-harness-aliases!)
    ;; agent review consumes the one authoritative policy text by default
    :review-contract (shuttle/set-default-review-contract! delegation-policy-text)
    :chime-rules (register-chime-rules!)
    :patterns [(patterns/register-pattern!
+               runtime
                'agent-plan
                "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?,harness?,cwd?,max-attempts?}]}. Use body for delegated work context."
                'config/agent-plan
                ::agent-plan-input)
               (patterns/register-pattern!
+               runtime
                'delegate-pipeline
                "Create a sequential chain-loop workflow of subagent gates. Input: {run_id,tasks:[{id,title,body?,harness?,cwd?,max-attempts?}],harness?,cwd?,accept?}."
                'config/delegate-pipeline
                ::delegate-pipeline-input)]
-   :queries (register-query-map!)
+   :queries (register-query-map! runtime)
    :ops [(api/register-op!
+          runtime
           'current-dags
           "Show active parent-of work DAGs with active depends-on edges"
           'config/current-dags-op)
          (api/register-op!
+          runtime
           'devflow-start
           "Start the devflow lifecycle for a feature"
           'config/devflow-start-op)
          (api/register-op!
+          runtime
           'devflow-next
           "Show ready devflow steps for a feature"
           'config/devflow-next-op)
          (api/register-op!
+          runtime
           'devflow-choices
           "Explain the current devflow checkpoint choices for a feature"
           'config/devflow-choices-op)
          (api/register-op!
+          runtime
           'devflow-choose
           "Record a devflow checkpoint choice for a feature"
           'config/devflow-choose-op)
          (api/register-op!
+          runtime
           'devflow-complete
           "Close the current devflow step for a feature"
           'config/devflow-complete-op)
          (api/register-op!
+          runtime
           'devflow-advance
           "Advance the current devflow step or checkpoint for a feature"
           'config/devflow-advance-op)
          (api/register-op!
+          runtime
           'devflow-describe
           "Describe the devflow cycle or one stage"
           'config/devflow-describe-op)
          (api/register-op!
+          runtime
           'devflow-history
           "Show ordered devflow run history for a feature"
           'config/devflow-history-op)
          (api/register-op!
+          runtime
           'devflow-archive
           "Archive a finished devflow run into one digest strand"
           'config/devflow-archive-op)
          (api/register-op!
+          runtime
           'devflow-status
           "Show devflow root, ready steps, and done state for a feature"
           'config/devflow-status-op)
          (api/register-op!
+          runtime
           'workflow-runs
           "Show active workflow molecule roots, optionally by family"
           'config/workflow-runs-op)
          (api/register-op!
+          runtime
           'devflow-conventions
           "Show repo-local spools, ops, patterns, and queries"
           'config/devflow-conventions-op)
          (api/register-op!
+          runtime
           'agent-delegate
           "Delegate an active task strand to a shuttle agent run"
           'config/agent-delegate-op)
          (api/register-op!
+          runtime
           'flow-await
           "Block until a workflow run needs coordinator attention"
           'config/flow-await-op)
          (api/register-op!
+          runtime
           'flow-status
           "Show workflow flow status for renderer consumption"
-          'config/flow-status-op)]})
+          'config/flow-status-op)]}))

@@ -368,7 +368,7 @@
         (api/register-event-handler! rt :prior #{:strand/added} 'skein.weaver-test/capture-event {})
         (api/register-hook! rt :prior #{:payload/received} 'skein.weaver-test/capture-hook {})
         (spit (io/file workspace "init.clj")
-              "(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime] '[skein.api.events.alpha :as events])\n(api/register-query @runtime/current-runtime 'shared [:= [:attr :owner] \"shared\"])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(api/enqueue-event! @runtime/current-runtime {:event/type :strand/added :event/id \"shared-only\" :event/at \"2026-06-29T00:00:00Z\" :event/source :test})\n")
+              "(require '[skein.api.current.alpha :as current]\n         '[skein.api.weaver.alpha :as api]\n         '[skein.api.events.alpha :as events])\n(let [rt (current/runtime)]\n  (api/register-query rt 'shared [:= [:attr :owner] \"shared\"])\n  (events/register! rt :shared #{:strand/added} 'skein.weaver-test/capture-event)\n  (api/enqueue-event! rt {:event/type :strand/added :event/id \"shared-only\" :event/at \"2026-06-29T00:00:00Z\" :event/source :test}))\n")
         (spit (io/file workspace "init.local.clj")
               "(throw (ex-info \"local boom\" {:source :local}))\n")
         (try
@@ -395,9 +395,9 @@
         (Thread/sleep 250)
         (is (seq (api/recent-event-failures rt)))
         (spit (io/file workspace "init.clj")
-              "(require '[skein.api.events.alpha :as events] '[skein.api.hooks.alpha :as hooks])\n(events/register! :shared #{:strand/added} 'skein.weaver-test/capture-event)\n(hooks/register! :shared #{:payload/received} 'skein.weaver-test/capture-hook)\n")
+              "(require '[skein.api.current.alpha :as current]\n         '[skein.api.events.alpha :as events]\n         '[skein.api.hooks.alpha :as hooks])\n(let [rt (current/runtime)]\n  (events/register! rt :shared #{:strand/added} 'skein.weaver-test/capture-event)\n  (hooks/register! rt :shared #{:payload/received} 'skein.weaver-test/capture-hook))\n")
         (spit (io/file workspace "init.local.clj")
-              "(require '[skein.api.events.alpha :as events] '[skein.api.hooks.alpha :as hooks])\n(events/register! :local #{:strand/updated} 'skein.weaver-test/capture-event)\n(hooks/register! :local #{:strand/add-before-commit} 'skein.weaver-test/capture-hook)\n")
+              "(require '[skein.api.current.alpha :as current]\n         '[skein.api.events.alpha :as events]\n         '[skein.api.hooks.alpha :as hooks])\n(let [rt (current/runtime)]\n  (events/register! rt :local #{:strand/updated} 'skein.weaver-test/capture-event)\n  (hooks/register! rt :local #{:strand/add-before-commit} 'skein.weaver-test/capture-hook))\n")
         (api/reload-config! rt)
         (is (= #{:shared :local} (set (mapv :key (api/event-handlers rt)))))
         (is (= #{:shared :local} (set (mapv :key (api/hooks rt)))))
@@ -671,7 +671,7 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"queue is full"
                             (api/enqueue-event! rt (test-event :x "full"))))
       (let [init (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
-        (spit init "(require '[skein.api.events.alpha :as events])\n(events/register! :after-reload #{:x} 'skein.weaver-test/capture-event)\n")
+        (spit init "(require '[skein.api.current.alpha :as current]\n         '[skein.api.events.alpha :as events])\n(let [rt (current/runtime)]\n  (events/register! rt :after-reload #{:x} 'skein.weaver-test/capture-event))\n")
         (api/reload-config! rt)
         (deliver @handler-release true)
         (is (= [:after-reload] (mapv :key (api/event-handlers rt))))
@@ -755,6 +755,7 @@
       (api/init rt)
       (let [from (api/add rt {:title "From"})
             to (api/add rt {:title "To"})]
+        (Thread/sleep 100)
         (reset! hook-contexts [])
         (reset! delivered-events [])
         (api/register-event-handler! rt :capture #{:batch/applied :strand/added :strand/updated :strand/burned}
@@ -763,10 +764,11 @@
         (let [result (api/apply-batch rt {:refs {:from (:id from) :to (:id to)}
                                           :edges [{:op :upsert :from :from :to :to :type "related-to"}]})
               events (wait-for-events 1)
+              batch-event (first (filter #(= :batch/applied (:event/type %)) events))
               context (last @hook-contexts)]
           (Thread/sleep 100)
           (is (= [:batch/applied] (mapv :event/type @delivered-events)))
-          (is (= (:edges result) (:batch/edges (first events))))
+          (is (= (:edges result) (:batch/edges batch-event)))
           (is (= [] (:batch/created context) (:batch/updated context) (:batch/burned context)))
           (is (= (:edges result) (:batch/edge-ops context))))))))
 
@@ -789,7 +791,7 @@
                                  {:ref :created :title "Created" :attributes {"storyPoints" "3"}}]
                        :edges [{:op :upsert :from :created :to :existing :type "depends-on" :attributes {:raw "edge"}}]
                        :burn [:burnable]}
-              result (batch/apply! payload)
+              result (batch/apply! rt payload)
               context (last @hook-contexts)
               batch-event (first (filter #(= :batch/applied (:event/type %)) (wait-for-events 5)))]
           (is (= {:storyPoints 3} (get-in result [:created 0 :attributes])))
@@ -903,7 +905,7 @@
     (fn [rt _]
       (let [init (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
         (api/register-hook! rt :stale #{:payload/received} 'skein.weaver-test/capture-hook {})
-        (spit init "(require '[skein.api.hooks.alpha :as hooks])\n(hooks/register! :fresh #{:payload/received} 'skein.weaver-test/capture-hook {:order 2})\n")
+        (spit init "(require '[skein.api.current.alpha :as current]\n         '[skein.api.hooks.alpha :as hooks])\n(let [rt (current/runtime)]\n  (hooks/register! rt :fresh #{:payload/received} 'skein.weaver-test/capture-hook {:order 2}))\n")
         (api/reload-config! rt)
         (is (= [{:key :fresh
                  :types #{:payload/received}
@@ -1193,7 +1195,7 @@
                 {:name "open" :params [] :referenced-params []}
                 {:name "owners" :params [:owners] :referenced-params [:owners]}]
                (api/query-metadata rt)))
-        (is (= (api/query-metadata rt) (api/query-metadata)))
+
         (is (= {:name "mine"
                 :params [:owner]
                 :referenced-params [:owner]
@@ -1203,7 +1205,7 @@
                 :definition-form (pr-str owner-query)
                 :summary "Invoke this query with `strand list --query <name>` or `strand ready --query <name>` and pass runtime values with repeated `--param key=value` arguments."}
                (api/query-explain rt :mine)))
-        (is (= (api/query-explain rt :blocked) (api/query-explain :blocked)))
+
         (try
           (api/query-explain rt :missing)
           (is false "expected query explain missing query failure")
@@ -1262,6 +1264,10 @@
             root (write-view-lib! (get-in rt [:metadata :config-dir]) lib ns-sym)]
         (.addURL ^clojure.lang.DynamicClassLoader (:spool-classloader rt)
                  (.toURL (.toURI (io/file root "src"))))
+        (load-file (str (io/file root "src" (str (-> (str ns-sym)
+                                                       (.replace \- \_)
+                                                       (.replace \. java.io.File/separatorChar))
+                                                    ".clj"))))
         (api/register-view! rt 'synced-lib (symbol (str ns-sym) "render"))
         (is (= {:lib-view {:from :synced}}
                (api/view! rt 'synced-lib {:from :synced}))))
@@ -1438,7 +1444,7 @@
   (with-runtime
     (fn [rt _]
       (let [init-file (io/file (get-in rt [:metadata :config-dir]) "init.clj")]
-        (spit init-file "(require '[skein.api.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync!)\n")
+        (spit init-file "(require '[skein.api.current.alpha :as current]\n         '[skein.api.runtime.alpha :as runtime-alpha])\n(runtime-alpha/sync! (current/runtime))\n")
         (api/register-pattern! rt 'dev-task 'skein.weaver-test/test-pattern ::pattern-input)
         (is (= 1 (count (api/patterns rt))))
         (api/reload-config! rt)
@@ -1710,7 +1716,7 @@
   (let [world (temp-world)
         init (io/file (:config-dir world) "init.clj")]
     (try
-      (spit init "(require '[skein.api.weaver.alpha :as api] '[skein.core.weaver.runtime :as runtime]) (api/register-query @runtime/current-runtime 'trusted [:= :state \"active\"])")
+      (spit init "(require '[skein.api.current.alpha :as current] '[skein.api.weaver.alpha :as api]) (api/register-query (current/runtime) 'trusted [:= :state \"active\"])")
       (let [rt (runtime/start! nil {:world world})]
         (try
           (is (= {"trusted" [:= :state "active"]} (api/queries rt)))

@@ -1,44 +1,22 @@
 (ns skein.api.views.alpha
-  "Public helper API for registering, inspecting, and invoking weaver views.
+  "Explicit-runtime API for registering, inspecting, and invoking weaver views.
 
-  Calls route directly when executing inside a weaver runtime, otherwise through
-  an explicit connected client world. The weaver API owns view validation, function
-  resolution, registry state, and invocation."
-  (:require [skein.core.client :as client]
-            [skein.repl :as repl]
-            [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]))
-
-(defn- call-daemon [op & args]
-  (if-let [rt @runtime/current-runtime]
-    (case op
-      :register-view! (apply api/register-view! rt args)
-      :view! (apply api/view! rt args)
-      :views (api/views rt))
-    (apply client/call-world (repl/connected-config-dir) (repl/connected-opts) op args)))
+  Callers own runtime selection and pass the target weaver runtime as the first
+  argument. The weaver API owns view validation, function resolution, registry
+  state, and invocation."
+  (:require [skein.api.weaver.alpha :as api]))
 
 (defn register-view!
-  "Register a weaver-memory view name to a fully qualified weaver-resolvable function symbol.
-
-  Duplicate names replace prior registrations. When called inside the weaver JVM,
-  registers directly on the active weaver runtime. When called from an explicit
-  connected client, routes to the selected weaver world from `skein.repl/connect!`;
-  client users should register functions that are already loadable in the weaver JVM."
-  [name fn-sym]
-  (call-daemon :register-view! name fn-sym))
+  "Register a weaver-memory view name in `runtime` to a function symbol."
+  [runtime name fn-sym]
+  (api/register-view! runtime name fn-sym))
 
 (defn view!
-  "Invoke a registered weaver-side view with params through the selected weaver runtime.
-
-  The weaver resolves the registered function symbol and calls it with
-  `{:params params}`. Routes directly through the weaver runtime or an explicit
-  connected client world."
-  [name params]
-  (call-daemon :view! name params))
+  "Invoke a registered weaver-side view with params through `runtime`."
+  [runtime name params]
+  (api/view! runtime name params))
 
 (defn views
-  "Return serializable weaver-memory view registry entries through the selected weaver runtime.
-
-  Routes directly through the weaver runtime or an explicit connected client world."
-  []
-  (call-daemon :views))
+  "Return serializable weaver-memory view registry entries from `runtime`."
+  [runtime]
+  (api/views runtime))

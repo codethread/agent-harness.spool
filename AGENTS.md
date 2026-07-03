@@ -93,10 +93,10 @@ strand --workspace "$workspace" weaver repl
 For non-interactive trusted forms:
 
 ```sh
-printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
-For spool workspace workflows, use `spools.edn`, privileged `skein.api.runtime.alpha/sync!`, layered `runtime/use!`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
+For spool workspace workflows, use `spools.edn`, explicit-runtime `skein.api.runtime.alpha/sync!`, layered `runtime/use!` after `(skein.api.current.alpha/runtime)`, and live weaver REPL/config loading. There are intentionally no plugin/package CLI commands.
 
 ## Validation and smoke testing
 

@@ -231,16 +231,16 @@
   (with-runtime
     (fn [rt _]
       (let [out (java.io.StringWriter.)]
-        (binding [*in* (java.io.StringReader. "(require '[skein.api.runtime.alpha :as runtime-alpha])\n(runtime-alpha/approved)\n(runtime-alpha/syncs)\n(runtime-alpha/uses)\n")
+        (binding [*in* (java.io.StringReader. "(require '[skein.api.current.alpha :as current] '[skein.api.runtime.alpha :as runtime-alpha])\n(def rt (current/runtime))\n(runtime-alpha/approved rt)\n(runtime-alpha/syncs rt)\n(runtime-alpha/uses rt)\n")
                   *out* out
                   *err* (java.io.StringWriter.)
                   *ns* (the-ns 'user)]
           (repl/-main "--stdin" (:config-dir (:metadata rt))))
         (let [lines (str/split-lines (str out))]
-          (is (= 4 (count lines)))
-          (is (= {:spools {}} (read-string (second lines))))
+          (is (= 5 (count lines)))
           (is (= {:spools {}} (read-string (nth lines 2))))
-          (is (= {} (read-string (nth lines 3)))))))))
+          (is (= {:spools {}} (read-string (nth lines 3))))
+          (is (= {} (read-string (nth lines 4)))))))))
 
 (deftest query-helpers-use-daemon-backed-task-flow
   (with-runtime

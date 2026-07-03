@@ -269,11 +269,13 @@ Named query registries are not durable by themselves. If you want a query after 
 For a simple persistent query, put it directly in `init.clj`:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha]
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha]
          '[skein.api.weaver.alpha :as api])
 
-(runtime-alpha/sync!)
-(api/register-query! 'mine [:= [:attr :owner] "ct"])
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(api/register-query! runtime 'mine [:= [:attr :owner] "ct"])
 ```
 
 For a workspace that already activates a local spool with `runtime-alpha/use!`, follow that existing pattern instead: add the `api/register-query!` call to the spool's `install!` function so reload/startup installs everything from one place.
@@ -305,14 +307,15 @@ Useful forms:
 Script the live weaver REPL with stdin:
 
 ```sh
-printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
 The REPL helper namespace includes common strand functions. Privileged runtime loader/config helpers are explicit built-in namespaces, not ordinary user spools; require them when needed:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
-(runtime-alpha/reload!)
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
+(runtime-alpha/reload! (current/runtime))
 ```
 
 ## Startup config
@@ -333,9 +336,11 @@ The generated `init.clj` is intentionally small:
 
 ```clojure
 ;; init.clj
-(require '[skein.api.runtime.alpha :as runtime-alpha])
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
 
-(runtime-alpha/sync!)
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
 ```
 
 The weaver loads startup files in order: `init.clj`, then `init.local.clj`. Missing files are skipped; present failing files fail loudly with file context. Use startup-loaded code to register queries, weave patterns, load approved spools, register views, and install conventions for your workspace. Simple workspaces can put shared registrations directly in `init.clj` and personal overlays in gitignored `init.local.clj`; reusable or larger workspaces should keep `init.clj` minimal and install behavior from a local spool.
@@ -343,18 +348,21 @@ The weaver loads startup files in order: `init.clj`, then `init.local.clj`. Miss
 A direct `init.clj` query registration can look like this:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha]
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha]
          '[skein.api.weaver.alpha :as api])
 
-(runtime-alpha/sync!)
-(api/register-query! 'mine [:= [:attr :owner] "ct"])
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(api/register-query! runtime 'mine [:= [:attr :owner] "ct"])
 ```
 
 Use reload during development:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
-(runtime-alpha/reload!)
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
+(runtime-alpha/reload! (current/runtime))
 ```
 
 `skein.api.runtime.alpha` is a privileged built-in runtime loader/config helper namespace shipped with Skein. It is not an ordinary user/community spool, and loader/config helpers do not live under `skein.spools.*`.
@@ -399,20 +407,23 @@ Implement the spool:
 
 ```clojure
 (ns my.workflow
-  (:require [skein.api.weaver.alpha :as api]))
+  (:require [skein.api.current.alpha :as current]
+            [skein.api.weaver.alpha :as api]))
 
 (defn install! []
-  (api/register-query! 'mine [:= [:attr :owner] "ct"])
+  (api/register-query! (current/runtime) 'mine [:= [:attr :owner] "ct"])
   {:my.workflow/installed true})
 ```
 
 Activate it from `init.clj`:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
 
-(runtime-alpha/sync!)
-(runtime-alpha/use! :my/workflow
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(runtime-alpha/use! runtime :my/workflow
   {:ns 'my.workflow
    :spools #{'my/workflow}
    :call 'my.workflow/install!})
@@ -437,6 +448,7 @@ Pattern registration lives in trusted Clojure config or spools, not in the publi
 ```clojure
 (ns my.workflow
   (:require [clojure.spec.alpha :as s]
+            [skein.api.current.alpha :as current]
             [skein.api.patterns.alpha :as patterns]))
 
 (s/def ::title string?)
@@ -452,7 +464,7 @@ Pattern registration lives in trusted Clojure config or spools, not in the publi
     :edges [{:type "depends-on" :to 'impl}]}])
 
 (defn install! []
-  (patterns/register-pattern! 'task 'my.workflow/task-pattern ::task-input))
+  (patterns/register-pattern! (current/runtime) 'task 'my.workflow/task-pattern ::task-input))
 ```
 
 CLI callers can discover registered patterns, inspect the input contract, and invoke the pattern with exactly one JSON value on stdin:
@@ -489,30 +501,34 @@ Views let you register named read-only transformations backed by weaver-loadable
 (ns my.workflow
   (:require [skein.api.graph.alpha :as graph]
             [skein.api.views.alpha :as views]
+            [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as api]))
 
 (defn owned-view [{:keys [params]}]
-  (let [ids (graph/query-ids! 'owned params)]
+  (let [rt (current/runtime)
+        ids (graph/query-ids! rt 'owned params)]
     {:ids ids
-     :strands (graph/strands-by-ids ids)}))
+     :strands (graph/strands-by-ids rt ids)}))
 
 (defn install! []
-  (api/register-query! 'owned [:= [:attr :owner] "ct"])
-  (views/register-view! 'owned-view 'my.workflow/owned-view)
-  {:installed true})
+  (let [rt (current/runtime)]
+    (api/register-query! rt 'owned [:= [:attr :owner] "ct"])
+    (views/register-view! rt 'owned-view 'my.workflow/owned-view)
+    {:installed true}))
 ```
 
 Call a registered view from trusted Clojure, usually the live weaver REPL:
 
 ```clojure
-(require '[skein.api.views.alpha :as views])
-(views/view! 'owned-view {})
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.views.alpha :as views])
+(views/view! (current/runtime) 'owned-view {})
 ```
 
 For scripts, use `weaver repl --stdin`:
 
 ```sh
-printf "(do (require '[skein.api.views.alpha :as views]) (views/view! 'owned-view {}))\n" \
+printf "(do (require '[skein.api.current.alpha :as current] '[skein.api.views.alpha :as views]) (views/view! (current/runtime) 'owned-view {}))\n" \
   | strand --workspace "$workspace" weaver repl --stdin
 ```
 
@@ -528,7 +544,8 @@ Register handlers from startup-loaded code or weaver-loadable spools:
 
 ```clojure
 (ns my.workflow
-  (:require [skein.api.events.alpha :as events]))
+  (:require [skein.api.current.alpha :as current]
+            [skein.api.events.alpha :as events]))
 
 (defn cleanup-temporary! [event]
   ;; Handler receives one event map and can call trusted Skein helpers/APIs.
@@ -537,7 +554,8 @@ Register handlers from startup-loaded code or weaver-loadable spools:
     nil))
 
 (defn install! []
-  (events/register! :my/cleanup-temporary
+  (events/register! (current/runtime)
+                    :my/cleanup-temporary
                     #{:strand/updated}
                     'my.workflow/cleanup-temporary!
                     {:purpose :cleanup}))
@@ -548,9 +566,10 @@ Handlers are selected by explicit event-type filters such as `:strand/added`, `:
 Event dispatch is asynchronous after successful mutations. Handler exceptions do not roll back the mutation; inspect bounded failure state from trusted Clojure:
 
 ```clojure
-(require '[skein.api.events.alpha :as events])
-(events/handlers)
-(events/recent-failures)
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.events.alpha :as events])
+(events/handlers (current/runtime))
+(events/recent-failures (current/runtime))
 ```
 
 Event handler state is weaver-lifetime runtime state. Register handlers from `init.clj` or an installed spool if they should exist after startup or reload.

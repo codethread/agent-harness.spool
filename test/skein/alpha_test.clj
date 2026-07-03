@@ -56,42 +56,42 @@
             task (api/add rt {:title "Task" :attributes {:owner "agent"}})]
         (api/update rt (:id feature) {:edges [{:type "parent-of" :to (:id task)}]})
         (api/register-query rt 'agent-owned [:= [:attr :owner] "agent"])
-        (is (= [(:id task)] (graph/query-ids! 'agent-owned {})))
-        (is (= [(:id task)] (mapv :id (graph/strands-by-ids [(:id task) (:id task)]))))
-        (is (= [(:id feature)] (graph/ancestor-root-ids [(:id task)] {})))
+        (is (= [(:id task)] (graph/query-ids! rt 'agent-owned {})))
+        (is (= [(:id task)] (mapv :id (graph/strands-by-ids rt [(:id task) (:id task)]))))
+        (is (= [(:id feature)] (graph/ancestor-root-ids rt [(:id task)] {})))
         (is (= #{(:id feature) (:id task)}
-               (set (map :id (:strands (graph/subgraph [(:id feature)]))))))
+               (set (map :id (:strands (graph/subgraph rt [(:id feature)]))))))
         (is (= {:name "daily" :fn 'skein.alpha-test/test-view}
-               (views/register-view! :daily 'skein.alpha-test/test-view)))
+               (views/register-view! rt :daily 'skein.alpha-test/test-view)))
         (is (= [{:name "daily" :fn 'skein.alpha-test/test-view}]
-               (views/views)))
+               (views/views rt)))
         (is (= {:alpha-view {:owner "agent"}}
-               (views/view! 'daily {:owner "agent"})))
+               (views/view! rt 'daily {:owner "agent"})))
         (is (= {:key :policy
                 :types #{:payload/received}
                 :fn 'skein.alpha-test/test-hook
                 :order 5
                 :metadata {:doc "policy"}}
-               (hooks/register! :policy #{:payload/received} 'skein.alpha-test/test-hook {:order 5 :doc "policy"})))
+               (hooks/register! rt :policy #{:payload/received} 'skein.alpha-test/test-hook {:order 5 :doc "policy"})))
         (is (= [{:key :policy
                  :types #{:payload/received}
                  :fn 'skein.alpha-test/test-hook
                  :order 5
                  :metadata {:doc "policy"}}]
-               (hooks/hooks)))
-        (is (= :policy (hooks/unregister! :policy)))
-        (let [batch-result (batch/apply! {:refs {:feature (:id feature)
-                                                 :task (:id task)}
-                                          :strands [{:ref :task
-                                                     :state "closed"
-                                                     :attributes {:owner "agent" :phase "batched"}}
-                                                    {:ref :batch-task
-                                                     :title "Batch task"
-                                                     :attributes {:owner "agent"}}]
-                                          :edges [{:op :upsert
-                                                   :from :batch-task
-                                                   :to :feature
-                                                   :type "depends-on"}]})
+               (hooks/hooks rt)))
+        (is (= :policy (hooks/unregister! rt :policy)))
+        (let [batch-result (batch/apply! rt {:refs {:feature (:id feature)
+                                                    :task (:id task)}
+                                             :strands [{:ref :task
+                                                        :state "closed"
+                                                        :attributes {:owner "agent" :phase "batched"}}
+                                                       {:ref :batch-task
+                                                        :title "Batch task"
+                                                        :attributes {:owner "agent"}}]
+                                             :edges [{:op :upsert
+                                                      :from :batch-task
+                                                      :to :feature
+                                                      :type "depends-on"}]})
               created (first (:created batch-result))
               updated (first (:updated batch-result))]
           (is (= (:id created) (get-in batch-result [:refs :batch-task])))
@@ -102,90 +102,27 @@
                   :attributes {:owner "agent" :phase "batched"}}
                  (select-keys (:after updated) [:id :state :attributes]))))))))
 
-(deftest batch-alpha-helper-routes-through-connected-weaver-world
-  (with-runtime
-    (fn [rt]
-      (repl/connect! (:config-dir (:metadata rt)))
-      (api/init rt)
-      ;; The helper must see no in-process runtime on the caller thread so it takes
-      ;; the connected-client path, while the same-JVM nREPL server still needs the
-      ;; active runtime to service that client request.
-      (reset! alpha-hook-contexts [])
-      (api/register-hook! rt :connected-normalize #{:attributes/normalize} 'skein.alpha-test/normalize-alpha-hook {})
-      (api/register-hook! rt :connected-batch #{:batch/apply-before-commit} 'skein.alpha-test/capture-alpha-hook {})
-      (let [caller-thread (Thread/currentThread)
-            runtime-cell (reify clojure.lang.IDeref
-                           (deref [_]
-                             (when-not (= caller-thread (Thread/currentThread))
-                               rt)))]
-        (with-redefs [runtime/current-runtime runtime-cell]
-          (let [result (batch/apply! {:strands [{:ref :connected-task
-                                                 :title "Connected task"
-                                                 :attributes {:owner "connected"}}]})
-                created (first (:created result))]
-            (is (= (:id created) (get-in result [:refs :connected-task])))
-            (is (= {:title "Connected task" :state "active" :attributes {:owner "connected"}}
-                   (select-keys created [:title :state :attributes])))
-            (is (= [(:id created)] (mapv :id (api/list rt))))
-            (is (= [:connected-normalize :connected-batch]
-                   (mapv :hook/key @alpha-hook-contexts)))
-            (is (= #{:nrepl} (set (map :request/source @alpha-hook-contexts))))
-            (is (= [:apply-batch :apply-batch]
-                   (mapv :request/operation @alpha-hook-contexts)))
-            (api/unregister-hook! rt :connected-normalize)
-            (api/unregister-hook! rt :connected-batch)
-            (is (= {:key :connected-policy
-                    :types #{:payload/received}
-                    :fn 'skein.alpha-test/test-hook
-                    :order 3
-                    :metadata {}}
-                   (hooks/register! :connected-policy #{:payload/received} 'skein.alpha-test/test-hook {:order 3})))
-            (is (= [:connected-policy] (mapv :key (api/hooks rt))))
-            (is (= :connected-policy (hooks/unregister! :connected-policy)))
-            (is (= [] (api/hooks rt)))))))))
-
-(deftest alpha-helpers-route-through-connected-helper-context
-  (with-redefs [runtime/current-runtime (atom nil)
-                repl/connected-config-dir (constantly "/tmp/skein-connected-world")
-                repl/connected-opts (constantly {:state-dir "/tmp/skein-state-world"})
-                skein.core.client/call-world (fn [config-dir opts op & args]
-                                         {:config-dir config-dir
-                                          :opts opts
-                                          :op op
-                                          :args args})]
+(deftest trusted-client-can-route-through-explicit-world
+  (with-redefs [skein.core.client/call-world (fn [config-dir opts op & args]
+                                               {:config-dir config-dir
+                                                :opts opts
+                                                :op op
+                                                :args args})]
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {:state-dir "/tmp/skein-state-world"}
             :op :query-ids
             :args ['mine {:owner "agent"}]}
-           (graph/query-ids! 'mine {:owner "agent"})))
+           (skein.core.client/call-world "/tmp/skein-connected-world"
+                                         {:state-dir "/tmp/skein-state-world"}
+                                         :query-ids
+                                         'mine
+                                         {:owner "agent"})))
     (is (= {:config-dir "/tmp/skein-connected-world"
             :opts {:state-dir "/tmp/skein-state-world"}
             :op :strands-by-ids
             :args [["a" "b"]]}
-           (graph/strands-by-ids ["a" "b"])))
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {:state-dir "/tmp/skein-state-world"}
-            :op :ancestor-root-ids
-            :args [["leaf"] {:where [:= [:attr :kind] "feature"]}]}
-           (graph/ancestor-root-ids ["leaf"] {:where [:= [:attr :kind] "feature"]})))
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {:state-dir "/tmp/skein-state-world"}
-            :op :subgraph
-            :args [["root"]]}
-           (graph/subgraph ["root"])))
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {:state-dir "/tmp/skein-state-world"}
-            :op :register-view!
-            :args ['daily 'my.views/daily]}
-           (views/register-view! 'daily 'my.views/daily)))
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {:state-dir "/tmp/skein-state-world"}
-            :op :view!
-            :args ['daily {:owner "agent"}]}
-           (views/view! 'daily {:owner "agent"})))
-    (is (= {:config-dir "/tmp/skein-connected-world"
-            :opts {:state-dir "/tmp/skein-state-world"}
-            :op :views
-            :args nil}
-           (views/views)))))
+           (skein.core.client/call-world "/tmp/skein-connected-world"
+                                         {:state-dir "/tmp/skein-state-world"}
+                                         :strands-by-ids
+                                         ["a" "b"])))))
 

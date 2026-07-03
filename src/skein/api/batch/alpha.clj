@@ -1,20 +1,11 @@
 (ns skein.api.batch.alpha
-  "Public helper API for applying batch graph mutations.
+  "Explicit-runtime API for applying batch graph mutations.
 
-  Calls route directly when executing inside a weaver runtime, otherwise through
-  an explicit connected client world. The weaver API owns payload validation and
-  transactional persistence."
-  (:require [skein.core.client :as client]
-            [skein.repl :as repl]
-            [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]))
+  Callers own runtime selection and pass the target weaver runtime as the first
+  argument. The weaver API owns payload validation and transactional persistence."
+  (:require [skein.api.weaver.alpha :as api]))
 
 (defn apply!
-  "Apply one transactional batch graph mutation payload through the selected weaver.
-
-  Returns the weaver API result. Fails loudly when there is neither an in-process
-  weaver runtime nor an explicit connected client world, or when the payload is invalid."
-  [payload]
-  (if-let [rt @runtime/current-runtime]
-    (api/apply-batch rt payload)
-    (client/call-world (repl/connected-config-dir) (repl/connected-opts) :apply-batch payload)))
+  "Apply one transactional batch graph mutation payload to `runtime`."
+  [runtime payload]
+  (api/apply-batch runtime payload))

@@ -133,7 +133,8 @@ Useful forms. In Clojure the function name comes first inside the parens, so
 [Clojure crash course](./clojure-crash-course.md) for more:
 
 ```clojure
-(require '[skein.api.batch.alpha :as batch])             ; batch graph mutations
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.batch.alpha :as batch])             ; batch graph mutations
 
 (def s (:id (strand! "My first REPL strand" {:owner "ct"}))) ; create one strand; keep its :id in s
 (strand s)                                           ; look up that strand by id
@@ -143,7 +144,7 @@ Useful forms. In Clojure the function name comes first inside the parens, so
 ;; the returned :refs map binds each ref to its generated id.
 (def refs
   (:refs
-   (batch/apply!
+   (batch/apply! (current/runtime)
     {:strands [{:ref :design :title "Sketch the data model" :attributes {:owner "ct" :priority "high"}}
                {:ref :build  :title "Implement the weaver"  :attributes {:owner "ct"}}
                {:ref :docs   :title "Write getting-started" :attributes {:owner "agent"}}]
@@ -179,13 +180,14 @@ relation (`depends-on` here) from a root id and returns the connected strands an
 edges; fold that into an ASCII tree:
 
 ```clojure
-(require '[skein.api.graph.alpha :as graph]
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.graph.alpha :as graph]
          '[clojure.string :as str])
 
 (defn dag-tree
   "Render the depends-on subgraph under root-id as an ASCII tree of titles."
   [root-id]
-  (let [{:keys [strands edges]} (graph/subgraph [root-id] {:type "depends-on"})
+  (let [{:keys [strands edges]} (graph/subgraph (current/runtime) [root-id] {:type "depends-on"})
         title    (into {} (map (juxt :id :title)) strands)
         children (group-by :from_strand_id edges)
         lines    (fn lines [id depth]
@@ -248,9 +250,11 @@ Generated `.skein/.gitignore` ignores `config.local.json`, `init.local.clj`,
 Skein behavior. The generated `init.clj` is a small resilient bootstrap:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
 
-(runtime-alpha/sync!)
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
 ```
 
 Create your own config or spool files when you need runtime behavior.
@@ -274,15 +278,17 @@ Built-in `skein.api.*.alpha` namespaces are privileged helpers shipped on the Sk
 
 ```clojure
 ;; .skein/init.local.clj, gitignored
-(require '[skein.api.runtime.alpha :as runtime-alpha])
-(runtime-alpha/sync!)
-(runtime-alpha/use! :personal/ops
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(runtime-alpha/use! runtime :personal/ops
   {:ns 'personal.ops.alpha
    :spools #{'personal/ops}
    :call 'personal.ops.alpha/install!})
 ```
 
-Require `skein.api.batch.alpha` explicitly when you want `(batch/apply! payload)` for transactional graph mutations. `weave --pattern` and `batch/apply!` are two doors into the same transactional engine: `weave` is the CLI-safe, named, spec-checked, create-only front door; raw batch is the trusted REPL/config loading dock that can also update, burn, and upsert edges. Package management, source fetching, and install commands are outside this MVP; local roots must already exist.
+Require `skein.api.batch.alpha` explicitly when you want `(batch/apply! runtime payload)` for transactional graph mutations. `weave --pattern` and `batch/apply!` are two doors into the same transactional engine: `weave` is the CLI-safe, named, spec-checked, create-only front door; raw batch is the trusted REPL/config loading dock that can also update, burn, and upsert edges. Package management, source fetching, and install commands are outside this MVP; local roots must already exist.
 
 Example pattern and view setup in your own startup-loaded spool:
 
@@ -292,6 +298,7 @@ Example pattern and view setup in your own startup-loaded spool:
             [skein.api.graph.alpha :as graph]
             [skein.api.patterns.alpha :as patterns]
             [skein.api.views.alpha :as views]
+            [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as api]))
 
 (s/def ::title string?)
@@ -307,14 +314,16 @@ Example pattern and view setup in your own startup-loaded spool:
     :edges [{:type "depends-on" :to 'impl}]}])
 
 (defn owned-view [{:keys [params]}]
-  (let [ids (graph/query-ids! 'owned params)]
+  (let [rt (current/runtime)
+        ids (graph/query-ids! rt 'owned params)]
     {:ids ids
-     :strands (graph/strands-by-ids ids)}))
+     :strands (graph/strands-by-ids rt ids)}))
 
 (defn install! []
-  (api/register-query! 'owned [:= [:attr :owner] "ct"])
-  (patterns/register-pattern! 'task 'my.workflow/task-pattern ::task-input)
-  (views/register-view! 'owned-view 'my.workflow/owned-view))
+  (let [rt (current/runtime)]
+    (api/register-query! rt 'owned [:= [:attr :owner] "ct"])
+    (patterns/register-pattern! rt 'task 'my.workflow/task-pattern ::task-input)
+    (views/register-view! rt 'owned-view 'my.workflow/owned-view)))
 ```
 
 Lower-privilege CLI callers can discover, inspect, and invoke registered patterns with JSON stdin:
@@ -338,12 +347,13 @@ strand op help
 Register custom handlers from trusted Clojure with `skein.api.weaver.alpha/register-op!`. The Go CLI forwards everything after the operation name as string argv:
 
 ```clojure
+(require '[skein.api.current.alpha :as current])
 (require '[skein.api.weaver.alpha :as api])
 
 (defn echo-op [{:op/keys [name argv]}]
   {:operation name :argv argv})
 
-(api/register-op! 'echo "Echo raw argv" 'my.workflow/echo-op)
+(api/register-op! (current/runtime) 'echo "Echo raw argv" 'my.workflow/echo-op)
 ```
 
 ```sh
@@ -361,6 +371,7 @@ For a safe demo, use a disposable workspace and append this handler to
 
 ```clojure
 (require '[clojure.string :as str])
+(require '[skein.api.current.alpha :as current])
 (require '[skein.api.weaver.alpha :as api])
 
 (defn parse-max [argv]
@@ -401,7 +412,7 @@ For a safe demo, use a disposable workspace and append this handler to
        vec))
 
 (defn kanban-op [{:op/keys [argv]}]
-  (let [rt (skein.api.runtime.alpha/current-runtime)
+  (let [rt (skein.api.current.alpha/runtime)
         max-rows (parse-max argv)
         cols [(by-kanban rt "ready" max-rows)
               (by-kanban rt "in-progress" max-rows)
@@ -412,7 +423,7 @@ For a safe demo, use a disposable workspace and append this handler to
     {:max max-rows
      :table (table rows)}))
 
-(api/register-op! 'kanban "Show strands grouped by :attr kanban" 'user/kanban-op)
+(api/register-op! (current/runtime) 'kanban "Show strands grouped by :attr kanban" 'user/kanban-op)
 ```
 
 Reload that disposable workspace's config so its running weaver installs the
@@ -420,7 +431,7 @@ handler. Do not run reload examples against the default repo workspace unless yo
 intend to reload its shared `.skein` config:
 
 ```sh
-printf '(do (require '\''[skein.api.runtime.alpha :as runtime-alpha]) (runtime-alpha/reload!))\n' \
+printf '(do (require '\''[skein.api.current.alpha :as current] '\''[skein.api.runtime.alpha :as runtime-alpha]) (runtime-alpha/reload! (current/runtime)))\n' \
   | strand --workspace "$workspace" weaver repl --stdin
 ```
 
@@ -430,8 +441,9 @@ Create a few demo strands with one batch call. Batch entries use temporary
 ```sh
 cat <<'EOF' | strand --workspace "$workspace" weaver repl --stdin
 (do
-  (require '[skein.api.batch.alpha :as batch])
-  (batch/apply!
+  (require '[skein.api.current.alpha :as current]
+           '[skein.api.batch.alpha :as batch])
+  (batch/apply! (current/runtime)
     {:strands [{:ref :ready-1
                 :title "Sketch CLI op guide"
                 :attributes {:kanban "ready"}}
@@ -480,29 +492,32 @@ Produces something like:
 Call registered views from trusted Clojure, not from a public `strand view` CLI command:
 
 ```clojure
-(require '[skein.api.views.alpha :as views])
-(views/view! 'owned-view {})
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.views.alpha :as views])
+(views/view! (current/runtime) 'owned-view {})
 ```
 
 Register event handlers from trusted config or weaver-loadable spools when you want asynchronous reactions to strand mutations. Event helpers are not public CLI commands:
 
 ```clojure
 (ns my.workflow
-  (:require [skein.api.events.alpha :as events]))
+  (:require [skein.api.current.alpha :as current]
+            [skein.api.events.alpha :as events]))
 
 (defn record-add! [event]
   (println "added" (:strand/id event)))
 
-(events/register! :example/record-add #{:strand/added} 'my.workflow/record-add!)
-(events/handlers)
-(events/recent-failures)
+(events/register! (current/runtime) :example/record-add #{:strand/added} 'my.workflow/record-add!)
+(events/handlers (current/runtime))
+(events/recent-failures (current/runtime))
 ```
 
 Hot-reload the selected workspace `init.clj` from the live weaver REPL:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
-(runtime-alpha/reload!)
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
+(runtime-alpha/reload! (current/runtime))
 ```
 
 Reload clears weaver-lifetime spool sync state, module-use state, named queries, views, patterns, custom ops, lifecycle hooks, event handlers, queued events, and recent event failures, then re-runs `init.clj` followed by `init.local.clj`.
@@ -511,7 +526,7 @@ Use the live stdin REPL for scripts. Include `--workspace` when scripting
 against a disposable or test workspace:
 
 ```sh
-printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
 ## Stop the weaver

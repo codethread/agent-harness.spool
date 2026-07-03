@@ -119,7 +119,7 @@ Fresh `strand init` creates a repo's config files: `.skein/config.json`, `.skein
 
 `strand init` does not persist a source path. Mill resolves the Skein source for weaver/REPL launch from `SKEIN_SOURCE`, the install-time source, or a canonical Skein checkout as the working directory.
 
-Use `strand weaver repl` to attach directly to the running weaver's nREPL for trusted interactive work, and `(skein.api.runtime.alpha/reload!)` to hot-reload `init.clj` followed by `init.local.clj`.
+Use `strand weaver repl` to attach directly to the running weaver's nREPL for trusted interactive work, capture the active runtime with `(skein.api.current.alpha/runtime)`, and pass it to helpers such as `(skein.api.runtime.alpha/reload! runtime)` to hot-reload `init.clj` followed by `init.local.clj`.
 
 ## Documentation
 

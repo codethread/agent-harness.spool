@@ -19,7 +19,7 @@
 
 (deftest workflow-spool-compiles-and-materializes-molecules
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [with-feature (fn [prefix]
                            (fn [{:keys [feature]}]
                              (str prefix feature)))
@@ -38,7 +38,7 @@
             result (workflow/pour! definition {:feature "workflow spool"})
             root-id (workflow/molecule-id result)
             root (repl/strand root-id)
-            subgraph (graph/subgraph [root-id])]
+            subgraph (graph/subgraph rt [root-id])]
         (is (= "Ship workflow spool" (:title root)))
         (is (= "molecule" (get-in root [:attributes :workflow/role])))
         (is (= #{"Design workflow spool" "Implement workflow spool" "Review workflow spool" "Ship workflow spool"}
@@ -87,7 +87,7 @@
 
 (deftest workflow-spool-runtime-drives-toastie-demo
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [toastie (workflow/workflow
                       (fn [{:keys [filling]}] (str "Make " filling " toastie"))
                       {:params {:filling (workflow/param :required true)}}
@@ -243,7 +243,7 @@
 
 (deftest workflow-models-pull-request-flow-without-conditional-edges
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "pr-flow" (pr-dev-workflow {}) {:feature "pr-42"}
                        {:family "pull-request"
                         :definition 'skein.spools.workflow-test/pr-dev-workflow
@@ -289,7 +289,7 @@
 
 (deftest workflow-pr-flow-rebinds-forge-without-spool-changes
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       ;; reference run: no bindings passed, the github reference applies
       (workflow/start! "pr-forge-ref" (pr-dev-workflow {}) {:feature "ref-feat"}
                        {:family "pull-request" :context {:feature "ref-feat"}})
@@ -332,7 +332,7 @@
 
 (deftest workflow-runtime-closes-empty-runs-at-start
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [empty-workflow (workflow/workflow "Nothing to do")]
         (is (= {:ready [] :done true} (workflow/start! "empty-run" empty-workflow {})))
         (is (workflow/done? "empty-run"))
@@ -341,7 +341,7 @@
 
 (deftest workflow-run-not-done-while-blocked-by-external-dependency
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [blocker (repl/strand! "External blocker")
             definition (workflow/workflow
                         "Blocked run"
@@ -359,13 +359,13 @@
 
 (deftest workflow-done-fails-loudly-for-unknown-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown workflow run"
                             (workflow/done? "no-such-run"))))))
 
 (deftest workflow-run-auto-closes-root-when-last-step-completes
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Linear run"
                         (workflow/step :a "Do A")
@@ -379,7 +379,7 @@
 
 (deftest workflow-runtime-supports-parallel-ready-steps
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Parallel entry"
                         (workflow/step :a "Do A")
@@ -400,7 +400,7 @@
 
 (deftest workflow-complete-records-notes-and-attributes
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow "Notes run" (workflow/step :a "Do A"))
             [step] (:ready (workflow/start! "notes-run" definition {}))]
         (workflow/complete! "notes-run" {:notes "done via automation" :attributes {"outcome" "ok"}})
@@ -411,7 +411,7 @@
 
 (deftest workflow-complete-fails-loudly-on-invalid-step-and-mutates-nothing
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow "Bad step run" (workflow/step :a "Do A"))]
         (workflow/start! "bad-step-run" definition {})
         (let [a-id (:id (workflow/next-step "bad-step-run"))]
@@ -421,7 +421,7 @@
 
 (deftest workflow-gate-requires-by-and-records-who-closed-it
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Gated run"
                         (workflow/step :push "Push branch")
@@ -458,7 +458,7 @@
 
 (deftest workflow-non-gate-step-closes-without-by
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow "Plain run" (workflow/step :a "Do A"))
             [step] (:ready (workflow/start! "plain-gate-run" definition {}))]
         (is (= {:ready [] :done true} (workflow/complete! "plain-gate-run")))
@@ -471,7 +471,7 @@
 
 (deftest workflow-routed-choice-closes-workless-continuation-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Route to empty"
                         (workflow/checkpoint :route "Route somewhere"
@@ -490,7 +490,7 @@
 
 (deftest workflow-routed-choice-swaps-to-single-active-continuation-root
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Route to work"
                         (workflow/checkpoint :route "Route somewhere"
@@ -512,7 +512,7 @@
 
 (deftest workflow-choose-records-outcome-by
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Signoff run"
                         (workflow/checkpoint :approve "Approve it"
@@ -543,7 +543,7 @@
 
 (deftest workflow-start-accepts-var-and-defaults-durable-context
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "var-start" #'loopy-workflow {:revision :yes})
       (let [root (workflow/current-root "var-start")]
         (is (= "skein.spools.workflow-test/loopy-workflow"
@@ -559,7 +559,7 @@
 
 (deftest workflow-start-accepts-registered-keyword
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/register-workflow! :loopy-test 'skein.spools.workflow-test/loopy-workflow)
       (workflow/start! "keyword-start" :loopy-test {})
       (is (= "skein.spools.workflow-test/loopy-workflow"
@@ -572,7 +572,7 @@
 
 (deftest workflow-start-and-describe-reject-unknown-registered-keyword
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown registered workflow"
                             (workflow/start! "missing-keyword-start" :missing-workflow {})))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown registered workflow"
@@ -580,7 +580,7 @@
 
 (deftest workflow-revise-choice-loops-back-to-a-fresh-revision-round
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (is (= [{:title "Orient" :kind "step"}]
              (mapv #(select-keys % [:title :kind])
                    (:ready (workflow/start! "loopy" (loopy-workflow {}) {})))))
@@ -610,7 +610,7 @@
 
 (deftest workflow-routed-choose-failure-keeps-run-resumable
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "loopy-fail" (loopy-workflow {}) {})
       (workflow/complete! "loopy-fail")
       (workflow/complete! "loopy-fail")
@@ -620,7 +620,7 @@
         ;; terminal state; the checkpoint close and continuation pour are folded
         ;; into one batch, so a failing apply commits nothing
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"batch boom"
-                              (with-redefs [batch/apply! (fn [_] (throw (ex-info "batch boom" {})))]
+                              (with-redefs [batch/apply! (fn [_ _] (throw (ex-info "batch boom" {})))]
                                 (workflow/choose! "loopy-fail" :revise))))
         (let [root (workflow/current-root "loopy-fail")]
           (is (some? root))
@@ -635,7 +635,7 @@
 
 (deftest workflow-runtime-selects-among-parallel-ready-checkpoints
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Parallel checkpoints"
                         (workflow/checkpoint :x "Pick X"
@@ -665,7 +665,7 @@
 
 (deftest workflow-spool-supports-wisps-bonds-and-squash
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [left-result (workflow/wisp! {:name "Left" :steps [{:id :a :title "A"}]})
             right-result (workflow/wisp! {:name "Right" :steps [{:id :b :title "B"}]})
             left-id (workflow/molecule-id left-result)
@@ -679,7 +679,7 @@
 
 (deftest workflow-bond-parent-blocks-the-bonded-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "bond-left" {:name "Left" :steps [{:id :a :title "Do A"}]} {})
       (workflow/start! "bond-right" {:name "Right" :steps [{:id :b :title "Do B"}]} {})
       (let [left-root-id (:id (workflow/current-root "bond-left"))
@@ -1000,7 +1000,7 @@
 
 (deftest workflow-run-scoped-views-carry-run-id-and-filter-frontier
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow "Runid demo"
                                           (workflow/step :a "Do A")
                                           (workflow/gate :handoff "Hand off" :subagent)
@@ -1031,7 +1031,7 @@
 
 (deftest workflow-choice-input-surfaced-and-enforced
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "input-run" (input-checkpoint-workflow {}) {})
       ;; the declaration is surfaced with the choice details, string-keyed
       (is (= [{"key" "reason" "required" true "description" "Why abort"}
@@ -1074,7 +1074,7 @@
   ;; names straight back (string-keyed) satisfies the requirement just as a
   ;; keyword-keyed map does
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "input-str-run" (input-checkpoint-workflow {}) {})
       (is (= {:ready [] :done true}
              (workflow/choose! "input-str-run" :abort {"reason" "cancelled"}))))))
@@ -1086,7 +1086,7 @@
 
 (deftest workflow-procedure-join-auto-closes-and-never-surfaces-as-ready
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Join demo"
                         (workflow/step :prep "Prep")
@@ -1113,7 +1113,7 @@
 
 (deftest workflow-advance-drives-steps-and-checkpoints
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [definition (workflow/workflow
                         "Advance demo"
                         (workflow/step :work "Do work")
@@ -1151,7 +1151,7 @@
 
 (deftest workflow-named-next-resolves-and-fails-loudly-on-unknown-name
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/register-workflow! :wt-second 'skein.spools.workflow-test/registry-second-stage)
       (is (= 'skein.spools.workflow-test/registry-second-stage
              (workflow/workflow-definition :wt-second)))
@@ -1170,7 +1170,7 @@
 
 (deftest workflow-registry-rename-repoints-in-flight-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/register-workflow! :wt-rename 'skein.spools.workflow-test/registry-second-stage)
       (workflow/start! "rename-run" (registry-router-stage {:target :wt-rename}) {})
       ;; re-registering the name (a reloaded workflow) points the in-flight run's
@@ -1195,7 +1195,7 @@
 
 (deftest workflow-revise-repours-definition-skipping-condition-gated-steps
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/register-workflow! :wt-downstream 'skein.spools.workflow-test/downstream-stage-workflow)
       (workflow/start! "revise-run" (revise-stage-workflow {}) {}
                        {:definition 'skein.spools.workflow-test/revise-stage-workflow
@@ -1221,7 +1221,7 @@
 
 (deftest workflow-revise-fails-loudly-without-resolvable-definition
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       ;; no :definition seeded, so the run's root cannot resolve a workflow to
       ;; re-pour and :revise fails loudly (TEN-003) rather than guessing
       (workflow/start! "revise-nodef" (revise-stage-workflow {}) {})
@@ -1296,7 +1296,7 @@
 
 (deftest workflow-run-history-projects-ordered-molecules-and-events
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "hist" (introspect-stage-a-workflow {}) {:feature "widgets"}
                        {:definition 'skein.spools.workflow-test/introspect-stage-a-workflow
                         :context {:feature "widgets"}})
@@ -1331,13 +1331,13 @@
 
 (deftest workflow-run-history-fails-loudly-for-unknown-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown workflow run"
                             (workflow/run-history "no-such-run"))))))
 
 (deftest workflow-archive-run-refuses-active-then-squashes-to-one-digest
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "arch" (introspect-stage-a-workflow {}) {:feature "widgets"}
                        {:definition 'skein.spools.workflow-test/introspect-stage-a-workflow
                         :context {:feature "widgets"}})
@@ -1368,7 +1368,7 @@
 
 (deftest await-returns-on-checkpoint-gate-stall-and-timeout
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "await-checkpoint"
                        (workflow/workflow "Await checkpoint"
                          (workflow/checkpoint :decide "Decide" :kind :human

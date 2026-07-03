@@ -7,8 +7,7 @@
             [skein.spools.workflow :as workflow]
             [skein.spools.test-support :refer [with-runtime]]
             [skein.core.db :as db]
-            [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]))
+            [skein.api.weaver.alpha :as api]))
 
 (defn- reset-engines! []
   (reset! @#'shuttle/in-flight {}))
@@ -47,8 +46,8 @@
                    :attributes gate-attrs)
     (workflow/step :after "After" :depends-on [:delegate])))
 
-(defn- run-for-gate [gate-id]
-  (first (api/list @runtime/current-runtime [:= [:attr "treadle/gate"] gate-id] {})))
+(defn- run-for-gate [rt gate-id]
+  (first (api/list rt [:= [:attr "treadle/gate"] gate-id] {})))
 
 (defn- ready-subagent-gate [run-id]
   (first (filter #(= "subagent" (:gate %)) (workflow/next-steps run-id))))
@@ -70,7 +69,7 @@
       (let [[first-step] (workflow/next-steps "happy")]
         (workflow/complete! "happy" {:step (:id first-step)}))
       (let [gate-id (:id (ready-subagent-gate "happy"))
-            run (await-eventually #(some-> (run-for-gate gate-id)
+            run (await-eventually #(some-> (run-for-gate rt gate-id)
                                            ((fn [r] (when (= "closed" (:state (api/show rt (:id r))))
                                                       (api/show rt (:id r))))))
                                   10000)
@@ -101,10 +100,10 @@
         (Thread/sleep 250)
         (let [gate-id (:id (first (api/list rt [:= :title "Delegate"] {})))]
           (is (some? gate-id))
-          (is (nil? (run-for-gate gate-id)))
+          (is (nil? (run-for-gate rt gate-id)))
           (let [[blocker] (workflow/next-steps "blocked")]
             (workflow/complete! "blocked" {:step (:id blocker)}))
-          (is (some? (await-eventually #(run-for-gate gate-id) 10000))))))))
+          (is (some? (await-eventually #(run-for-gate rt gate-id) 10000))))))))
 
 (deftest missing-harness-stamps-error-and-does-not-retry
   (with-treadle
@@ -116,10 +115,10 @@
       (let [gate-id (:id (ready-subagent-gate "missing"))
             gate (await-eventually #(let [g (api/show rt gate-id)] (when (attr g :treadle/error) g)) 10000)]
         (is (str/includes? (attr gate :treadle/error) "shuttle/harness"))
-        (is (nil? (run-for-gate gate-id)))
+        (is (nil? (run-for-gate rt gate-id)))
         (api/add rt {:title "unrelated"})
         (Thread/sleep 250)
-        (is (nil? (run-for-gate gate-id)))))))
+        (is (nil? (run-for-gate rt gate-id)))))))
 
 (deftest failed-run-stays-ready-and-clearing-stamp-spawns-fresh-run
   (with-treadle
@@ -131,7 +130,7 @@
                                                               "shuttle/prompt" "exit 7"})
                                   (workflow/step :after "After" :depends-on [:delegate])) {})
       (let [gate-id (:id (ready-subagent-gate "retry"))
-            failed (await-eventually #(when-let [r (run-for-gate gate-id)]
+            failed (await-eventually #(when-let [r (run-for-gate rt gate-id)]
                                         (let [shown (api/show rt (:id r))]
                                           (when (= "failed" (attr shown :shuttle/phase)) shown))) 10000)]
         (is (= "active" (:state failed)))
@@ -156,7 +155,7 @@
                                                   :attributes {"shuttle/harness" "sh-tail"
                                                                "shuttle/prompt" "sleep 1; echo too-late"})) {})
       (let [gate-id (:id (ready-subagent-gate "routed"))
-            run (await-eventually #(run-for-gate gate-id) 10000)]
+            run (await-eventually #(run-for-gate rt gate-id) 10000)]
         (api/update rt gate-id {:state "closed"})
         (let [done (await-eventually #(let [r (api/show rt (:id run))]
                              (when (attr r :treadle/delivered) r)) 10000)]
@@ -171,7 +170,7 @@
                                                :attributes {"shuttle/harness" "sh-tail"
                                                             "shuttle/prompt" "sleep 1; echo held-result"})) {})
       (let [gate-id (:id (ready-subagent-gate "held"))
-            run (await-eventually #(run-for-gate gate-id) 10000)
+            run (await-eventually #(run-for-gate rt gate-id) 10000)
             hold (api/add rt {:title "Hold delivery"})]
         ;; un-ready the gate while its run is in flight: delivery must park
         ;; loudly (write-once treadle/delivery-blocked), not stamp terminal
@@ -208,7 +207,7 @@
                                                          :attributes {"shuttle/harness" "sh-tail"
                                                                       "shuttle/prompt" "sleep 1; echo ok"})) {})
       (let [running-gate-id (:id (ready-subagent-gate "query-running"))
-            running-run-id (:id (await-eventually #(run-for-gate running-gate-id) 10000))]
+            running-run-id (:id (await-eventually #(run-for-gate rt running-gate-id) 10000))]
         (await-eventually #(= "running" (attr (api/show rt running-run-id) :shuttle/phase)) 10000)
         (is (empty? (filter #(= running-gate-id (:id %))
                             (api/list-query rt 'stalled-gates {}))))
@@ -232,5 +231,5 @@
                                                            "shuttle/prompt" "echo ignored"})) {})
       (let [gate-id (:id (first (workflow/next-steps "ci")))]
         (Thread/sleep 300)
-        (is (nil? (run-for-gate gate-id)))
+        (is (nil? (run-for-gate rt gate-id)))
         (is (nil? (attr (api/show rt gate-id) :treadle/run)))))))

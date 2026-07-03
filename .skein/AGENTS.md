@@ -143,7 +143,7 @@ not reload the main canonical weaver unless explicitly asked. Reload a selected
 world with:
 
 ```sh
-printf "(do (require '[skein.api.runtime.alpha :as runtime-alpha]) (runtime-alpha/reload!))\n" | strand --workspace "$world" weaver repl --stdin
+printf "(do (require '[skein.api.current.alpha :as current] '[skein.api.runtime.alpha :as runtime-alpha]) (runtime-alpha/reload! (current/runtime)))\n" | strand --workspace "$world" weaver repl --stdin
 ```
 
 ## Coordination attention surface

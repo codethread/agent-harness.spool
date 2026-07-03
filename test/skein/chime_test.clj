@@ -264,9 +264,9 @@
             (pr-str {:spools {'skein.spools/chime {:local/root repo-root}}}))
       (let [rt (runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))})]
         (try
-          (let [synced ((requiring-resolve 'skein.api.runtime.alpha/sync!))
+          (let [synced ((requiring-resolve 'skein.api.runtime.alpha/sync!) rt)
                 used ((requiring-resolve 'skein.api.runtime.alpha/use!)
-                      :chime {:ns 'skein.spools.chime
+                      rt :chime {:ns 'skein.spools.chime
                               :spools ['skein.spools/chime]
                               :call 'skein.spools.chime/install!
                               :required? true})]

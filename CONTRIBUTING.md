@@ -61,19 +61,21 @@ strand --workspace "$workspace" weaver repl
 Non-interactive trusted forms:
 
 ```sh
-printf '(skein.api.runtime.alpha/current-runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
 Runtime spool startup config may use:
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime]
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha]
          '[skein.api.graph.alpha :as graph]
          '[skein.api.views.alpha :as views])
-(runtime/sync!)
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
 ```
 
-Shipped `skein.api.*.alpha` namespaces are privileged built-in helpers. `spools.edn` approves user/community local roots; `skein.api.runtime.alpha/sync!` makes approved roots available; `runtime/use!` activates modules for the weaver lifetime.
+Shipped `skein.api.*.alpha` namespaces are privileged built-in helpers. `spools.edn` approves user/community local roots; `skein.api.runtime.alpha/sync!` makes approved roots available; `runtime-alpha/use!` activates modules for the weaver lifetime.
 
 ## Validation
 

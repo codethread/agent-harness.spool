@@ -2,10 +2,11 @@
   "Userland helpers for temporary, parent-owned work strands.
 
   This namespace is intentionally authorable example code: it composes the
-  documented `skein.repl` and `skein.api.graph.alpha` helper surfaces and owns no
+  documented explicit-runtime weaver and graph helper surfaces and owns no
   privileged loader/config/runtime implementation."
-  (:require [skein.api.graph.alpha :as graph]
-            [skein.repl :as repl]))
+  (:require [skein.api.current.alpha :as current]
+            [skein.api.graph.alpha :as graph]
+            [skein.api.weaver.alpha :as api]))
 
 (defn ephemeral!
   "Create a userland ephemeral strand under parent-id.
@@ -16,8 +17,10 @@
   ([parent-id title]
    (ephemeral! parent-id title {}))
   ([parent-id title attributes]
-   (let [strand (repl/strand! title (merge {:ephemeral "true"} attributes))]
-     (repl/update! parent-id {:edges [{:type "parent-of" :to (:id strand)}]})
+   (let [rt (current/runtime)
+         strand (api/add rt {:title title
+                             :attributes (merge {:ephemeral "true"} attributes)})]
+     (api/update rt parent-id {:edges [{:type "parent-of" :to (:id strand)}]})
      strand)))
 
 (def ephemeral-query
@@ -29,14 +32,14 @@
   ([]
    (ephemeral-ids {}))
   ([_opts]
-   (graph/query-ids! ephemeral-query {})))
+   (graph/query-ids! (current/runtime) ephemeral-query {})))
 
 (defn burn-ephemeral!
   "Burn all active userland ephemeral strands."
   []
   (let [ids (ephemeral-ids)]
     (if (seq ids)
-      (graph/burn-by-ids! ids)
+      (graph/burn-by-ids! (current/runtime) ids)
       {:burned [] :count 0})))
 
 (defn install!

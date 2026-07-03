@@ -417,7 +417,7 @@
       (assert-config-registrations rt)
       (assert-treadle-installed-after-config rt)
       (op! "devflow-start" ["startup-feature" "already-in-worktree-ok"])
-      (is (= :loaded (:status (runtime-alpha/reload!))))
+      (is (= :loaded (:status (runtime-alpha/reload! rt))))
       (assert-config-registrations rt)
       ;; runtime registries reload; the strand graph and run state persist
       (let [status (op! "devflow-status" ["startup-feature"])]

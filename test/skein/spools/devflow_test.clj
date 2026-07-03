@@ -9,7 +9,7 @@
 
 (deftest devflow-proposal-revise-loops-back-through-the-proposal-stage
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "prop-run"
                        (devflow/proposal-workflow {:feature "widgets"})
                        {:feature "widgets"}
@@ -41,7 +41,7 @@
 
 (deftest devflow-revise-input-does-not-override-revision-round
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "prop-input"
                        (devflow/proposal-workflow {:feature "widgets"})
                        {:feature "widgets"}
@@ -59,7 +59,7 @@
 
 (deftest devflow-intake-revision-preserves-start-opts
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "intake-loop" {:worktree-check :already-in-worktree-ok})
       (devflow/choose! "intake-loop" :already-in-worktree)
       (devflow/complete! "intake-loop")
@@ -73,7 +73,7 @@
 
 (deftest devflow-spool-composes-decision-point-workflows
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (let [intake (devflow/intake-workflow {:worktree-check :already-in-worktree-ok})
             proposal (devflow/proposal-workflow {})
             route (devflow/route-after-plan-workflow {})
@@ -97,7 +97,7 @@
 
 (deftest devflow-spool-exposes-small-operational-loop
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "workflow-loop" {:worktree-check :already-in-worktree-ok})
       (let [first-step (devflow/next-step "workflow-loop")]
         (is (= "checkpoint" (:kind first-step)))
@@ -197,7 +197,7 @@
 
 (deftest devflow-afk-loop-routing-and-revision-pour-delegated-gates
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (workflow/start! "afk-route"
                        (devflow/task-breakdown-workflow {:feature "afk-route"})
                        {:feature "afk-route"}
@@ -224,7 +224,7 @@
 
 (deftest devflow-registered-routes-cover-later-stage-runtime-paths
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "route-happy" {:worktree-check :already-in-worktree-ok})
       (devflow/advance! "route-happy" {:choice :already-in-worktree})
       (devflow/advance! "route-happy" {:notes "brief captured"})
@@ -244,7 +244,7 @@
 
 (deftest devflow-choice-next-workflow-validates-lazily
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "workflow-abort" {:worktree-check :required})
       ;; the abort choice declares a required :reason input, so omitting it fails
       ;; loudly before any mutation (D1.2), leaving the checkpoint active
@@ -260,7 +260,7 @@
 
 (deftest devflow-next-step-fails-on-multiple-active-roots
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "workflow-duplicate-root" {:worktree-check :required})
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Active workflow run already exists"
                             (devflow/start! "workflow-duplicate-root" {:worktree-check :required}))))))
@@ -292,7 +292,7 @@
 
 (deftest devflow-history-and-archive-project-then-squash-a-run
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (devflow/start! "af-run" {:worktree-check :already-in-worktree-ok})
       ;; abort the feature: intake routes to the abort stage, then record the abort
       (devflow/choose! "af-run" :abort {:reason "not needed"})

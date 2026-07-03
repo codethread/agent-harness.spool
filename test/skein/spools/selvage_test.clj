@@ -32,7 +32,7 @@
 
 (deftest check-reports-clean-and-violating-strands
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)]
         (selvage/defvocab! vocab (shuttle-spec))
@@ -56,14 +56,14 @@
 
 (deftest check-fails-loudly-for-missing-strand-id
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (clear-vocabs!)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Strand not found"
                             (selvage/check "missing-strand"))))))
 
 (deftest check-all-can-be-scoped-by-query-form
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)]
         (selvage/defvocab! vocab (shuttle-spec))
@@ -75,7 +75,7 @@
 
 (deftest watch-records-and-clears-violations
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)
             strand (repl/strand! "Watch target" {:shuttle/phase "pending"})]
@@ -96,7 +96,7 @@
 
 (deftest defvocab-replaces-existing-vocabulary
   (with-runtime
-    (fn [_ _]
+    (fn [rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)
             strand (repl/strand! "Replace target" {:shuttle/phase "running"})]

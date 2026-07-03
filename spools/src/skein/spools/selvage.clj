@@ -6,9 +6,10 @@
   vocabularies, run checks on demand, or watch asynchronous mutation events for
   post-hoc detection."
   (:require [clojure.string :as str]
+            [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
             [skein.api.graph.alpha :as graph]
-            [skein.repl :as repl]))
+            [skein.api.weaver.alpha :as api]))
 
 (defonce ^:private vocab-state (atom {}))
 (defonce ^:private violation-state (atom []))
@@ -163,13 +164,16 @@
 (defn check
   "Return vocabulary violations for one strand map or strand id.
 
-  Missing strand ids fail loudly through the public graph/repl surfaces. A clean
+  Missing strand ids fail loudly through the public graph surfaces. A clean
   strand returns an empty vector."
   [strand-or-id]
   (let [strand (if (strand-map? strand-or-id)
                  strand-or-id
-                 (or (repl/strand strand-or-id)
-                     (fail! "Strand not found" {:strand-id strand-or-id})))]
+                 (try
+                   (or (first (graph/strands-by-ids (current/runtime) [strand-or-id]))
+                       (fail! "Strand not found" {:strand-id strand-or-id}))
+                   (catch clojure.lang.ExceptionInfo e
+                     (throw (ex-info "Strand not found" {:strand-id strand-or-id} e)))))]
     (check-strand strand)))
 
 (defn check-all
@@ -178,9 +182,11 @@
   With no arguments checks all active strands. With `query-form`, checks only
   strands selected by that predicate DSL query."
   ([]
-   (vec (mapcat check-strand (repl/strands [:= :state "active"]))))
+   (let [rt (current/runtime)]
+     (vec (mapcat check-strand (api/list rt [:= :state "active"] {})))))
   ([query-form]
-   (vec (mapcat check-strand (repl/strands [:and [:= :state "active"] query-form])))))
+   (let [rt (current/runtime)]
+     (vec (mapcat check-strand (api/list rt [:and [:= :state "active"] query-form] {}))))))
 
 (defn record-event!
   "Event handler that records violations for strand added/updated events.
@@ -200,8 +206,9 @@
 (defn watch!
   "Register the asynchronous mutation watcher for post-hoc violation recording."
   []
-  (events/register! event-key #{:strand/added :strand/updated} 'skein.spools.selvage/record-event!
-                    {:purpose :selvage/attribute-vocabulary-lint}))
+  (let [rt (current/runtime)]
+    (events/register! rt event-key #{:strand/added :strand/updated} 'skein.spools.selvage/record-event!
+                      {:purpose :selvage/attribute-vocabulary-lint})))
 
 (defn violations
   "Return recorded watch-mode violations in delivery order."

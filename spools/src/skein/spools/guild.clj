@@ -10,6 +10,7 @@
   (:require [clojure.data.json :as json]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as weaver]))
 
 (def ^:private guild-ops (atom {}))
@@ -93,7 +94,7 @@
   (requiring-resolve handler-fn-sym)
   (when-let [spec (:spec opts)]
     (require-spec-name! spec))
-  (let [registered (weaver/register-op! name (:doc opts) 'skein.spools.guild/dispatch-op)
+  (let [registered (weaver/register-op! (current/runtime) name (:doc opts) 'skein.spools.guild/dispatch-op)
         entry (cond-> {:name (:name registered)
                        :handler handler-fn-sym}
                 (:doc opts) (assoc :doc (:doc opts))
@@ -123,7 +124,7 @@
         entry (or (get @guild-ops op-name)
                   (fail! "Guild op is not registered" {:op name}))
         deprecated (select-keys opts [:replacement :since])]
-    (weaver/register-op! name (:doc entry) 'skein.spools.guild/deprecated-op)
+    (weaver/register-op! (current/runtime) name (:doc entry) 'skein.spools.guild/deprecated-op)
     (swap! guild-ops dissoc (:name entry))
     (swap! deprecated-ops assoc (:name entry) (assoc deprecated :doc (:doc entry)))
     (assoc deprecated :name (:name entry))))
@@ -159,4 +160,4 @@
    (reset! guild-ops {})
    (reset! deprecated-ops {})
    (reset! fallback-guild-name guild-name)
-   (weaver/register-op! 'guild.describe "Describe this weaver's guild operation API" 'skein.spools.guild/describe-op)))
+   (weaver/register-op! (current/runtime) 'guild.describe "Describe this weaver's guild operation API" 'skein.spools.guild/describe-op)))

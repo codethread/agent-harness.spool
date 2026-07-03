@@ -35,7 +35,7 @@ to discover and invoke same-machine sibling weavers.
 
 These live beside this index in the repo-root [`spools/`](./) directory, **off**
 the shipped classpath, and load only through the approved-local-root flow
-(`spools.edn` → `sync!` → `use!`). The placement rule: pure graph vocabulary
+(`spools.edn` → explicit-runtime `sync!` → explicit-runtime `use!`). The placement rule: pure graph vocabulary
 that other code builds on ships on the classpath above; a spool that
 **escalates capability** (the shuttle spawns harness processes with the
 user's authority) or exists to exercise the userland distribution path sits

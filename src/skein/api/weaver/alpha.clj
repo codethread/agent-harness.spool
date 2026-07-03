@@ -6,8 +6,8 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [next.jdbc :as jdbc]
-            [skein.core.weaver.runtime :as runtime]
             [skein.core.db :as db]
+            [skein.core.weaver.runtime :as runtime]
             [skein.core.query :as query])
   (:import [java.time Instant]
            [java.util UUID]))
@@ -447,19 +447,15 @@
     (swap! (query-registry runtime) merge validated-query-defs)
     validated-query-defs))
 
-(defn- current-runtime []
-  (or @runtime/current-runtime
-      (throw (ex-info "No weaver runtime is active" {}))))
-
 (defn register-query!
   "Register a named query definition and return its canonical API shape."
-  [query-name query-def]
-  (register-query (current-runtime) query-name query-def))
+  [runtime query-name query-def]
+  (register-query runtime query-name query-def))
 
 (defn load-queries!
   "Load multiple named query definitions and return their canonical API shape."
-  [query-defs]
-  (load-queries (current-runtime) query-defs))
+  [runtime query-defs]
+  (load-queries runtime query-defs))
 
 (defn queries
   "Return registered query definitions keyed by canonical string name."
@@ -483,25 +479,21 @@
 
 (defn query-metadata
   "Return registered query caller metadata ordered by canonical name."
-  ([]
-   (query-metadata (current-runtime)))
-  ([runtime]
-   (mapv query-metadata-entry (queries runtime))))
+  [runtime]
+  (mapv query-metadata-entry (queries runtime)))
 
 (defn query-explain
   "Describe a registered query definition and how CLI callers invoke it."
-  ([query-name]
-   (query-explain (current-runtime) query-name))
-  ([runtime query-name]
-   (let [query-def (resolve-query runtime query-name)
-         name (query/query-lookup-name query-name)
-         where (query-where query-def)]
-     (assoc (query-metadata-entry [name query-def])
-            :where where
-            :definition query-def
-            :where-form (pr-str where)
-            :definition-form (pr-str query-def)
-            :summary "Invoke this query with `strand list --query <name>` or `strand ready --query <name>` and pass runtime values with repeated `--param key=value` arguments."))))
+  [runtime query-name]
+  (let [query-def (resolve-query runtime query-name)
+        name (query/query-lookup-name query-name)
+        where (query-where query-def)]
+    (assoc (query-metadata-entry [name query-def])
+           :where where
+           :definition query-def
+           :where-form (pr-str where)
+           :definition-form (pr-str query-def)
+           :summary "Invoke this query with `strand list --query <name>` or `strand ready --query <name>` and pass runtime values with repeated `--param key=value` arguments.")))
 
 (defn init
   "Initialize the runtime database schema."
@@ -944,16 +936,13 @@
   "Register a trusted weaver-side CLI operation.
 
   Registered operations are invoked by `strand op <name> [args...]`. The handler
-  symbol must resolve to a function that accepts one context map with `:op/name`
-  and `:op/argv`, and returns JSON-compatible data. Registry contents live only
-  for the current weaver lifetime and are normally installed from init.clj or a
-  live REPL or explicit connected client. Duplicate names replace prior entries for reload workflows."
-  ([op-name fn-sym]
-   (register-op! (current-runtime) op-name nil fn-sym))
-  ([a b c]
-   (if (runtime? a)
-     (register-op! a b nil c)
-     (register-op! (current-runtime) a b c)))
+  symbol must resolve to a function that accepts one context map with `:op/name`,
+  `:op/argv`, `:op/runtime`, and `:op/runtime-metadata`, and returns
+  JSON-compatible data. Registry contents live only for the current weaver
+  lifetime and are normally installed from init.clj or a live REPL. Duplicate
+  names replace prior entries for reload workflows."
+  ([runtime op-name fn-sym]
+   (register-op! runtime op-name nil fn-sym))
   ([runtime op-name doc fn-sym]
    (let [entry (cond-> {:name (canonical-op-name op-name)
                         :fn (validate-op-fn-symbol! fn-sym)}
@@ -983,17 +972,18 @@
       runtime
       #((requiring-resolve fn-sym) {:op/name name
                                     :op/argv (vec argv)
+                                    :op/runtime runtime
                                     :op/runtime-metadata (:metadata runtime)}))))
 
 (defn op-help-handler
   "Return help for `strand op` and currently registered operations."
-  [_ctx]
+  [ctx]
   {:summary "strand op invokes trusted weaver-side operations by name."
    :usage "strand op <name> [args...]"
    :details ["The Go CLI stops parsing after the operation name and forwards the remaining arguments as strings."
              "Register handlers from trusted init.clj, activated spools, or the live REPL with skein.api.weaver.alpha/register-op!."
-             "Handlers receive {:op/name <canonical-name> :op/argv [<strings>...]} and return JSON-compatible data."]
-   :registered (ops (current-runtime))})
+             "Handlers receive {:op/name <canonical-name> :op/argv [<strings>...] :op/runtime <runtime> :op/runtime-metadata <metadata>} and return JSON-compatible data."]
+   :registered (ops (:op/runtime ctx))})
 
 (defn register-built-in-ops!
   "Install Skein-provided CLI operations into the runtime op registry."
@@ -1024,14 +1014,10 @@
 
 (defn register-pattern!
   "Register a trusted weaver pattern handler and input spec."
-  ([pattern-name fn-sym input-spec]
-   (register-pattern! (current-runtime) pattern-name fn-sym input-spec))
-  ([a b c d]
-   (if (runtime? a)
-     (let [entry (pattern-entry b nil c d)]
-       (swap! (pattern-registry a) assoc (:name entry) entry)
-       entry)
-     (register-pattern! (current-runtime) a b c d)))
+  ([runtime pattern-name fn-sym input-spec]
+   (let [entry (pattern-entry pattern-name nil fn-sym input-spec)]
+     (swap! (pattern-registry runtime) assoc (:name entry) entry)
+     entry))
   ([runtime pattern-name doc fn-sym input-spec]
    (let [entry (pattern-entry pattern-name doc fn-sym input-spec)]
      (swap! (pattern-registry runtime) assoc (:name entry) entry)
@@ -1243,12 +1229,8 @@
 
 (defn register-hook!
   "Register a trusted lifecycle hook for selected hook types."
-  ([key types fn-sym]
-   (register-hook! (current-runtime) key types fn-sym {}))
-  ([a b c d]
-   (if (runtime? a)
-     (register-hook! a b c d {})
-     (register-hook! (current-runtime) a b c d)))
+  ([runtime key types fn-sym]
+   (register-hook! runtime key types fn-sym {}))
   ([runtime key types fn-sym opts]
    (let [opts (validate-hook-opts! opts)
          entry {:key (validate-hook-key! key)

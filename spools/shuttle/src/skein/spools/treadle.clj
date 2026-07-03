@@ -10,7 +10,7 @@
             [skein.spools.shuttle :as shuttle]
             [skein.spools.workflow :as workflow]
             [skein.api.weaver.alpha :as api]
-            [skein.api.runtime.alpha :as runtime-alpha]))
+            [skein.api.current.alpha :as current]))
 
 (def ^:private event-types
   #{:strand/added :strand/updated :batch/applied :strand/burned :strand/superseded})
@@ -20,8 +20,12 @@
 (defn- fail! [message data]
   (throw (ex-info message data)))
 
+(def ^:dynamic *runtime*
+  "Runtime captured for asynchronous treadle scans."
+  nil)
+
 (defn- rt []
-  (runtime-alpha/current-runtime))
+  (or *runtime* (current/runtime)))
 
 (defn- attr
   "Read attribute `k` tolerating keyword- or string-keyed maps (mirrors
@@ -160,11 +164,14 @@
 (defn scan!
   "Deliver finished shuttle runs and spawn ready workflow subagent gates."
   []
-  (locking scan-monitor
-    (doseq [run (finished-undelivered-runs)]
-      (deliver-run! run))
-    (spawn-ready-gates!)
-    {:scanned true}))
+  (let [runtime (rt)]
+    (binding [*runtime* runtime
+              shuttle/*runtime* runtime]
+      (locking scan-monitor
+        (doseq [run (finished-undelivered-runs)]
+          (deliver-run! run))
+        (spawn-ready-gates!)
+        {:scanned true}))))
 
 (defn on-event
   "Weaver event handler: graph changes may finish or unblock treadle work."
@@ -200,11 +207,11 @@
                                  'skein.spools.treadle/on-event
                                  {:spool "treadle"})
     (workflow/register-stall-predicate! :treadle gate-stalled?)
-    (api/register-query! 'stalled-gates
+    (api/register-query! runtime 'stalled-gates
                          [:and [:= :state "active"]
                           [:= [:attr "workflow/gate"] "subagent"]
                           [:exists [:attr "treadle/error"]]])
-    (api/register-query! 'blocked-deliveries
+    (api/register-query! runtime 'blocked-deliveries
                          [:and [:= :state "closed"]
                           [:exists [:attr "treadle/delivery-blocked"]]
                           [:missing [:attr "treadle/delivered"]]])

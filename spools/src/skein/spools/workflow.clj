@@ -9,8 +9,9 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.batch.alpha :as batch]
+            [skein.api.current.alpha :as current]
             [skein.api.graph.alpha :as graph]
-            [skein.repl :as repl]))
+            [skein.api.weaver.alpha :as api]))
 
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -847,6 +848,10 @@
      {:name (:name rendered)
       :steps (mapv describe-step steps)})))
 
+(defn- pour-with-rt!
+  [rt workflow params opts]
+  (batch/apply! rt (compile workflow params (merge opts {:phase :molecule}))))
+
 (defn pour!
   "Materialize `workflow` as a persistent molecule strand graph."
   ([workflow]
@@ -854,7 +859,12 @@
   ([workflow params]
    (pour! workflow params {}))
   ([workflow params opts]
-   (batch/apply! (compile workflow params (merge opts {:phase :molecule})))))
+   (let [rt (current/runtime)]
+     (pour-with-rt! rt workflow params opts))))
+
+(defn- wisp-with-rt!
+  [rt workflow params opts]
+  (batch/apply! rt (compile workflow params (merge opts {:phase :wisp}))))
 
 (defn wisp!
   "Materialize `workflow` as an ephemeral wisp strand graph.
@@ -866,7 +876,8 @@
   ([workflow params]
    (wisp! workflow params {}))
   ([workflow params opts]
-   (batch/apply! (compile workflow params (merge opts {:phase :wisp})))))
+   (let [rt (current/runtime)]
+     (wisp-with-rt! rt workflow params opts))))
 
 (defn- attr
   "Read attribute `k` (a keyword such as `:workflow/role`) from `strand`'s
@@ -893,53 +904,73 @@
   The `workflow/bond` edge attribute distinguishes a cross-molecule bond from
   the intra-molecule dependency edges `compile` emits."
   [left-id right-id]
-  (repl/update! right-id {:edges [{:type "depends-on" :to left-id
-                                   :attributes {:workflow/bond "sequential"}}]}))
+  (let [rt (current/runtime)]
+    (api/update rt right-id {:edges [{:type "depends-on" :to left-id
+                                      :attributes {:workflow/bond "sequential"}}]})))
+
+(defn- burn-with-rt!
+  [rt root-id]
+  (let [ids (mapv :id (:strands (graph/subgraph rt [root-id])))]
+    (if (seq ids)
+      (graph/burn-by-ids! rt ids)
+      {:burned [] :count 0})))
 
 (defn burn!
   "Burn a materialized molecule or wisp subgraph rooted at `root-id`."
   [root-id]
-  (let [ids (mapv :id (:strands (graph/subgraph [root-id])))]
-    (if (seq ids)
-      (graph/burn-by-ids! ids)
-      {:burned [] :count 0})))
+  (let [rt (current/runtime)]
+    (burn-with-rt! rt root-id)))
 
 (defn squash!
   "Replace a materialized wisp/molecule with one digest strand, then burn its graph."
   ([root-id title]
    (squash! root-id title {}))
   ([root-id title attributes]
-   (let [subgraph (graph/subgraph [root-id])
-         digest (repl/strand! title
-                              (merge {"workflow/role" "digest"
-                                      "workflow/squashed-root" root-id
-                                      "workflow/squashed-count" (count (:strands subgraph))}
-                                     attributes)
-                              {:state "closed"})]
-     (burn! root-id)
+   (let [rt (current/runtime)
+         subgraph (graph/subgraph rt [root-id])
+         digest (api/add rt {:title title
+                             :state "closed"
+                             :attributes (merge {"workflow/role" "digest"
+                                                 "workflow/squashed-root" root-id
+                                                 "workflow/squashed-count" (count (:strands subgraph))}
+                                                attributes)})]
+     (burn-with-rt! rt root-id)
      digest)))
+
+(defn- active-runs-with-rt
+  ([rt]
+   (api/list rt [:and [:= :state "active"] [:= [:attr "workflow/role"] "molecule"]] {}))
+  ([rt family]
+   (api/list rt [:and
+                 [:= :state "active"]
+                 [:= [:attr "workflow/role"] "molecule"]
+                 [:= [:attr "workflow/family"] family]] {})))
 
 (defn active-runs
   "Return active workflow root strands, optionally filtered by family."
   ([]
-   (repl/query [:and [:= :state "active"] [:= [:attr "workflow/role"] "molecule"]]))
+   (let [rt (current/runtime)]
+     (active-runs-with-rt rt)))
   ([family]
-   (repl/query [:and
-                [:= :state "active"]
-                [:= [:attr "workflow/role"] "molecule"]
-                [:= [:attr "workflow/family"] family]])))
+   (let [rt (current/runtime)]
+     (active-runs-with-rt rt family))))
 
-(defn current-root
-  "Return the single active workflow root for run-id, nil when absent, or fail if ambiguous."
-  [run-id]
-  (let [roots (repl/query [:and
-                           [:= :state "active"]
-                           [:= [:attr "workflow/run-id"] run-id]
-                           [:= [:attr "workflow/role"] "molecule"]])]
+(defn- current-root-with-rt
+  [rt run-id]
+  (let [roots (api/list rt [:and
+                            [:= :state "active"]
+                            [:= [:attr "workflow/run-id"] run-id]
+                            [:= [:attr "workflow/role"] "molecule"]] {})]
     (case (count roots)
       0 nil
       1 (first roots)
       (throw (ex-info "Multiple active workflow roots found" {:run-id run-id :roots roots})))))
+
+(defn current-root
+  "Return the single active workflow root for run-id, nil when absent, or fail if ambiguous."
+  [run-id]
+  (let [rt (current/runtime)]
+    (current-root-with-rt rt run-id)))
 
 (defn- raw-next-steps
   "Return the run's ready workflow work strands.
@@ -947,11 +978,11 @@
   A root with an active depends-on blocker (a `bond!` from another molecule)
   parent-blocks the whole run: its steps stay hidden until the blocking root
   closes, even though each step's own deps may be satisfied."
-  [run-id]
-  (let [root (current-root run-id)
-        ready (repl/ready)
+  [rt run-id]
+  (let [root (current-root-with-rt rt run-id)
+        ready (api/ready rt)
         root-ready? (and root (some #(= (:id %) (:id root)) ready))
-        ids (when root (set (map :id (:strands (graph/subgraph [(:id root)])))))]
+        ids (when root (set (map :id (:strands (graph/subgraph rt [(:id root)])))))]
     (if-not root-ready?
       []
       (->> ready
@@ -959,8 +990,8 @@
            (remove #(contains? #{"molecule" "procedure"} (attr % :workflow/role)))
            vec))))
 
-(defn- raw-next-step [run-id]
-  (let [steps (raw-next-steps run-id)]
+(defn- raw-next-step [rt run-id]
+  (let [steps (raw-next-steps rt run-id)]
     (case (count steps)
       0 nil
       1 (first steps)
@@ -968,8 +999,8 @@
 
 (defn- ready-step-by-id
   "Return the ready step matching id among run-id's currently ready steps, or nil."
-  [run-id id]
-  (some #(when (= (:id %) id) %) (raw-next-steps run-id)))
+  [rt run-id id]
+  (some #(when (= (:id %) id) %) (raw-next-steps rt run-id)))
 
 (defn- resolve-ready-step
   "Return the ready workflow step to act on for run-id.
@@ -979,12 +1010,12 @@
   requested step is not ready. Without `:step`, falls back to the single
   ready step, returning nil when none is ready and throwing when more than
   one is ready (ambiguous)."
-  [run-id opts]
+  [rt run-id opts]
   (if-let [wanted (:step opts)]
-    (or (ready-step-by-id run-id wanted)
+    (or (ready-step-by-id rt run-id wanted)
         (fail! "Requested workflow step is not ready" {:run-id run-id :step wanted
-                                                        :ready (mapv :id (raw-next-steps run-id))}))
-    (raw-next-step run-id)))
+                                                        :ready (mapv :id (raw-next-steps rt run-id))}))
+    (raw-next-step rt run-id)))
 
 (defn step-view
   "Return the agent-facing view of a workflow step."
@@ -1004,6 +1035,16 @@
       (attr step :workflow/instruction) (assoc :instruction (attr step :workflow/instruction))
       (attr step :skills) (assoc :skills (attr step :skills)))))
 
+(defn- next-steps-with-rt
+  [rt run-id selector]
+  (require-map! selector [:selector])
+  (let [matches? (fn [step]
+                   (every? (fn [[k v]] (= v (get step k))) selector))]
+    (->> (raw-next-steps rt run-id)
+         (map #(assoc (step-view %) :run-id run-id))
+         (filter matches?)
+         vec)))
+
 (defn next-steps
   "Return agent-facing ready workflow steps for run-id.
 
@@ -1014,25 +1055,23 @@
   ([run-id]
    (next-steps run-id {}))
   ([run-id selector]
-   (require-map! selector [:selector])
-   (let [matches? (fn [step]
-                    (every? (fn [[k v]] (= v (get step k))) selector))]
-     (->> (raw-next-steps run-id)
-          (map #(assoc (step-view %) :run-id run-id))
-          (filter matches?)
-          vec))))
+   (let [rt (current/runtime)]
+     (next-steps-with-rt rt run-id selector))))
 
 (defn next-gates
   "Return ready gate step views for run-id, optionally filtered by waiter."
   ([run-id]
-   (filterv :gate (next-steps run-id)))
+   (let [rt (current/runtime)]
+     (filterv :gate (next-steps-with-rt rt run-id {}))))
   ([run-id waiter]
-   (next-steps run-id {:gate (name waiter)})))
+   (let [rt (current/runtime)]
+     (next-steps-with-rt rt run-id {:gate (name waiter)}))))
 
 (defn next-checkpoint
   "Return the single ready checkpoint view for run-id, nil if none, or fail if ambiguous."
   [run-id]
-  (let [steps (next-steps run-id {:kind "checkpoint"})]
+  (let [rt (current/runtime)
+        steps (next-steps-with-rt rt run-id {:kind "checkpoint"})]
     (case (count steps)
       0 nil
       1 (first steps)
@@ -1043,7 +1082,8 @@
 
   The view carries `:run-id` (see `next-steps`)."
   [run-id]
-  (some-> (raw-next-step run-id) step-view (assoc :run-id run-id)))
+  (let [rt (current/runtime)]
+    (some-> (raw-next-step rt run-id) step-view (assoc :run-id run-id))))
 
 (def ^:private workflow-work-roles #{"step" "checkpoint" "procedure"})
 
@@ -1055,16 +1095,23 @@
 
 (defn- run-work-done?
   "True when every step, checkpoint, and procedure strand in root-id's subgraph is closed."
-  [root-id]
+  [rt root-id]
   (every? #(= "closed" (:state %))
-          (filter workflow-work-strand? (:strands (graph/subgraph [root-id])))))
+          (filter workflow-work-strand? (:strands (graph/subgraph rt [root-id])))))
 
 (defn- root-strand-exists?
   "True when run-id has ever had a root molecule strand, active or closed."
-  [run-id]
-  (boolean (seq (repl/query [:and
-                            [:= [:attr "workflow/run-id"] run-id]
-                            [:= [:attr "workflow/role"] "molecule"]]))))
+  [rt run-id]
+  (boolean (seq (api/list rt [:and
+                                             [:= [:attr "workflow/run-id"] run-id]
+                                             [:= [:attr "workflow/role"] "molecule"]] {}))))
+
+(defn- done-with-rt?
+  [rt run-id]
+  (when-not (root-strand-exists? rt run-id)
+    (fail! "Unknown workflow run" {:run-id run-id}))
+  (let [root (current-root-with-rt rt run-id)]
+    (or (nil? root) (run-work-done? rt (:id root)))))
 
 (defn done?
   "Return true when run-id has no active workflow root, or its active root's
@@ -1072,18 +1119,16 @@
 
   Fails loudly for a run-id that has never had a root strand."
   [run-id]
-  (when-not (root-strand-exists? run-id)
-    (fail! "Unknown workflow run" {:run-id run-id}))
-  (let [root (current-root run-id)]
-    (or (nil? root) (run-work-done? (:id root)))))
+  (let [rt (current/runtime)]
+    (done-with-rt? rt run-id)))
 
 (defn- run-molecule-roots
   "Return every molecule root ever poured for run-id (active or closed), ordered
   by creation. Empty when the run never existed."
-  [run-id]
-  (->> (repl/query [:and
-                    [:= [:attr "workflow/run-id"] run-id]
-                    [:= [:attr "workflow/role"] "molecule"]])
+  [rt run-id]
+  (->> (api/list rt [:and
+                                    [:= [:attr "workflow/run-id"] run-id]
+                                    [:= [:attr "workflow/role"] "molecule"]] {})
        (sort-by :created_at)
        vec))
 
@@ -1115,8 +1160,8 @@
 (defn- molecule-history
   "Project one molecule root into `{:root {…} :events [event …]}`, its events being
   every closed step/checkpoint strand in the root's subgraph, ordered by `:at`."
-  [root]
-  (let [events (->> (:strands (graph/subgraph [(:id root)]))
+  [rt root]
+  (let [events (->> (:strands (graph/subgraph rt [(:id root)]))
                     (filter #(and (= "closed" (:state %))
                                   (contains? history-event-roles (attr % :workflow/role))))
                     (map history-event)
@@ -1140,10 +1185,11 @@
   `devflow/stage`. Writes nothing and fails loudly (TEN-003) for a run that never
   had a root strand."
   [run-id]
-  (let [roots (run-molecule-roots run-id)]
+  (let [rt (current/runtime)
+        roots (run-molecule-roots rt run-id)]
     (when (empty? roots)
       (fail! "Unknown workflow run" {:run-id run-id}))
-    (mapv molecule-history roots)))
+    (mapv #(molecule-history rt %) roots)))
 
 (defn- run-summary
   "Return a compact, JSON-safe summary of `history`: one string-keyed entry per
@@ -1167,30 +1213,30 @@
   ([run-id]
    (archive-run! run-id {}))
   ([run-id {:keys [title attributes]}]
-   (when-not (root-strand-exists? run-id)
-     (fail! "Unknown workflow run" {:run-id run-id}))
-   (when (current-root run-id)
-     (fail! "Cannot archive a run with an active root" {:run-id run-id}))
-   (let [roots (run-molecule-roots run-id)
-         summary (run-summary (mapv molecule-history roots))
-         squashed-count (reduce + 0 (map #(count (:strands (graph/subgraph [(:id %)]))) roots))
-         digest (repl/strand!
-                 (or title (str "Digest for run " run-id))
-                 (merge {"workflow/role" "digest"
-                         "workflow/run-id" run-id
-                         "workflow/squashed-count" squashed-count
-                         "workflow/summary" summary}
-                        attributes)
-                 {:state "closed"})]
-     (doseq [root roots]
-       (burn! (:id root)))
-     digest)))
+   (let [rt (current/runtime)]
+     (when-not (root-strand-exists? rt run-id)
+       (fail! "Unknown workflow run" {:run-id run-id}))
+     (when (current-root-with-rt rt run-id)
+       (fail! "Cannot archive a run with an active root" {:run-id run-id}))
+     (let [roots (run-molecule-roots rt run-id)
+           summary (run-summary (mapv #(molecule-history rt %) roots))
+           squashed-count (reduce + 0 (map #(count (:strands (graph/subgraph rt [(:id %)]))) roots))
+           digest (api/add rt {:title (or title (str "Digest for run " run-id))
+                               :state "closed"
+                               :attributes (merge {"workflow/role" "digest"
+                                                   "workflow/run-id" run-id
+                                                   "workflow/squashed-count" squashed-count
+                                                   "workflow/summary" summary}
+                                                  attributes)})]
+       (doseq [root roots]
+         (burn-with-rt! rt (:id root)))
+       digest))))
 
 (defn- attention
   "Return the current attention state for workflow run-id."
-  [run-id stall-predicate]
-  (let [ready (next-steps run-id)
-        done (done? run-id)]
+  [rt run-id stall-predicate]
+  (let [ready (next-steps-with-rt rt run-id {})
+        done (done-with-rt? rt run-id)]
     (cond
       done {:reason :done :ready ready :done true}
       (seq (filter #(= "checkpoint" (:kind %)) ready))
@@ -1228,12 +1274,13 @@
    (await! run-id {}))
   ([run-id {:keys [timeout-secs stall-predicate]
             :or {timeout-secs 1800 stall-predicate :default}}]
-   (let [pred (or (get @stall-predicate-registry stall-predicate)
+   (let [rt (current/runtime)
+         pred (or (get @stall-predicate-registry stall-predicate)
                   (fail! "Unknown workflow stall predicate" {:stall-predicate stall-predicate
                                                               :available (sort (keys @stall-predicate-registry))}))
          deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))]
      (loop []
-       (let [state (attention run-id pred)]
+       (let [state (attention rt run-id pred)]
          (cond
            (not= :waiting (:reason state)) state
            (>= (System/currentTimeMillis) deadline) (assoc state :reason :timeout)
@@ -1244,9 +1291,9 @@
   done-ness, in one map. Every run-mutating op (`start!`, `complete!`,
   `choose!`, `advance!`) returns this so callers never guess whether an empty
   `:ready` means the run finished or merely stalled."
-  [run-id]
-  {:ready (next-steps run-id)
-   :done (done? run-id)})
+  [rt run-id]
+  {:ready (next-steps-with-rt rt run-id {})
+   :done (done-with-rt? rt run-id)})
 
 (declare close-run-if-done!)
 
@@ -1264,17 +1311,18 @@
   ([run-id workflow params]
    (start! run-id workflow params {}))
   ([run-id workflow params opts]
-   (when (current-root run-id)
-     (fail! "Active workflow run already exists" {:run-id run-id}))
-   (let [{resolved-workflow :workflow derived-definition :definition} (workflow-input-plan workflow params)
-         opts (cond-> opts
-                (and derived-definition (not (contains? opts :definition)))
-                (assoc :definition derived-definition)
-                (not (contains? opts :context))
-                (assoc :context (default-context params)))]
-     (pour! resolved-workflow params (merge opts {:run-id run-id})))
-   (close-run-if-done! run-id)
-   (run-result run-id)))
+   (let [rt (current/runtime)]
+     (when (current-root-with-rt rt run-id)
+       (fail! "Active workflow run already exists" {:run-id run-id}))
+     (let [{resolved-workflow :workflow derived-definition :definition} (workflow-input-plan workflow params)
+           opts (cond-> opts
+                  (and derived-definition (not (contains? opts :definition)))
+                  (assoc :definition derived-definition)
+                  (not (contains? opts :context))
+                  (assoc :context (default-context params)))]
+       (pour-with-rt! rt resolved-workflow params (merge opts {:run-id run-id})))
+     (close-run-if-done! rt run-id)
+     (run-result rt run-id))))
 
 (defn- string-keyed [m]
   (into {} (map (fn [[k v]] [(if (keyword? k) (name k) k) v])) m))
@@ -1300,13 +1348,14 @@
   ([run-id]
    (choice-details run-id {}))
   ([run-id opts]
-   (require-map! opts [:opts])
-   (let [step (or (resolve-ready-step run-id opts)
-                  (fail! "No ready workflow step" {:run-id run-id}))
-         details (attr step :workflow/choice-details)]
-     (when-not (= "checkpoint" (attr step :workflow/role))
-       (fail! "Current workflow step is not a checkpoint" {:run-id run-id :step (step-view step)}))
-     (into {} (map (fn [[k v]] [(if (keyword? k) (name k) k) (detail-view v)])) details))))
+   (let [rt (current/runtime)]
+     (require-map! opts [:opts])
+     (let [step (or (resolve-ready-step rt run-id opts)
+                    (fail! "No ready workflow step" {:run-id run-id}))
+           details (attr step :workflow/choice-details)]
+       (when-not (= "checkpoint" (attr step :workflow/role))
+         (fail! "Current workflow step is not a checkpoint" {:run-id run-id :step (step-view step)}))
+       (into {} (map (fn [[k v]] [(if (keyword? k) (name k) k) (detail-view v)])) details)))))
 
 (defn choice-detail
   "Return one choice explanation for run-id's current workflow checkpoint.
@@ -1323,10 +1372,10 @@
 
 (declare close-workflow-root!)
 
-(defn- close-run-if-done! [run-id]
-  (when-let [root (current-root run-id)]
-    (when (run-work-done? (:id root))
-      (close-workflow-root! root))))
+(defn- close-run-if-done! [rt run-id]
+  (when-let [root (current-root-with-rt rt run-id)]
+    (when (run-work-done? rt (:id root))
+      (close-workflow-root! rt root))))
 
 (defn- close-attributes!
   "Return attributes to merge onto a step closed by complete!, from optional
@@ -1345,14 +1394,14 @@
   "Return the depends-on adjacency (from-id -> #{to-id ...}) internal to
   `strand-ids`. Subgraph expansion can reach external blockers, so edges with an
   endpoint outside the set are dropped to keep join readiness run-local."
-  [strand-ids]
+  [rt strand-ids]
   (let [ids (set strand-ids)]
     (reduce (fn [acc {:keys [from_strand_id to_strand_id]}]
               (if (and (contains? ids from_strand_id) (contains? ids to_strand_id))
                 (update acc from_strand_id (fnil conj #{}) to_strand_id)
                 acc))
             {}
-            (:edges (graph/subgraph strand-ids {:type "depends-on"})))))
+            (:edges (graph/subgraph rt strand-ids {:type "depends-on"})))))
 
 (defn- cascade-join-ids
   "Return the `procedure` join strand ids under root-id's run that become fully
@@ -1363,10 +1412,10 @@
   closing the last inner step beneath a join thus closes the join in the same
   transaction, and a join that is the last inner step of an outer join cascades
   likewise. Joins never surface as ready work (see `raw-next-steps`)."
-  [root-id closing-ids]
-  (let [strands (:strands (graph/subgraph [root-id]))
+  [rt root-id closing-ids]
+  (let [strands (:strands (graph/subgraph rt [root-id]))
         by-id (into {} (map (juxt :id identity)) strands)
-        deps (depends-on-edges (map :id strands))
+        deps (depends-on-edges rt (map :id strands))
         joins (filter #(= "procedure" (attr % :workflow/role)) strands)]
     (loop [closed (set closing-ids)
            result #{}]
@@ -1415,22 +1464,23 @@
   ([run-id]
    (complete! run-id {}))
   ([run-id opts]
-   (require-map! opts [:opts])
-   (let [step (or (resolve-ready-step run-id opts)
-                  (fail! "No ready workflow step" {:run-id run-id}))]
-     (when (= "checkpoint" (attr step :workflow/role))
-       (fail! "Cannot complete a checkpoint; use choose!" {:run-id run-id :step (step-view step)}))
-     (let [gate (attr step :workflow/gate)]
-       (when (and gate (not (non-blank-string? (:by opts))))
-         (fail! "Gate steps require a non-blank :by to record who closed them"
-                {:run-id run-id :step (step-view step) :gate gate :by (:by opts)}))
-       (let [attrs (cond-> (or (close-attributes! opts) {})
-                     gate (assoc "workflow/outcome-by" (:by opts)))
-             root (current-root run-id)
-             join-ids (cascade-join-ids (:id root) #{(:id step)})]
-         (batch/apply! (close-batch (:id step) (not-empty attrs) join-ids))
-         (close-run-if-done! run-id)
-         (run-result run-id))))))
+   (let [rt (current/runtime)]
+     (require-map! opts [:opts])
+     (let [step (or (resolve-ready-step rt run-id opts)
+                    (fail! "No ready workflow step" {:run-id run-id}))]
+       (when (= "checkpoint" (attr step :workflow/role))
+         (fail! "Cannot complete a checkpoint; use choose!" {:run-id run-id :step (step-view step)}))
+       (let [gate (attr step :workflow/gate)]
+         (when (and gate (not (non-blank-string? (:by opts))))
+           (fail! "Gate steps require a non-blank :by to record who closed them"
+                  {:run-id run-id :step (step-view step) :gate gate :by (:by opts)}))
+         (let [attrs (cond-> (or (close-attributes! opts) {})
+                       gate (assoc "workflow/outcome-by" (:by opts)))
+               root (current-root-with-rt rt run-id)
+               join-ids (cascade-join-ids rt (:id root) #{(:id step)})]
+           (batch/apply! rt (close-batch (:id step) (not-empty attrs) join-ids))
+           (close-run-if-done! rt run-id)
+           (run-result rt run-id)))))))
 
 (defn- raw-choice-detail [step choice]
   (let [details (attr step :workflow/choice-details)]
@@ -1458,12 +1508,12 @@
                 :missing (vec missing)
                 :input-declaration decls})))))
 
-(defn- close-workflow-root! [root]
-  (doseq [strand (:strands (graph/subgraph [(:id root)]))]
+(defn- close-workflow-root! [rt root]
+  (doseq [strand (:strands (graph/subgraph rt [(:id root)]))]
     (when (and (= "active" (:state strand))
                (contains? #{"molecule" "step" "checkpoint" "procedure"}
                           (attr strand :workflow/role)))
-      (repl/update! (:id strand) {:state "closed"}))))
+      (api/update rt (:id strand) {:state "closed"}))))
 
 (defonce ^{:private true
            :doc "Weaver-lifetime map of registered workflow name (keyword) ->
@@ -1575,12 +1625,12 @@
   params so leaving the stage sheds its loop state. Params persist as the new
   root's `workflow/context`, and the resolved constructor symbol as its
   `workflow/definition` so a later `:revise` can re-pour the stage."
-  [run-id step next-str input]
+  [rt run-id step next-str input]
   (let [next-sym (resolve-next-symbol next-str)
         workflow-fn (or (requiring-resolve next-sym)
                         (fail! "Choice next workflow cannot be resolved"
                                {:run-id run-id :next next-sym}))
-        root (current-root run-id)
+        root (current-root-with-rt rt run-id)
         context (or (attr root :workflow/context) {})
         call-params (apply dissoc (merge context input) (stage-param-keys root))
         {:keys [workflow params]} (continuation-plan (workflow-fn call-params) call-params)
@@ -1600,8 +1650,8 @@
   overrides winning, and persist as the new root's `workflow/context`; the
   overridden keys are recorded as stage-local (see `stage-params-attrs`). Fails
   loudly (TEN-003) when the root has no resolvable `workflow/definition`."
-  [run-id step choice input override-params]
-  (let [root (current-root run-id)
+  [rt run-id step choice input override-params]
+  (let [root (current-root-with-rt rt run-id)
         def-str (or (attr root :workflow/definition)
                     (fail! "Cannot revise a run whose root has no workflow/definition"
                            {:run-id run-id :choice choice}))
@@ -1630,13 +1680,13 @@
   override params (see `revise-plan`). The plan carries the old root and the
   continuation batch payload, compiled once before any mutation and applied only
   after the old root closes, so two active roots never share one run-id."
-  [run-id step choice input]
+  [rt run-id step choice input]
   (let [detail (some-> (raw-choice-detail step choice) detail-view)
         next-str (get detail "next")
         revise-params (get detail "revise")]
     (cond
-      next-str (next-plan run-id step next-str input)
-      revise-params (revise-plan run-id step choice input revise-params)
+      next-str (next-plan rt run-id step next-str input)
+      revise-params (revise-plan rt run-id step choice input revise-params)
       :else nil)))
 
 (defn- routed-batch
@@ -1651,13 +1701,13 @@
   strand is mutated, so the old root and its checkpoint stay active and the run
   stays resumable (a plain `repl/update!` close before the pour would instead
   strand the run in a false terminal state)."
-  [route step outcome]
+  [rt route step outcome]
   (let [checkpoint-id (:id step)
         closeable (filter (fn [strand]
                             (and (= "active" (:state strand))
                                  (contains? #{"molecule" "step" "checkpoint" "procedure"}
                                             (attr strand :workflow/role))))
-                          (:strands (graph/subgraph [(:id (:old-root route))])))
+                          (:strands (graph/subgraph rt [(:id (:old-root route))])))
         close-strands (mapv (fn [strand]
                               (cond-> {:ref (keyword (:id strand)) :state "closed"}
                                 (= (:id strand) checkpoint-id) (assoc :attributes outcome)))
@@ -1692,30 +1742,31 @@
   ([run-id choice input]
    (choose! run-id choice input {}))
   ([run-id choice input opts]
-   (require-map! opts [:opts])
-   (let [choice (if (keyword? choice) (name choice) (str choice))
-         step (or (resolve-ready-step run-id opts)
-                  (fail! "No ready workflow checkpoint" {:run-id run-id}))]
-     (when-not (map? input)
-       (fail! "Choice input must be a map" {:run-id run-id :choice choice :input input}))
-     (when-not (= "checkpoint" (attr step :workflow/role))
-       (fail! "Current workflow step is not a checkpoint" {:run-id run-id :step (step-view step)}))
-     (let [choices (set (attr step :workflow/choices))]
-       (when-not (contains? choices choice)
-         (fail! "Choice is not valid for checkpoint" {:run-id run-id :choice choice :valid choices})))
-     (validate-choice-input! run-id step choice input)
-     (let [route (route-plan run-id step choice input)
-           outcome (cond-> {"workflow/outcome" choice
-                            "workflow/outcome-input" input}
-                     (contains? opts :by) (assoc "workflow/outcome-by" (:by opts)))]
-       (if route
-         (batch/apply! (routed-batch route step outcome))
-         (batch/apply! (close-batch (:id step) outcome
-                                    (cascade-join-ids (:id (current-root run-id)) #{(:id step)}))))
-       ;; also covers a routed continuation that poured no active work, so the
-       ;; new root cannot linger active on a logically finished run
-       (close-run-if-done! run-id)
-       (run-result run-id)))))
+   (let [rt (current/runtime)]
+     (require-map! opts [:opts])
+     (let [choice (if (keyword? choice) (name choice) (str choice))
+           step (or (resolve-ready-step rt run-id opts)
+                    (fail! "No ready workflow checkpoint" {:run-id run-id}))]
+       (when-not (map? input)
+         (fail! "Choice input must be a map" {:run-id run-id :choice choice :input input}))
+       (when-not (= "checkpoint" (attr step :workflow/role))
+         (fail! "Current workflow step is not a checkpoint" {:run-id run-id :step (step-view step)}))
+       (let [choices (set (attr step :workflow/choices))]
+         (when-not (contains? choices choice)
+           (fail! "Choice is not valid for checkpoint" {:run-id run-id :choice choice :valid choices})))
+       (validate-choice-input! run-id step choice input)
+       (let [route (route-plan rt run-id step choice input)
+             outcome (cond-> {"workflow/outcome" choice
+                              "workflow/outcome-input" input}
+                       (contains? opts :by) (assoc "workflow/outcome-by" (:by opts)))]
+         (if route
+           (batch/apply! rt (routed-batch rt route step outcome))
+           (batch/apply! rt (close-batch (:id step) outcome
+                                         (cascade-join-ids rt (:id (current-root-with-rt rt run-id)) #{(:id step)}))))
+         ;; also covers a routed continuation that poured no active work, so the
+         ;; new root cannot linger active on a logically finished run
+         (close-run-if-done! rt run-id)
+         (run-result rt run-id))))))
 
 (defn advance!
   "Advance run-id by one ready step regardless of its kind, returning the
@@ -1730,21 +1781,22 @@
   ([run-id]
    (advance! run-id {}))
   ([run-id opts]
-   (require-map! opts [:opts])
-   (let [step (or (resolve-ready-step run-id opts)
-                  (fail! "No ready workflow step" {:run-id run-id}))]
-     (if (= "checkpoint" (attr step :workflow/role))
-       (do
-         (when-not (contains? opts :choice)
-           (fail! "advance! on a checkpoint requires a :choice"
-                  {:run-id run-id :step (step-view step)}))
-         (choose! run-id (:choice opts) (get opts :input {})
-                  (select-keys opts [:by :step])))
-       (do
-         (when (contains? opts :choice)
-           (fail! "advance! on a step must not supply a :choice"
-                  {:run-id run-id :step (step-view step)}))
-         (complete! run-id (select-keys opts [:notes :attributes :step :by])))))))
+   (let [rt (current/runtime)]
+     (require-map! opts [:opts])
+     (let [step (or (resolve-ready-step rt run-id opts)
+                    (fail! "No ready workflow step" {:run-id run-id}))]
+       (if (= "checkpoint" (attr step :workflow/role))
+         (do
+           (when-not (contains? opts :choice)
+             (fail! "advance! on a checkpoint requires a :choice"
+                    {:run-id run-id :step (step-view step)}))
+           (choose! run-id (:choice opts) (get opts :input {})
+                    (select-keys opts [:by :step])))
+         (do
+           (when (contains? opts :choice)
+             (fail! "advance! on a step must not supply a :choice"
+                    {:run-id run-id :step (step-view step)}))
+           (complete! run-id (select-keys opts [:notes :attributes :step :by]))))))))
 
 (defn install!
   "Return installation metadata for this alpha workflow spool."

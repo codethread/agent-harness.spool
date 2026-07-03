@@ -48,10 +48,10 @@
 
 (defn- await-phase
   "Poll until the strand's shuttle/phase is in `phases` or timeout; return it."
-  [id phases timeout-ms]
+  [rt id phases timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
     (loop []
-      (let [strand (api/show @runtime/current-runtime id)
+      (let [strand (api/show rt id)
             phase (get-in strand [:attributes :shuttle/phase])]
         (cond
           (contains? phases phase) strand
@@ -87,9 +87,9 @@
 
 (deftest run-spawns-when-ready-and-captures-result
   (with-shuttle
-    (fn [_]
+    (fn [rt]
       (let [run (shuttle/spawn-run! {:harness :sh :prompt "echo hello-shuttle"})
-            done (await-phase (:id run) #{"done"} 10000)]
+            done (await-phase rt (:id run) #{"done"} 10000)]
         (is (= "closed" (:state done)))
         (is (= "hello-shuttle" (get-in done [:attributes :shuttle/result])))
         (is (= 1 (get-in done [:attributes :shuttle/attempt])))
@@ -97,9 +97,9 @@
 
 (deftest failing-run-stays-active-and-loud
   (with-shuttle
-    (fn [_]
+    (fn [rt]
       (let [run (shuttle/spawn-run! {:harness :sh :prompt "echo boom >&2; exit 3"})
-            failed (await-phase (:id run) #{"failed"} 10000)]
+            failed (await-phase rt (:id run) #{"failed"} 10000)]
         (is (= "active" (:state failed)))
         (is (str/includes? (get-in failed [:attributes :shuttle/error]) "exited 3"))
         (is (str/includes? (get-in failed [:attributes :shuttle/error]) "boom"))))))
@@ -112,14 +112,14 @@
             child-b (shuttle/spawn-run! {:harness :sh :prompt "echo b"})
             collector (shuttle/spawn-run! {:harness :sh :prompt "echo collected"
                                            :depends-on [(:id blocker) (:id child-a) (:id child-b)]})]
-        (await-phase (:id child-a) #{"done"} 10000)
-        (await-phase (:id child-b) #{"done"} 10000)
+        (await-phase rt (:id child-a) #{"done"} 10000)
+        (await-phase rt (:id child-b) #{"done"} 10000)
         (testing "collector stays pending while any dependency is active"
           (Thread/sleep 300)
           (is (= "pending" (get-in (api/show rt (:id collector)) [:attributes :shuttle/phase]))))
         (testing "closing the last dependency triggers the spawn via events"
           (api/update rt (:id blocker) {:state "closed"})
-          (let [done (await-phase (:id collector) #{"done"} 10000)]
+          (let [done (await-phase rt (:id collector) #{"done"} 10000)]
             (is (= "collected" (get-in done [:attributes :shuttle/result])))))))))
 
 (deftest spawned-by-records-provenance-tree
@@ -128,8 +128,8 @@
       (let [parent (shuttle/spawn-run! {:harness :sh :prompt "echo parent"})
             child (shuttle/spawn-run! {:harness :sh :prompt "echo child"
                                        :spawned-by (:id parent)})]
-        (await-phase (:id parent) #{"done"} 10000)
-        (await-phase (:id child) #{"done"} 10000)
+        (await-phase rt (:id parent) #{"done"} 10000)
+        (await-phase rt (:id child) #{"done"} 10000)
         (is (= (:id parent)
                (get-in (api/show rt (:id child)) [:attributes :shuttle/spawned-by])))
         (is (some #(and (= (:id child) (:to_strand_id %)) (= "parent-of" (:edge_type %)))
@@ -145,7 +145,7 @@
                                      :prompt "echo delegated"
                                      :attrs {"treadle/gate" (:id gate)}})]
         (is (= (:id gate) (:for (shuttle/run-summary (api/show rt (:id run))))))
-        (await-phase (:id run) #{"done"} 10000)))))
+        (await-phase rt (:id run) #{"done"} 10000)))))
 
 (deftest notes-are-append-only-memory-with-rounds
   (with-shuttle
@@ -181,11 +181,11 @@
 
 (deftest kill-terminates-a-running-harness
   (with-shuttle
-    (fn [_]
+    (fn [rt]
       (let [run (shuttle/spawn-run! {:harness :sh :prompt "sleep 30; echo survived"})]
-        (await-phase (:id run) #{"running"} 10000)
+        (await-phase rt (:id run) #{"running"} 10000)
         (shuttle/kill! (:id run))
-        (let [failed (await-phase (:id run) #{"failed"} 10000)]
+        (let [failed (await-phase rt (:id run) #{"failed"} 10000)]
           (is (str/includes? (get-in failed [:attributes :shuttle/error]) "killed")))))))
 
 (deftest reconcile-respawns-orphans-and-exhausts-bounded-attempts
@@ -202,7 +202,7 @@
               summary (shuttle/reconcile!)]
           (is (= [(:id orphan)] (:respawned summary)))
           (is (= "recovered"
-                 (get-in (await-phase (:id orphan) #{"done"} 10000)
+                 (get-in (await-phase rt (:id orphan) #{"done"} 10000)
                          [:attributes :shuttle/result])))))
       (testing "a run out of attempts is marked exhausted, stays active"
         (let [spent (api/add rt {:title "spent"
@@ -220,7 +220,7 @@
 
 (deftest spawn-validates-inputs-before-creating-anything
   (with-shuttle
-    (fn [_]
+    (fn [rt]
       (testing "reserved control attributes cannot be overridden"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"control attributes"
                               (shuttle/spawn-run! {:harness :sh :prompt "echo x"
@@ -244,7 +244,7 @@
                                   "shuttle/phase" "pending"}})
         (let [run-id (:id (first (filter #(= "handmade" (:title %))
                                          (api/list rt shuttle/run-query {}))))
-              failed (await-phase run-id #{"failed"} 10000)]
+              failed (await-phase rt run-id #{"failed"} 10000)]
           (is (str/includes? (get-in failed [:attributes :shuttle/error]) "Harness not found")))))))
 
 (deftest agent-op-dispatches-and-fails-loudly
@@ -343,7 +343,7 @@
           (doseq [member members]
             (api/update rt member {:state "closed"}))
           (is (contains? #{"done" "failed"}
-                         (get-in (await-phase synthesizer #{"done" "failed"} 10000)
+                         (get-in (await-phase rt synthesizer #{"done" "failed"} 10000)
                                  [:attributes :shuttle/phase]))))))))
 
 (deftest spool-loads-through-approved-spool-workspace-flow
@@ -356,9 +356,9 @@
             (pr-str {:spools {'skein.spools/shuttle {:local/root repo-root}}}))
       (let [rt (runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))})]
         (try
-          (let [synced ((requiring-resolve 'skein.api.runtime.alpha/sync!))
+          (let [synced ((requiring-resolve 'skein.api.runtime.alpha/sync!) rt)
                 used ((requiring-resolve 'skein.api.runtime.alpha/use!)
-                      :shuttle {:ns 'skein.spools.shuttle
+                      rt :shuttle {:ns 'skein.spools.shuttle
                                 :spools ['skein.spools/shuttle]
                                 :call 'skein.spools.shuttle/install!
                                 :required? true})]

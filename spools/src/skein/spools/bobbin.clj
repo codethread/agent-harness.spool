@@ -1,12 +1,14 @@
 (ns skein.spools.bobbin
   "Assemble compact, self-contained context packs for delegated strand work.
 
-  Bobbin is a reference spool that composes only public REPL and graph helper
-  surfaces. It projects the strand graph around one target strand into a
-  JSON-compatible bundle and renders that bundle as deterministic prompt text."
+  Bobbin is a reference spool that composes explicit-runtime public graph and
+  weaver helper surfaces. It projects the strand graph around one target strand
+  into a JSON-compatible bundle and renders that bundle as deterministic prompt
+  text."
   (:require [clojure.string :as str]
+            [skein.api.current.alpha :as current]
             [skein.api.graph.alpha :as graph]
-            [skein.repl :as repl]))
+            [skein.api.weaver.alpha :as api]))
 
 (def ^:private section-order [:strand :blockers :dependents :parents :children :notes :workflow])
 (def ^:private selectable-sections (set section-order))
@@ -26,9 +28,9 @@
 (defn- summarize [strand]
   (select-keys strand [:id :title :state :attributes :created_at :updated_at]))
 
-(defn- strand-by-id! [strand-id]
+(defn- strand-by-id! [rt strand-id]
   (try
-    (first (graph/strands-by-ids [strand-id]))
+    (first (graph/strands-by-ids rt [strand-id]))
     (catch clojure.lang.ExceptionInfo e
       (throw (ex-info "Bobbin target strand was not found"
                       {:strand-id strand-id}
@@ -46,9 +48,9 @@
 (defn- active-query [expr]
   [:and [:= :state "active"] expr])
 
-(defn- direct-active [relation direction target-id]
+(defn- direct-active [rt relation direction target-id]
   (let [op (case direction :out :edge/out :in :edge/in)]
-    (repl/query (active-query [op relation [:= :id target-id]]))))
+    (api/list rt (active-query [op relation [:= :id target-id]]) {})))
 
 (defn- edge-summary [edge]
   (select-keys edge [:from_strand_id :to_strand_id :edge_type :attributes]))
@@ -68,35 +70,35 @@
                  (sort-by (juxt :from_strand_id :to_strand_id :edge_type))
                  vec)}))
 
-(defn- blockers-section [target-id]
-  (let [sg (graph/subgraph [target-id] {:type "depends-on"})
+(defn- blockers-section [rt target-id]
+  (let [sg (graph/subgraph rt [target-id] {:type "depends-on"})
         strands (->> (:strands sg)
                      (remove #(= target-id (:id %)))
                      (filter #(= "active" (:state %))))]
     (graph-section strands (:edges sg))))
 
-(defn- dependents-section [target-id]
-  (graph-section (direct-active "depends-on" :out target-id) []))
+(defn- dependents-section [rt target-id]
+  (graph-section (direct-active rt "depends-on" :out target-id) []))
 
-(defn- children-section [target-id]
-  (graph-section (direct-active "parent-of" :in target-id) []))
+(defn- children-section [rt target-id]
+  (graph-section (direct-active rt "parent-of" :in target-id) []))
 
-(defn- direct-active-parents [target-id]
-  (direct-active "parent-of" :out target-id))
+(defn- direct-active-parents [rt target-id]
+  (direct-active rt "parent-of" :out target-id))
 
-(defn- parents-section [target-id]
+(defn- parents-section [rt target-id]
   (loop [frontier [target-id]
          seen #{target-id}
          parents []]
     (if-let [id (first frontier)]
-      (let [found (remove #(contains? seen (:id %)) (direct-active-parents id))]
+      (let [found (remove #(contains? seen (:id %)) (direct-active-parents rt id))]
         (recur (into (vec (rest frontier)) (map :id found))
                (into seen (map :id found))
                (into parents found)))
       (graph-section parents []))))
 
-(defn- notes-section [target-id]
-  (let [notes (->> (repl/query [:edge/in "notes" [:= :id target-id]])
+(defn- notes-section [rt target-id]
+  (let [notes (->> (api/list rt [:edge/in "notes" [:= :id target-id]] {})
                    (sort-by (juxt #(or (attr % :shuttle/at) "") :created_at :id)))]
     (graph-section notes [])))
 
@@ -105,13 +107,13 @@
         (filter (fn [[k _]] (str/starts-with? (if (keyword? k) (subs (str k) 1) (str k)) "workflow/")))
         (:attributes strand)))
 
-(defn- workflow-section [strand]
+(defn- workflow-section [rt strand]
   (when (seq (workflow-attrs strand))
     (let [run-id (attr strand :workflow/run-id)
           root (when run-id
-                 (first (repl/query [:and
-                                     [:= [:attr "workflow/run-id"] run-id]
-                                     [:= [:attr "workflow/role"] "molecule"]])))]
+                 (first (api/list rt [:and
+                                      [:= [:attr "workflow/run-id"] run-id]
+                                      [:= [:attr "workflow/role"] "molecule"]] {})))]
       (cond-> {:run-id run-id
                :role (attr strand :workflow/role)
                :attributes (workflow-attrs strand)}
@@ -128,8 +130,9 @@
   ([strand-id]
    (pack strand-id {}))
   ([strand-id opts]
-   (let [include (validate-include! (:include opts))
-         target (strand-by-id! strand-id)
+   (let [rt (current/runtime)
+         include (validate-include! (:include opts))
+         target (strand-by-id! rt strand-id)
          ;; nil section values (a target with no workflow attrs) are dropped so
          ;; consumers can detect workflow context by key presence
          section (fn [k f] (when (contains? include k)
@@ -138,12 +141,12 @@
             :include (vec (filter include section-order))}
            (keep identity)
            [(section :strand #(summarize target))
-            (section :blockers #(blockers-section strand-id))
-            (section :dependents #(dependents-section strand-id))
-            (section :parents #(parents-section strand-id))
-            (section :children #(children-section strand-id))
-            (section :notes #(notes-section strand-id))
-            (section :workflow #(workflow-section target))]))))
+            (section :blockers #(blockers-section rt strand-id))
+            (section :dependents #(dependents-section rt strand-id))
+            (section :parents #(parents-section rt strand-id))
+            (section :children #(children-section rt strand-id))
+            (section :notes #(notes-section rt strand-id))
+            (section :workflow #(workflow-section rt target))]))))
 
 (defn- salient-attrs [strand]
   (dissoc (:attributes strand) :body "body"))

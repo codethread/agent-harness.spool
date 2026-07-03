@@ -18,10 +18,12 @@ Shuttle is shipped as an approved-local-root spool example under `spools/shuttle
 ```
 
 ```clojure
-(require '[skein.api.runtime.alpha :as runtime-alpha])
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime-alpha])
 
-(runtime-alpha/sync!)
-(runtime-alpha/use! :shuttle
+(def runtime (current/runtime))
+(runtime-alpha/sync! runtime)
+(runtime-alpha/use! runtime :shuttle
   {:ns 'skein.spools.shuttle
    :spools ['skein.spools/shuttle]
    :call 'skein.spools.shuttle/install!
