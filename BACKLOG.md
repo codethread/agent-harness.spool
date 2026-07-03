@@ -33,3 +33,5 @@ _No active items currently listed here._
 - [x] `8kisd` Investigate refinement backlog items: audited refinement entries for current relevance; results synthesized from delegated run `4z4f9`. Outdated delegated-agent failure visibility item was removed; retained items now carry notes.
 - [x] `h5lcx` Decide scheduler durable wake storage shape: delegated run `osia1` recommended dedicated weaver-owned SQLite storage; decision recorded in `devflow/rfcs/2026-06-29-weaver-scheduler.md`.
   - amend: user does not agree, veto
+- [ ] `le0lm` Fix strand op agent status listing closed tasks as awaiting_verification
+- [ ] `d5af5` Declarative review fan-out: small-agent reviewer registry in .skein
