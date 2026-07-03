@@ -211,7 +211,7 @@
         (when (= :started (:status (notify! notification)))
           (swap! seen-notifications conj seen-key)))
       ;; the condition no longer holds: re-arm so a later recurrence
-      ;; (e.g. a checkpoint blocked and made ready again) notifies again
+      ;; (the rule stops matching, then matches again later) notifies again
       (swap! seen-notifications disj seen-key))))
 
 (defn scan!

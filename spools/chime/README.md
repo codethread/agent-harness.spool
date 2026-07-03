@@ -69,7 +69,7 @@ a loud failure in `(chime/failures)` instead of silently dropping the event.
 Manual sends use the same path:
 
 ```clojure
-(chime/notify! {:title "Needs review" :body "Checkpoint abc is ready."})
+(chime/notify! {:title "Build finished" :body "All strands under plan abc are closed."})
 ```
 
 ## Rules
