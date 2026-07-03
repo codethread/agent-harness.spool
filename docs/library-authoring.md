@@ -147,7 +147,10 @@ Write the spool fixture and approval into the generated world, sync it from
 
 To test your actual library instead of an inline fixture, point the approved
 `:local/root` at your library checkout (an absolute path works in
-`:spools-edn` data).
+`:spools-edn` data). When the checkout comes from the test classpath rather
+than a fixed local path, `skein.test.alpha/spool-checkout-root` resolves the
+root from one of the spool's source resources and fails loudly if that resource
+is absent.
 
 Two constraints from tools.deps to know about:
 

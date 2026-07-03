@@ -151,3 +151,9 @@ Outcome: Migrate the weaver-world library-author-style cases `daemon-init-runs-w
   resolution helpers like this belong in `skein.test.alpha` once this feature's
   helper namespace ships — promote it (and migrate the test-support caller)
   when branches converge.
+
+### LAT-PLAN-001.DN9 Classpath checkout helper promoted — 2026-07-03
+
+- Promoted `spool-checkout-root` from the repo-only `skein.spools.test-support` fixture namespace into the public `skein.test.alpha` helper API, keeping its fail-loud classpath resource contract for gitlib and local-root backed spool checkouts.
+- Repointed the repo-local config test's devflow `:local/root` approval to `skein.test.alpha/spool-checkout-root` and removed the duplicate test-support copy.
+- Documented the helper in `docs/library-authoring.md` where external authors build generated `spools.edn` data for actual library checkouts.

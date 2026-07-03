@@ -54,6 +54,33 @@
       (is (= 1 (count (t/repl! outer (str "(do " require-api " (api/list (current/runtime)))")))))
       (is (= [] (t/repl! inner (str "(do " require-api " (api/list (current/runtime)))")))))))
 
+(deftest spool-checkout-root-resolves-directory-checkouts-from-classpath-entry
+  (let [checkout (doto (io/file (System/getProperty "java.io.tmpdir")
+                                (str "skein-spool-checkout-" (java.util.UUID/randomUUID)))
+                   (.mkdirs))
+        source-root (io/file checkout "src/main/clojure")
+        source-file (io/file source-root "demo/spool.clj")]
+    (try
+      (io/make-parents source-file)
+      (spit (io/file checkout "deps.edn") "{:paths [\"src/main/clojure\"]}\n")
+      (spit source-file "(ns demo.spool)\n")
+      (with-redefs [io/resource (fn [path]
+                                  (when (= "demo/spool.clj" path)
+                                    (.toURL (.toURI source-file))))]
+        (is (= (.getCanonicalFile checkout)
+               (.getCanonicalFile (t/spool-checkout-root "demo/spool.clj")))))
+      (finally
+        (doseq [file (reverse (file-seq checkout))]
+          (.delete file))))))
+
+(deftest spool-checkout-root-fails-loudly-for-jar-backed-resources
+  (with-redefs [io/resource (fn [path]
+                              (when (= "demo/spool.clj" path)
+                                (java.net.URL. "jar:file:/tmp/demo.jar!/demo/spool.clj")))]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Spool source is not a directory checkout"
+                          (t/spool-checkout-root "demo/spool.clj")))))
+
 (deftest helper-fails-loudly-on-bad-input
   (testing "unknown options"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown weaver world options"

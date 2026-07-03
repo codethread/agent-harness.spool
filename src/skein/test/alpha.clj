@@ -13,7 +13,8 @@
   activation wrappers, CLI subprocess helpers, and any use of the user's
   default config/data/state workspaces. Generated worlds are isolated and
   disposable by default."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [skein.core.client :as client]
             [skein.core.weaver.config :as config]
@@ -72,6 +73,63 @@
       (throw (ex-info ":files must be a map of workspace-relative path to string content" {:files files})))
     (doseq [[relative-path content] files]
       (write-fixture! root relative-path content))))
+
+(defn- classpath-root-for-resource [resource-file resource-path]
+  (let [root (reduce (fn [f _] (.getParentFile f))
+                     resource-file
+                     (str/split resource-path #"/"))]
+    (when-not (and root (.isDirectory root))
+      (throw (ex-info "Spool source classpath root is not a directory"
+                      {:resource resource-path
+                       :classpath-root (some-> root .getPath)})))
+    root))
+
+(defn- deps-paths [deps-file]
+  (let [paths (:paths (edn/read-string (slurp deps-file)))]
+    (when-not (and (vector? paths) (every? string? paths))
+      (throw (ex-info "Spool checkout deps.edn must declare string :paths"
+                      {:deps-edn (.getPath deps-file)
+                       :paths paths})))
+    paths))
+
+(defn- matching-deps-checkout-root [classpath-root]
+  (some (fn [candidate]
+          (let [deps-file (io/file candidate "deps.edn")]
+            (when (.isFile deps-file)
+              (let [paths (deps-paths deps-file)]
+                (when (some #(= (.getCanonicalFile (io/file candidate %))
+                                (.getCanonicalFile classpath-root))
+                            paths)
+                  candidate)))))
+        (take-while some? (iterate #(.getParentFile %) classpath-root))))
+
+(defn spool-checkout-root
+  "Resolve the checkout root of a spool from one of its classpath source files.
+
+  `resource-path` is the spool source's classpath-relative path (for example,
+  `\"skein/spools/devflow.clj\"`). Returns the directory holding the spool's
+  `deps.edn`, whichever directory-backed checkout supplies the classpath entry:
+  a tools.deps gitlib procurement or a developer's local override. The supplying
+  checkout must declare that classpath entry in `deps.edn` `:paths`. Fails
+  loudly when the resource is not on the test classpath, is jar-backed, or does
+  not come from a directory checkout with the expected layout. This is for tests
+  that must approve the real dependency checkout as a `:local/root` in generated
+  `spools.edn` data."
+  [resource-path]
+  (let [resource (io/resource resource-path)]
+    (when-not resource
+      (throw (ex-info "Spool source not on the test classpath"
+                      {:resource resource-path})))
+    (when-not (= "file" (.getProtocol resource))
+      (throw (ex-info "Spool source is not a directory checkout"
+                      {:resource resource-path
+                       :url (str resource)})))
+    (let [resource-file (io/file (.toURI resource))
+          classpath-root (classpath-root-for-resource resource-file resource-path)]
+      (or (matching-deps-checkout-root classpath-root)
+          (throw (ex-info "Spool source is not a directory checkout with a deps.edn :paths entry"
+                          {:resource resource-path
+                           :classpath-root (.getPath classpath-root)}))))))
 
 (defn- source-checkout
   "Best-effort path of the Skein source checkout on this test JVM's classpath."

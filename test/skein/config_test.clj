@@ -10,8 +10,8 @@
             [skein.api.weaver.alpha :as api]
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]
-            [skein.spools.test-support :as test-support]
-            [skein.spools.workflow :as workflow]))
+            [skein.spools.workflow :as workflow]
+            [skein.test.alpha :as test-alpha]))
 
 (defn- delete-directory!
   "Delete a directory tree rooted at `path` if it exists."
@@ -69,7 +69,7 @@
                           'skein.spools/backlog
                           {:local/root (.getCanonicalPath (io/file "spools/backlog"))}
                           'codethread/devflow
-                          {:local/root (.getCanonicalPath (test-support/spool-checkout-root "skein/spools/devflow.clj"))}}}))
+                          {:local/root (.getCanonicalPath (test-alpha/spool-checkout-root "skein/spools/devflow.clj"))}}}))
   ;; The shipped config leaves chime's notifier to each developer's personal
   ;; init.local.clj. Bind an inert command through that same overlay hook
   ;; (loaded after init.clj on startup and on every reload) so the test also
