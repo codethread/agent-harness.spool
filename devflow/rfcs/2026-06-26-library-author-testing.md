@@ -74,14 +74,10 @@ The current guidance is mostly conceptual: write pure Clojure tests where possib
 - **RFC-005.C11:** SQLite WASM is out of scope. Atom ships and validates against Xerial SQLite JDBC; a WASM engine would add divergence without solving the connection-lifetime issue.
 - **RFC-005.C12:** The durable contract will likely require a small REPL/Daemon Runtime spec note if accepted. The CLI spec should not gain new commands; at most it may reaffirm that library testing remains outside the public CLI command surface.
 
-## RFC-005.P7 Open spikes
+## RFC-005.P7 Follow-up tracking
 
-- **RFC-005.SPK1:** [`SPIKE-2026-06-26-001` Xerial SQLite In-Memory Lifecycle](../spikes/2026-06-26-sqlite-memory-lifecycle.md) — prove daemon-owned held-connection behavior, transactions, concurrency, and stop cleanup.
-- **RFC-005.SPK2:** [`SPIKE-2026-06-26-002` Storage Metadata Contract for In-Memory Daemons](../spikes/2026-06-26-storage-metadata-contract.md) — decide how metadata/status should represent non-file storage.
-- **RFC-005.SPK3:** [`SPIKE-2026-06-26-003` Minimal `atom.test.alpha` API Shape](../spikes/2026-06-26-atom-test-alpha-api.md) — design the smallest useful clojure.test helper surface.
-- **RFC-005.SPK4:** [`SPIKE-2026-06-26-004` Library Author Classpath and Dependency Setup](../spikes/2026-06-26-library-author-classpath.md) — validate external-library deps.edn, classpath, and docs guidance.
-- **RFC-005.SPK5:** [`SPIKE-2026-06-26-005` In-Memory Smoke Feasibility](../spikes/2026-06-26-smoke-memory-feasibility.md) — classify which smoke paths can use memory storage and which should stay file-backed.
+Future implementation slices and spike-derived work are tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
 
 ## RFC-005.P8 Outcome
 
-- **RFC-005.OUT1:** Open for review. Proposed feature: `library-author-testing-support`, scoped to storage groundwork for file-backed and real Xerial SQLite in-memory daemon worlds, `docs/library-authoring.md`, a minimal `atom.test.alpha` daemon-world helper with explicit storage selection, and one narrow dogfooding migration in Atom's own tests.
+- **RFC-005.OUT1:** Open for review. Pending implementation work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).

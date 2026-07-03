@@ -744,12 +744,76 @@
     {:title (str "Treadle error: " (:title strand))
      :body (str "Strand " (:id strand) " has treadle/error:\n\n" error)}))
 
+(defn backlog-started-rule
+  "Notify when a backlog item is claimed and work starts."
+  [{:keys [strand]}]
+  (when (and (= "active" (:state strand))
+             (= "true" (config-attr strand :backlog/item))
+             (= "claimed" (config-attr strand :backlog/status)))
+    {:title (str "Backlog started: " (:title strand))
+     :body (str "Backlog item " (:id strand) " has been claimed and work has started.")}))
+
+(defn backlog-completed-rule
+  "Notify when a backlog item reaches the explicit done outcome."
+  [{:keys [strand]}]
+  (when (and (= "closed" (:state strand))
+             (= "true" (config-attr strand :backlog/item))
+             (= "done" (config-attr strand :backlog/status)))
+    {:title (str "Backlog done: " (:title strand))
+     :body (str "Backlog item " (:id strand) " completed fully.")}))
+
+(defn- failed-blocker?
+  "Return true when strand is an active failed/exhausted blocker."
+  [strand]
+  (and (= "active" (:state strand))
+       (contains? #{"failed" "exhausted"} (config-attr strand :shuttle/phase))))
+
+(defn- active-descendants
+  "Return active strands below backlog root over parent-of, including the root."
+  [rt root-id]
+  (->> (:strands (api/subgraph rt [root-id] {:type "parent-of"}))
+       (filter #(= "active" (:state %)))
+       vec))
+
+(defn- blocking-failures
+  "Return failed/exhausted depends-on blockers for active strands under root."
+  [rt root-id]
+  (let [work (active-descendants rt root-id)
+        work-ids (set (map :id work))
+        blocker-ids (->> (:edges (api/subgraph rt (vec work-ids) {:type "depends-on"}))
+                         (filter #(contains? work-ids (:from_strand_id %)))
+                         (map :to_strand_id)
+                         distinct)]
+    (->> blocker-ids
+         (map #(api/show rt %))
+         (filter failed-blocker?)
+         (sort-by :id)
+         vec)))
+
+(defn backlog-blocked-rule
+  "Notify when active backlog work is blocked by failed/exhausted delegated work."
+  [{:keys [strand]}]
+  (when (and (= "active" (:state strand))
+             (= "true" (config-attr strand :backlog/item)))
+    (let [rt (current/runtime)
+          blockers (blocking-failures rt (:id strand))]
+      (when (seq blockers)
+        {:title (str "Backlog blocked: " (:title strand))
+         :body (str "Backlog item " (:id strand)
+                    " is blocked by failed/exhausted work:\n"
+                    (str/join "\n" (map #(str "- " (:id %) " " (:title %)
+                                               " (" (config-attr % :shuttle/phase) ")")
+                                         blockers)))}))))
+
 (defn- register-chime-rules!
   "Register the repo's attention rules with the chime engine."
   []
   [(chime/defrule! :hitl-checkpoint-ready 'config/hitl-checkpoint-ready-rule)
    (chime/defrule! :agent-failure 'config/agent-failure-rule)
-   (chime/defrule! :treadle-error 'config/treadle-error-rule)])
+   (chime/defrule! :treadle-error 'config/treadle-error-rule)
+   (chime/defrule! :backlog-started 'config/backlog-started-rule)
+   (chime/defrule! :backlog-completed 'config/backlog-completed-rule)
+   (chime/defrule! :backlog-blocked 'config/backlog-blocked-rule)])
 
 ;; ---------------------------------------------------------------------------
 ;; install!

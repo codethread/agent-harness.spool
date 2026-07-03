@@ -116,7 +116,8 @@
   (is (= (var-get (requiring-resolve 'skein.spools.agents/review-contract))
          @@(requiring-resolve 'skein.spools.shuttle/default-review-contract)))
   ;; the repo owns chime's attention rules; the chime engine ships none
-  (is (= [:agent-failure :hitl-checkpoint-ready :treadle-error]
+  (is (= [:agent-failure :backlog-blocked :backlog-completed :backlog-started
+          :hitl-checkpoint-ready :treadle-error]
          (mapv :name ((requiring-resolve 'skein.spools.chime/rules))))))
 
 (deftest current-dags-op-builds-self-contained-plan-task-projection

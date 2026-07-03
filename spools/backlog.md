@@ -4,7 +4,13 @@ The backlog spool is a small repo-local convention that keeps `BACKLOG.md` as th
 
 ## Model
 
-Each Markdown checkbox row points at one backlog item strand:
+`BACKLOG.md` is organized into three sections:
+
+- **In progress** — items that already have a backlog strand and tracked work in Skein.
+- **Ready** — items ready to turn into a strand and delegate.
+- **Refinement** — ideas or decisions that must only be acted on after an explicit human command.
+
+Each Markdown checkbox row in **In progress** or accepted **Ready** work points at one backlog item strand:
 
 ```md
 - [ ] `3rwu8` Some feature idea, maybe referencing an RFC or feature folder
@@ -34,7 +40,7 @@ strand op backlog finish <id> [--outcome done|abandoned]
 strand op backlog sync
 ```
 
-`next` returns the first unchecked, active, `pending` backlog item in file order. `claim` marks it `claimed` but leaves the checkbox unchecked. `finish` closes the strand and checks the row. `sync` fails loudly if the Markdown file and graph disagree.
+`next` returns the first unchecked, active, `pending` backlog item in file order from the actionable backlog sections. `claim` marks it `claimed` but leaves the checkbox unchecked. `finish` closes the strand and checks the row. `sync` fails loudly if the Markdown file and graph disagree. Refinement items are not actionable until a human explicitly moves or adds them through the backlog flow.
 
 ## Queries
 

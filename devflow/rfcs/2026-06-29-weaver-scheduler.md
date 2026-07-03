@@ -87,14 +87,17 @@ The decision: should skein bless a weaver-owned scheduler so libraries share one
 - **RFC-009.C7:** This is the first proactive mutation path. The core test surface gains a clock; an injectable/virtual clock is needed for deterministic tests.
 - **RFC-009.C8:** A follow-up workflows library can build gates (timer, human, deadline) on this primitive plus the existing batch/pattern/edge/readiness machinery, without further core changes.
 
-## RFC-009.P8 Open questions
+## RFC-009.P8 Storage shape decision
 
-- **RFC-009.Q1:** Is the durable wake a first-class strand (scheduler attribute convention, visible to queries/views, reusing burn/readiness) or dedicated weaver storage outside the strand graph? The former maximises reuse and introspection; the latter avoids polluting the user graph with machinery rows.
-- **RFC-009.Q2:** Missed-fire policy on restart: fire-once catch-up for past-due wakes, skip, or a per-schedule option with a thin default? Core should pick the smallest defensible default and leave the rest to handlers.
-- **RFC-009.Q3:** Pure self-arming precise timers, or self-arm plus a slow safety tick to absorb clock jumps and missed fires? The latter is more robust at the cost of a heartbeat.
-- **RFC-009.Q4:** Do scheduled wakes flow through the same async dispatch queue as events (shared serialization, shared failure introspection) or a sibling worker? RFC-009.REC2 prefers shared; confirm at spec time.
-- **RFC-009.Q5:** Should read-only CLI introspection (`strand scheduled`) exist for agents, given mutating registration stays in trusted config/REPL (TEN-006)?
+- **RFC-009.Q1.OUT:** Store durable scheduler wakes in dedicated weaver-owned SQLite tables, not as first-class strand records. A wake is daemon runtime coordination state: `wake-at`, stable key, handler symbol, payload, status/attempt bookkeeping, and fire/failure metadata. It should persist beside the strand graph so startup can re-arm pending rows, reload can cancel/rebuild in-memory timers without graph mutation, and scheduler introspection can return data-first runtime rows without polluting user task queries, readiness, DAG traversals, or userland graph conventions.
+- **RFC-009.Q1.R1:** Dedicated storage aligns with the strand model by keeping strands as user graph records with lifecycle, attributes, edges, readiness, and explicit burn semantics. Encoding wakes as strands would create user graph noise, require reserved scheduler attributes and states, risk accidental closure/burn/update by normal workflows, and make timer cleanup indistinguishable from graph lifecycle policy.
+- **RFC-009.Q1.R2:** Dedicated storage aligns with the daemon-runtime tenet that runtime behaviour and registries live in the weaver while only explicitly durable feature state is persisted. Scheduler wake rows are the explicit durable state needed by RFC-009.G2; handler registries remain non-durable and are reloaded through trusted config/REPL like events, views, patterns, and hooks.
+- **RFC-009.Q1.R3:** Tests should cover schema initialization, schedule/cancel/list persistence, startup re-arm from pending rows, reload teardown/re-arm without duplicate fires, malformed wake rejection, unresolvable handler failure capture, and that scheduler rows do not appear in `list`, `ready`, strand queries, relation traversals, or burn/update paths.
+
+## RFC-009.P8a Follow-up tracking
+
+Future implementation slices and unresolved design decisions are tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
 
 ## RFC-009.P9 Outcome
 
-- **RFC-009.OUT1:** Open for review. If accepted, create a feature folder for the weaver scheduler, write a daemon-runtime spec delta and a REPL API delta, then implement the durable wake record, lifecycle/re-arm, handler resolution, and introspection with focused tests. A workflows/gates library is downstream of this primitive, not part of it.
+- **RFC-009.OUT1:** Open for review. Pending implementation work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).

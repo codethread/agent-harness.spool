@@ -136,17 +136,10 @@ only for engines that never touch the graph between registration and finish
   periodic `heartbeat!` touches with a threshold, surfaced as `:stale` —
   never auto-burned (TEN-003; cleanup stays a deliberate act).
 
-## RFC-014.P7 Open questions
+## RFC-014.P7 Follow-up tracking
 
-- **RFC-014.Q1:** Heartbeat mechanism and threshold: explicit `heartbeat!`
-  calls vs deriving liveness from `updated_at` of the driver's recent
-  mutations; what gap reads as stale.
-- **RFC-014.Q2:** Lifecycle of finished entries: close (durable history) vs
-  wisp/burn (`skein.spools.ephemeral` style) vs digest on archive.
-- **RFC-014.Q3:** Should `roster/engine` name the implementation
-  (`devflow-molecule`, `file-queue`, `human`) for tooling to branch on, or
-  stay freeform?
+Future implementation slices and unresolved design decisions are tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
 
 ## RFC-014.P8 Outcome
 
-Pending decision.
+Pending decision. Pending work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).

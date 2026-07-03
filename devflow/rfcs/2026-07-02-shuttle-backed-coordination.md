@@ -210,36 +210,13 @@ strand op agent spawn --harness claude --depends-on "$r1" --depends-on "$r2" \
   --parent <review-task> --prompt "Read child run results and synthesize findings."
 ```
 
-## RFC-010.P8 Open questions
+## RFC-010.P8 Follow-up tracking
 
-- **RFC-010.Q1:** Should the first helper be a pattern (atomic graph creation,
-  JSON input contract) or an op (easier to derive prompt text from current
-  strand state and return run summaries)?
-- **RFC-010.Q2:** Should a Shuttle run depend on the delegated task strand, the
-  task's blockers, or neither? Depending on the task itself would never start
-  until the task closes, so the likely answer is to spawn only for already-ready
-  tasks or copy the task's blockers onto the run.
-- **RFC-010.Q3:** Where should generated prompt templates live: `.skein/config.clj`,
-  `.skein/AGENTS.md` extracted text, or a small repo-local Clojure data file?
-- **RFC-010.Q4:** What attributes should link a task to its primary run beyond
-  `parent-of`: `shuttle/task`, `assigned-run`, `owner`, or only generic
-  `shuttle/spawned-by`/parentage?
-- **RFC-010.Q5:** Should a successful run set `status=implemented` on the task,
-  or should it only write `shuttle/result` and leave all task attributes to the
-  coordinator? The recommendation prefers coordinator-owned task status.
-- **RFC-010.Q6:** How should failure be represented in ready queries? Failed
-  Shuttle runs are active and should be visible, but naive `strand ready --query
-  work` may need guidance or a dedicated `agent-failures` query.
-- **RFC-010.Q7:** What is the smallest useful workflow-gate contract that does
-  not couple `skein.spools.workflow` to Shuttle?
+Most implementation questions were resolved by the archived Shuttle, treadle, `agent-delegate`, and `afk-gates` features. Remaining follow-up work is tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
 
 ## RFC-010.P9 Outcome
 
-- **RFC-010.OUT1:** Open for review. If accepted, create a feature folder for
-  Shuttle-backed coordination. The first feature should activate Shuttle in the
-  repo workspace, add the smallest repo-local delegation helper and guidance,
-  and dogfood it on one delegated implementation/review task before considering
-  workflow gate automation.
+- **RFC-010.OUT1:** Accepted in part. Pending follow-up work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).
 - **RFC-010.OUT2 (2026-07-02):** Accepted in part and dogfooded. Shuttle is
   activated in the canonical repo workspace (C1), and the REC8 workflow gate
   bridge shipped as the `skein.spools.treadle` spool
