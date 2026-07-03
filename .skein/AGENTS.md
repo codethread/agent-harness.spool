@@ -3,28 +3,31 @@ Always read `docs/skein.md` from the repository root before changing this Skein 
 This repo's `.skein` world is thin glue over the shipped reference spools.
 `.skein/init.clj` activates `skein.spools.ephemeral`, `skein.spools.workflow`,
 and `skein.spools.devflow` from the weaver classpath, plus
-`skein.spools.shuttle` and `skein.spools.treadle` from the approved
-`spools/shuttle` local root and `skein.spools.chime` from the approved
-`spools/chime` local root, then loads `.skein/config.clj`, which registers:
+`skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from
+the approved `spools/shuttle` / `spools/agents` local roots and
+`skein.spools.chime` from the approved `spools/chime` local root. Together, the
+installed spools and `.skein/config.clj` register:
 
-- ops: `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`,
-  `devflow-complete`, `devflow-advance`, `devflow-describe`,
-  `devflow-history`, `devflow-archive`, `devflow-status`, `workflow-runs`,
-  `current-dags`, `agent-delegate`, `flow-await`, `flow-status`,
-  `devflow-conventions`
+- ops: `agent`, `devflow-start`, `devflow-next`, `devflow-choices`,
+  `devflow-choose`, `devflow-complete`, `devflow-advance`,
+  `devflow-describe`, `devflow-history`, `devflow-archive`,
+  `devflow-status`, `workflow-runs`, `current-dags`, `flow-await`,
+  `flow-status`, `devflow-conventions`
 - queries: `work`, `feature-active`, `feature-work`, `feature-owner-work`,
-  `feature-run`, `workflow-runs`, `devflow-runs`
+  `feature-run`, `workflow-runs`, `devflow-runs`, `agent-failures`
 - patterns: `agent-plan`, `delegate-pipeline`
 - shuttle harness aliases: `pi-main` (delegation default), plus claude tiers
   matched to roles — `explore` (haiku: fan-out search/read-only recon),
   `grunt` (sonnet: tests and mechanical work), `build` (opus: feature
   building, reviews, councils). `strand op agent harnesses` lists all.
-  Delegate existing task strands with `strand op agent-delegate <task-id>`;
-  the delegated-agent policy text is the `delegation-policy-text` def in
-  `.skein/config.clj`. Review completed work with `strand op agent review
-  <target-id> --members 2 --harness pi-main,build`; findings are appended as
-  notes on the target strand. Raw `strand op agent spawn` remains the escape hatch for custom shuttle
-  runs (manual: `strand op agent about`). Workflow `:subagent` gates are
+  Use the spool-owned surface: run `strand op agent about` for the live
+  manual, delegate existing task strands with `strand op agent delegate
+  <task-id>`, fan out with `strand op agent delegate --ready <plan-id>`,
+  recover with `strand op agent retry <task-or-run-id>`, and inspect with
+  `strand op agent status [root-id]`. Review completed work with `strand op
+  agent review <target-id> --members 2 --harness pi-main,build`; findings are
+  appended as notes on the target strand. Raw `strand op agent spawn` remains
+  the escape hatch for custom shuttle runs. Workflow `:subagent` gates are
   fulfilled automatically by the treadle (`spools/shuttle/treadle.md`).
 - chime attention rules: `hitl-checkpoint-ready`, `agent-failure`, and
   `treadle-error`. Notification is already set up for everything a human
@@ -118,17 +121,16 @@ strand ready --query feature-work --param feature=<slug>
 
 Any strand delegated to another agent must include a descriptive `body`
 attribute. Use `owner` plus `branch` together when assigning ready work so
-other agents avoid duplicating it. Prefer the repo-local delegation op:
+other agents avoid duplicating it. Prefer the spool-owned delegation op:
 
 ```sh
-strand op agent-delegate <task-id> --prompt "Extra implementation constraints if needed"
+strand op agent delegate <task-id> --prompt "Extra implementation constraints if needed"
 ```
 
-Delegated agents receive the repo policy from `.skein/config.clj`'s
-`delegation-policy-text`. `agent-delegate` resolves routing as flags > task
-attributes > repo defaults for `harness`, `cwd`, and `max-attempts`; invalid
-attribute types fail at delegation time. `agent-plan` may set those optional
-keys on each task.
+Delegated agents receive the spool-owned worker contract. `agent delegate`
+resolves routing as flags > task attributes for `harness` (no default), and
+`--cwd` > task `cwd` > workspace root for cwd. `agent-plan` may set optional
+`harness`, `cwd`, `validation`, and `max-attempts` keys on each task.
 
 For sequential delegated workflows, use `delegate-pipeline`:
 

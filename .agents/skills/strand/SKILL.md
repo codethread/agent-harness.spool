@@ -84,12 +84,14 @@ Create a small plan with a registered pattern when available:
 
 ```sh
 strand pattern explain agent-plan
-printf '%s' '{"feature":"<slug>","title":"Feature: <name>","body":"Problem, scope, and acceptance criteria.","tasks":[{"key":"impl","title":"Implement <outcome>","body":"Implementation context for an offloaded agent."},{"key":"validate","title":"Validate <outcome>","kind":"review","body":"Validation expectations.","depends_on":["impl"]}]}' \
-  | strand weave --pattern agent-plan
 strand ready
 # In skein-src's repo-local .skein workspace, prefer:
 strand ready --query work
 ```
+
+For agent-driven delegation (spawning subagent runs, checking status, retrying
+failures), the in-band manual is `strand op agent about` — read it live rather
+than hand-rolling the JSON shape here.
 
 Mark done:
 
@@ -129,11 +131,11 @@ strand ready --query agent-owned
 
 ## Delegated-agent contract in skein-src
 
-When working from a delegated strand in this repository, read the assigned
-strand first, record progress with `strand update <id> --attr progress=...`, and
-set `--attr status=implemented` when the scoped implementation is ready for the
-coordinator to verify. Do not close your assigned strand, and do not mutate
-sibling or parent strands unless the assignment explicitly says so.
+The full worker contract (read your strand and notes first, record progress,
+set `status=implemented` only when validation is green, never close your own
+strand, never mutate siblings/parents unless told, commit only if told) ships
+in-band and is injected into every delegated run's preamble automatically.
+Read it directly: `strand op agent about`.
 
 ## Validation and finish
 

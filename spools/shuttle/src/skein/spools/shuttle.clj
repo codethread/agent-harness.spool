@@ -14,9 +14,8 @@
   `notes` annotation edges plus `shuttle/note-for` attributes.
 
   The whole spool composes public surfaces (`skein.api.weaver.alpha` inside the
-  weaver JVM) and owns no privileged runtime state. Low-trust CLI agents drive
-  it through `strand op agent ...`; `strand op agent about` is the complete,
-  harness-agnostic manual."
+  weaver JVM) and owns no privileged runtime state. Higher-level spools, such as
+  `skein.spools.agents`, register CLI operations over this engine."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -182,7 +181,7 @@
       .getParentFile .getParentFile .getParentFile
       .getCanonicalPath))
 
-(defn- pinned-strand
+(defn pinned-strand-command
   "Return the fully pinned strand invocation prefix for spawned agents.
 
   Harness shells may re-source user dotfiles and override ambient env, so the
@@ -191,8 +190,24 @@
   []
   (str "env XDG_STATE_HOME=" (state-root) " strand --workspace " (workspace-dir)))
 
+(defonce ^:private preamble-extension (atom nil))
+
+(defn set-preamble-extension!
+  "Register additional preamble text appended after shuttle's engine contract.
+
+  A second registration with different text fails loudly so composed spools do
+  not silently replace each other's worker contract. Re-registering the same
+  text is idempotent for config reloads."
+  [text]
+  (when-not (and (string? text) (not (str/blank? text)))
+    (fail! "Preamble extension must be non-blank text" {:text text}))
+  (let [[old _] (swap-vals! preamble-extension #(or % text))]
+    (when (and old (not= old text))
+      (fail! "Preamble extension already registered" {}))
+    {:preamble-extension true}))
+
 (defn- preamble [run-id prompt-prefix]
-  (let [cmd (pinned-strand)]
+  (let [cmd (pinned-strand-command)]
     (str "[shuttle run context]\n"
          "You are a headless subagent run managed by the Skein shuttle spool.\n"
          "run-id: " run-id "\n"
@@ -206,6 +221,8 @@
          " (init.clj, spools.edn, config.json, libs.edn): if strand commands fail, report the"
          " exact error as your result instead of repairing the environment.\n"
          "- Your final message is captured automatically as this run's result; end with a clear, self-contained report for your caller.\n"
+         (when-let [extension @preamble-extension]
+           (str extension "\n"))
          "[task]\n"
          prompt-prefix)))
 
@@ -306,9 +323,11 @@
 
 (defn- finish-run! [id process harness out-file err-file]
   (let [exit (.waitFor ^Process process)
-        stdout (read-file-safe out-file)]
+        stdout (read-file-safe out-file)
+        current (api/show (rt) id)]
     (swap! in-flight dissoc id)
-    (if (zero? exit)
+    (when-not (= "failed" (sattr current "phase"))
+      (if (zero? exit)
       (let [{:keys [result session-id parse-error]}
             (try
               (parse-output (:parse harness) stdout)
@@ -322,9 +341,9 @@
                           session-id (assoc "shuttle/session-id" session-id)
                           parse-error (assoc "shuttle/parse-error" parse-error))
                      {:state "closed"}))
-      (let [stderr (str/trim (read-file-safe err-file))
-            detail (if (str/blank? stderr) (str/trim stdout) stderr)]
-        (mark-failed! id (str "harness exited " exit ": " (tail detail 2000)))))))
+        (let [stderr (str/trim (read-file-safe err-file))
+              detail (if (str/blank? stderr) (str/trim stdout) stderr)]
+          (mark-failed! id (str "harness exited " exit ": " (tail detail 2000))))))))
 
 (defn- process-start-instant
   "Return the OS start instant string for a live process, or nil when unknown."
@@ -529,7 +548,7 @@
        (filterv #(= for (:for %)) summaries)
        summaries))))
 
-(def ^:private terminal-phases #{"done" "failed" "exhausted"})
+(def ^:private terminal-phases #{"done" "failed" "exhausted" "superseded"})
 
 (defn- terminal? [run]
   (or (not= "active" (:state run))
@@ -555,7 +574,9 @@
         handle (get @in-flight id)]
     (if-let [process (:process handle)]
       (.destroy ^Process process)
-      (some-> (run-process-handle run) (.destroy)))
+      (if-let [handle (run-process-handle run)]
+        (.destroy ^ProcessHandle handle)
+        (fail! "Run has no live process" {:id id})))
     (swap! in-flight dissoc id)
     (mark-failed! id "killed by request")
     {:killed id}))
@@ -602,7 +623,7 @@
                   (sattr note "round") (assoc :round (sattr note "round"))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Review and council shapes
+;; Review contract state
 
 (def generic-review-contract
   "Default contract text for independent shuttle reviews."
@@ -610,9 +631,8 @@
 
 (defonce ^{:private true
            :doc "Weaver-lifetime default review contract override. Startup
-  config sets it (like harness aliases) so `review!`/`agent review` consume
-  the workspace's one authoritative policy text without callers passing
-  :contract by hand."}
+  config sets it so higher-level agent spools consume the workspace's one
+  authoritative policy text without callers passing :contract by hand."}
   default-review-contract
   (atom nil))
 
@@ -624,348 +644,17 @@
   (reset! default-review-contract text)
   {:default-review-contract (boolean text)})
 
-(defn- effective-review-contract [contract]
-  (or contract @default-review-contract generic-review-contract))
-
-(defn- review-prompt [{:keys [target-id focus contract]}]
-  (let [cmd (pinned-strand)]
-    (str contract "\n\n"
-         "Review target strand " target-id ".\n"
-         (when (not (str/blank? focus))
-           (str "Focus: " focus "\n"))
-         "Read the target with `" cmd " show " target-id "` and inspect the relevant repository state.\n"
-         "When finished, append findings with: " cmd " op agent note " target-id
-         " \"<findings>\" --by <your run-id>\n"
-         "Findings are notes-only; do not write verdict attributes.")))
-
-(defn- review-synthesis-prompt [{:keys [target-id review-runs contract]}]
-  (let [cmd (pinned-strand)]
-    (str contract "\n\n"
-         "Synthesize independent review findings for target strand " target-id ".\n"
-         "Review run ids: " (str/join ", " review-runs) "\n"
-         "Read target notes with `" cmd " op agent notes " target-id "`, append one synthesis note with `"
-         cmd " op agent note " target-id " \"<synthesis>\" --by <your run-id>`, then finish with the synthesis.")))
-
-(defn review!
-  "Spawn independent read-only reviewers for a target strand.
-
-  Opts: `:reviewers` vector of `{:harness ... :focus ...}` maps, or `:members`
-  plus `:harnesses`; optional `:contract`, `:synthesize?`, and `:spawned-by`.
-  Review findings are appended by reviewers as notes on the target strand."
-  [target-id {:keys [reviewers members harnesses contract synthesize? spawned-by]
-              :or {members 2}}]
-  (when-not (api/show (rt) target-id)
-    (fail! "Review target strand not found" {:id target-id}))
-  (let [contract (effective-review-contract contract)]
-  (let [reviewers (or reviewers
-                      (let [hs (or (seq harnesses) [:claude])]
-                        (mapv (fn [idx]
-                                {:harness (nth hs (mod idx (count hs)))
-                                 :focus (str "review pass " (inc idx))})
-                              (range members))))]
-    (when-not (and (vector? reviewers) (seq reviewers))
-      (fail! "Review requires at least one reviewer" {:reviewers reviewers}))
-    (let [review-runs (mapv (fn [{:keys [harness focus]}]
-                              (spawn-run! {:harness (or harness (fail! "Review reviewer requires :harness" {:reviewer {:focus focus}}))
-                                           :title (truncate (str "Review " target-id (when focus (str ": " focus))) 72)
-                                           :prompt (review-prompt {:target-id target-id
-                                                                   :focus focus
-                                                                   :contract contract})
-                                           :parent target-id
-                                           :spawned-by spawned-by
-                                           :attrs {"shuttle/review-target" target-id
-                                                   "shuttle/review-focus" (or focus "")}}))
-                            reviewers)
-          synthesis (when synthesize?
-                      (spawn-run! {:harness (:harness (first reviewers))
-                                   :title (truncate (str "Review synthesis: " target-id) 72)
-                                   :prompt (review-synthesis-prompt {:target-id target-id
-                                                                     :review-runs (mapv :id review-runs)
-                                                                     :contract contract})
-                                   :parent target-id
-                                   :spawned-by spawned-by
-                                   :depends-on (mapv :id review-runs)
-                                   :attrs {"shuttle/review-target" target-id
-                                           "shuttle/review-synthesis" "true"}}))]
-      (cond-> {:target target-id
-               :reviewers (mapv :id review-runs)}
-        synthesis (assoc :synthesizer (:id synthesis)))))))
-
-(defn- council-member-prompt [{:keys [council-id topic member member-count rounds]}]
-  (let [cmd (pinned-strand)
-        notes-cmd (str cmd " op agent notes " council-id)]
-    (str "You are council member " member " of " member-count
-         " deliberating this topic over " rounds " rounds:\n"
-         topic "\n\n"
-         "Shared memory is the council strand " council-id ". Protocol for each round r (1.." rounds "):\n"
-         "1. Do your own genuine exploration/thinking for round r (use your tools; investigate, do not just opine).\n"
-         "2. Post your position: " cmd " op agent note " council-id
-         " \"<your round-r analysis>\" --by <your run-id> --round r\n"
-         "3. Wait for peers: poll `" notes-cmd " --round r` (sleep a few seconds between polls, up to ~2 minutes)"
-         " until it lists " member-count " notes, then read them all with `" notes-cmd "`.\n"
-         "4. Let their arguments genuinely update your round r+1 thinking; agree, rebut, or refine.\n\n"
-         "After the final round, end with your definitive position as your last message —"
-         " it is captured automatically as your result.")))
-
-(defn- council-synthesis-prompt [{:keys [council-id topic member-count rounds]}]
-  (let [cmd (pinned-strand)]
-    (str "You are the synthesizer for a " member-count "-member, " rounds "-round council on:\n"
-         topic "\n\n"
-         "Read the full deliberation: " cmd " op agent notes " council-id "\n"
-         "Weigh the arguments, note consensus and unresolved disagreements, and produce one decisive synthesis.\n"
-         "Record it on the council strand: " cmd " update " council-id
-         " --attr shuttle/result=\"<one-paragraph verdict>\"\n"
-         "Then end with the full synthesis as your last message.")))
-
-(defn council!
-  "Convene a council: `members` agent runs deliberating `topic` over `rounds`
-  rounds on one shared parent strand, then a synthesizer run that depends on
-  every member and writes the verdict onto the council strand.
-
-  Opts: `:harness` (default :claude), `:members` (default 2), `:rounds`
-  (default 2), `:spawned-by`. Asynchronous; await the synthesizer id."
-  [topic {:keys [harness members rounds spawned-by]
-          :or {harness :claude members 2 rounds 2}}]
-  (when (str/blank? topic)
-    (fail! "Council topic must be non-blank" {}))
-  (when-not (and (pos-int? members) (pos-int? rounds))
-    (fail! "Council :members and :rounds must be positive integers" {:members members :rounds rounds}))
-  (let [council (api/add (rt) {:title (truncate (str "Council: " topic) 72)
-                               :attributes (cond-> {"shuttle/role" "council"
-                                                    "shuttle/topic" topic
-                                                    "shuttle/members" members
-                                                    "shuttle/rounds" rounds}
-                                             spawned-by (assoc "shuttle/spawned-by" spawned-by))})
-        council-id (:id council)
-        member-runs (mapv (fn [member]
-                            (spawn-run! {:harness harness
-                                         :title (truncate (str "Council member " member ": " topic) 72)
-                                         :prompt (council-member-prompt {:council-id council-id
-                                                                         :topic topic
-                                                                         :member member
-                                                                         :member-count members
-                                                                         :rounds rounds})
-                                         :parent council-id
-                                         :attrs {"shuttle/council" council-id}}))
-                          (range 1 (inc members)))
-        synthesizer (spawn-run! {:harness harness
-                                 :title (truncate (str "Council synthesis: " topic) 72)
-                                 :prompt (council-synthesis-prompt {:council-id council-id
-                                                                    :topic topic
-                                                                    :member-count members
-                                                                    :rounds rounds})
-                                 :parent council-id
-                                 :depends-on (mapv :id member-runs)
-                                 :attrs {"shuttle/council" council-id}})]
-    {:council council-id
-     :members (mapv :id member-runs)
-     :synthesizer (:id synthesizer)}))
-
-;; ---------------------------------------------------------------------------
-;; Op surface
-
-(def ^:private about-doc
-  {:overview
-   ["Shuttle spawns coding agents (subagents) in configurable harnesses."
-    "An agent run is a strand with shuttle/* attributes; `spawn` creates it and returns immediately."
-    "The run starts as soon as its strand is ready: no depends-on edges means now; edges mean it waits for those strands to close."
-    "On success the run strand closes with the agent's final message in shuttle/result; on failure it stays active with shuttle/phase failed and shuttle/error."
-    "Everything is async. Poll with `ps`/`strand show <id>`, or block with `await`."
-    "Fan-out: spawn several runs with no edges between them — they execute concurrently."
-    "Fan-in: spawn a collector run with --depends-on <each child> — it starts only when all children closed; or just `await` the ids yourself and synthesize."
-    "Runs can themselves spawn runs (any harness, e.g. claude spawning pi), so delegation nests; pass --spawned-by so the tree is recorded."]
-   :subcommands
-   {:about "strand op agent about — this manual."
-    :spawn (str "strand op agent spawn --harness <name> --prompt \"...\" "
-                "[--title t] [--depends-on <id>]... [--parent <id>] [--spawned-by <run-id>] "
-                "[--cwd <dir>] [--max-attempts n] — create a run; prints the run id. Async.")
-    :ps "strand op agent ps [--active] — list runs with phase/result summaries."
-    :await "strand op agent await <id>... [--timeout-secs n] — block until the ids finish (default 300s); returns their summaries."
-    :kill "strand op agent kill <id> — kill a running harness process; the run is marked failed."
-    :note "strand op agent note <strand-id> \"<text>\" [--by <run-id>] [--round n] — append an immutable note to any strand's memory."
-    :notes "strand op agent notes <strand-id> [--round n] — read a strand's notes in order."
-    :harnesses "strand op agent harnesses — list available harnesses and aliases."
-    :council (str "strand op agent council --topic \"...\" [--members n] [--rounds n] [--harness name] [--spawned-by id] "
-                  "— spawn n agents that deliberate on one shared strand for n rounds plus a synthesizer; "
-                  "await the returned synthesizer id for the verdict.")
-    :review (str "strand op agent review <target-id> [--members n] [--harness a,b] [--synthesize] [--contract text] [--spawned-by id] "
-                 "— spawn independent read-only reviewers; findings are notes on the target.")}
-   :recipes
-   {:review "spawn --harness claude --prompt \"Review the diff on branch X for correctness...\" then await the id."
-    :explore-fan-out "spawn 3 runs with different exploration prompts, then await all three ids and read their results."
-    :cross-harness "a claude run may spawn --harness pi (or any registered alias) when the job fits it better."
-    :memory "before finishing risky work, note key findings to your own run id so a respawned successor can resume."}
-   :vocabulary
-   {:shuttle/phase "pending -> running -> done | failed | exhausted"
-    :shuttle/result "final agent message (set on success; strand also closes)"
-    :shuttle/error "failure detail (run stays active and blocks dependents, loudly)"
-    :shuttle/session-id "harness session for manual resumption"
-    :crash-recovery "if the weaver dies mid-run, on restart the run respawns (bounded by shuttle/max-attempts); design prompts to be resumable."}})
-
-(defn- parse-argv
-  "Parse raw op argv into positionals and flag values.
-
-  `flag-spec` maps flag string to :single or :multi; unknown flags fail loudly."
-  [argv flag-spec]
-  (loop [remaining argv
-         positional []
-         flags {}]
-    (if-let [arg (first remaining)]
-      (if (str/starts-with? arg "--")
-        (let [kind (or (get flag-spec arg)
-                       (fail! "Unknown flag" {:flag arg :allowed (sort (keys flag-spec))}))]
-          (if (= :bool kind)
-            (recur (rest remaining) positional (assoc flags arg true))
-            (let [value (or (second remaining)
-                            (fail! "Flag requires a value" {:flag arg}))]
-              (recur (drop 2 remaining)
-                     positional
-                     (if (= :multi kind)
-                       (update flags arg (fnil conj []) value)
-                       (assoc flags arg value))))))
-        (recur (rest remaining) (conj positional arg) flags))
-      {:positional positional :flags flags})))
-
-(defn- parse-int! [flag value]
-  (try
-    (Long/parseLong value)
-    (catch NumberFormatException _
-      (fail! "Flag requires an integer value" {:flag flag :value value}))))
-
-(defn- op-spawn [argv]
-  (let [{:keys [positional flags]}
-        (parse-argv argv {"--harness" :single "--prompt" :single "--title" :single
-                          "--depends-on" :multi "--parent" :single "--spawned-by" :single
-                          "--cwd" :single "--max-attempts" :single})]
-    (when (seq positional)
-      (fail! "spawn takes only flags" {:unexpected positional}))
-    (run-summary
-     (spawn-run! {:harness (or (get flags "--harness") (fail! "spawn requires --harness" {}))
-                  :prompt (or (get flags "--prompt") (fail! "spawn requires --prompt" {}))
-                  :title (get flags "--title")
-                  :depends-on (get flags "--depends-on")
-                  :parent (get flags "--parent")
-                  :spawned-by (get flags "--spawned-by")
-                  :cwd (get flags "--cwd")
-                  :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))}))))
-
-(defn- op-await [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--timeout-secs" :single})]
-    (when (empty? positional)
-      (fail! "await requires at least one run id" {}))
-    (await-runs positional
-                (if-let [timeout (get flags "--timeout-secs")]
-                  {:timeout-secs (parse-int! "--timeout-secs" timeout)}
-                  {}))))
-
-(defn- op-note [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--by" :single "--round" :single})]
-    (when-not (= 2 (count positional))
-      (fail! "note requires <strand-id> <text>" {:got positional}))
-    (note! (first positional) (second positional)
-           (cond-> {}
-             (get flags "--by") (assoc :by (get flags "--by"))
-             (get flags "--round") (assoc :round (parse-int! "--round" (get flags "--round")))))))
-
-(defn- op-notes [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--round" :single})]
-    (when-not (= 1 (count positional))
-      (fail! "notes requires <strand-id>" {:got positional}))
-    (notes (first positional)
-           (if-let [round (get flags "--round")]
-             {:round (parse-int! "--round" round)}
-             {}))))
-
-(defn- op-logs [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--tail" :single})
-        [run-id] positional]
-    (when-not (= 1 (count positional))
-      (fail! "logs requires <run-id>" {:got positional}))
-    (let [run (or (api/show (rt) run-id) (fail! "Run not found" {:id run-id}))
-          log-path (or (sattr run "log") (fail! "Run has no shuttle/log" {:id run-id}))
-          tail (some->> (get flags "--tail") (parse-int! "--tail"))
-          read-file (fn [path]
-                      (let [f (java.io.File. path)]
-                        (when-not (.exists f)
-                          (fail! "Run log file missing" {:id run-id :path path}))
-                        (let [lines (str/split-lines (slurp f))]
-                          (if tail (str/join "\n" (take-last tail lines)) (str/join "\n" lines)))))]
-      {:id run-id
-       :out {:path log-path :text (read-file log-path)}
-       :err {:path (str/replace log-path #"\.out$" ".err")
-             :text (read-file (str/replace log-path #"\.out$" ".err"))}})))
-
-(defn- op-ps [argv]
-  ;; --active is a bare flag; strip it before parse-argv, which treats every
-  ;; "--" token as a value-carrying flag and would reject it as unknown
-  (let [active? (boolean (some #{"--active"} argv))
-        {:keys [positional flags]} (parse-argv (vec (remove #{"--active"} argv))
-                                               {"--for" :single})]
-    (when (seq positional)
-      (fail! "ps takes only --active and --for" {:unexpected positional}))
-    (runs (cond-> {:active active?}
-            (get flags "--for") (assoc :for (get flags "--for"))))))
-
-(defn- split-csv [s]
-  (when s
-    (mapv str/trim (remove str/blank? (str/split s #",")))))
-
-(defn- op-review [argv]
-  (let [{:keys [positional flags]}
-        (parse-argv argv {"--members" :single "--harness" :single "--synthesize" :bool
-                          "--contract" :single "--spawned-by" :single})
-        [target-id] positional]
-    (when-not (= 1 (count positional))
-      (fail! "review requires <target-id>" {:got positional}))
-    (review! target-id (cond-> {}
-                         (get flags "--members") (assoc :members (parse-int! "--members" (get flags "--members")))
-                         (get flags "--harness") (assoc :harnesses (split-csv (get flags "--harness")))
-                         (get flags "--contract") (assoc :contract (get flags "--contract"))
-                         (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
-                         (get flags "--synthesize") (assoc :synthesize? true)))))
-
-(defn- op-council [argv]
-  (let [{:keys [positional flags]}
-        (parse-argv argv {"--topic" :single "--members" :single "--rounds" :single
-                          "--harness" :single "--spawned-by" :single})]
-    (when (seq positional)
-      (fail! "council takes only flags" {:unexpected positional}))
-    (council! (or (get flags "--topic") (fail! "council requires --topic" {}))
-              (cond-> {}
-                (get flags "--members") (assoc :members (parse-int! "--members" (get flags "--members")))
-                (get flags "--rounds") (assoc :rounds (parse-int! "--rounds" (get flags "--rounds")))
-                (get flags "--harness") (assoc :harness (get flags "--harness"))
-                (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))))))
-
-(defn agent-op
-  "`strand op agent` entrypoint: dispatch argv to a shuttle subcommand."
-  [{:keys [op/argv]}]
-  (let [[sub & args] argv]
-    (case sub
-      nil about-doc
-      "about" about-doc
-      "spawn" (op-spawn args)
-      "ps" (op-ps args)
-      "await" (op-await args)
-      "kill" (do (when-not (= 1 (count args))
-                   (fail! "kill requires <run-id>" {:got (vec args)}))
-                 (kill! (first args)))
-      "note" (op-note args)
-      "notes" (op-notes args)
-      "logs" (op-logs args)
-      "harnesses" (harnesses)
-      "council" (op-council args)
-      "review" (op-review args)
-      (fail! "Unknown agent subcommand"
-             {:subcommand sub
-              :available ["about" "spawn" "ps" "await" "kill" "note" "notes" "logs" "harnesses" "council" "review"]}))))
+(defn default-review-contract-text
+  "Return the effective workspace review contract text."
+  []
+  (or @default-review-contract generic-review-contract))
 
 ;; ---------------------------------------------------------------------------
 ;; Install
 
 (defn install!
   "Install the shuttle into the active weaver: default harnesses, the graph
-  event listener, the `agent` op, then crash reconciliation and a first scan."
+  event listener, crash reconciliation, and a first scan."
   []
   (let [runtime (rt)]
     (register-default-harnesses!)
@@ -974,16 +663,8 @@
                                    :strand/burned :strand/superseded}
                                  'skein.spools.shuttle/on-event
                                  {:spool "shuttle"})
-    (api/register-op! runtime 'agent
-                      "Spawn and manage coding-agent runs; `strand op agent about` is the manual"
-                      'skein.spools.shuttle/agent-op)
-    (api/register-query! runtime 'agent-failures
-                         [:and [:= :state "active"]
-                          [:= [:attr "shuttle/run"] "true"]
-                          [:in [:attr "shuttle/phase"] ["failed" "exhausted"]]])
     (let [recovered (reconcile!)]
       {:installed true
        :namespace 'skein.spools.shuttle
-       :op 'agent
        :harnesses (mapv :name (harnesses))
        :recovered recovered})))

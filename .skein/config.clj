@@ -2,16 +2,19 @@
   "Repo-local Skein runtime configuration for skein-src.
 
   Thin glue over the shipped spools: `skein.spools.devflow` owns the feature
-  lifecycle and `skein.spools.workflow` is the engine (both activated from
-  init.clj). This config only adds CLI-facing `strand op` wrappers over the
-  devflow spool commands, a few named queries, the generic `agent-plan` weave
-  pattern, the `current-dags` graph projection, and repo-local shuttle harness
-  aliases."
+  lifecycle, `skein.spools.workflow` is the engine, and `skein.spools.agents`
+  owns the `strand op agent` surface plus the `agent-plan` pattern (all
+  activated from init.clj). This config shrinks to genuine workspace tuning:
+  CLI-facing `strand op` wrappers over the devflow spool commands, a few named
+  queries, the `delegate-pipeline` weave pattern, the `current-dags` graph
+  projection, repo-local shuttle harness aliases, chime attention rules, and
+  the default review contract."
   (:require [clojure.data.json :as json]
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.patterns.alpha :as patterns]
+            [skein.spools.agents :as agents]
             [skein.spools.chime :as chime]
             [skein.spools.devflow :as devflow]
             [skein.spools.shuttle :as shuttle]
@@ -20,12 +23,8 @@
             [skein.api.weaver.alpha :as api]))
 
 ;; ---------------------------------------------------------------------------
-;; Delegation policy and agent-plan weave patterns
+;; delegate-pipeline weave pattern
 ;; ---------------------------------------------------------------------------
-
-(def delegation-policy-text
-  "Repo-local policy text prepended to delegated-agent prompts."
-  "Repo delegated-agent contract:\n- Read the assigned strand first with the pinned strand command.\n- Record progress with a `progress` attribute on the task strand and notes on the run.\n- Set `status=implemented` on the task only when validation is green.\n- Never close the assigned strand.\n- Never mutate sibling or parent strands unless the body says so.\n- Do not commit unless the body says so.")
 
 (defn- non-blank-string?
   "Return true when v is a non-blank string."
@@ -33,80 +32,11 @@
   (and (string? v) (not (str/blank? v))))
 
 (s/def ::non-blank-string non-blank-string?)
-(s/def ::feature ::non-blank-string)
 (s/def ::title ::non-blank-string)
-(s/def ::key ::non-blank-string)
-(s/def ::kind #{"task" "review"})
 (s/def ::body ::non-blank-string)
-(s/def ::hitl boolean?)
-(s/def ::depends_on (s/coll-of ::key :kind vector?))
-(s/def ::owner ::non-blank-string)
-(s/def ::branch ::non-blank-string)
-(s/def ::validation (s/coll-of ::non-blank-string :kind vector? :min-count 1))
 (s/def ::harness ::non-blank-string)
 (s/def ::cwd ::non-blank-string)
 (s/def ::max-attempts pos-int?)
-(s/def ::task (s/keys :req-un [::key ::title]
-                      :opt-un [::body ::kind ::hitl ::depends_on
-                               ::owner ::branch ::validation ::harness ::cwd ::max-attempts]))
-(s/def ::tasks (s/coll-of ::task :kind vector? :min-count 1))
-(s/def ::agent-plan-input (s/keys :req-un [::feature ::title ::tasks]
-                                  :opt-un [::body]))
-
-(defn- ref-symbol
-  "Return the batch ref symbol for a user-supplied task key."
-  [key]
-  (symbol key))
-
-(defn- plan-strand
-  "Return the feature/plan strand for an agent-plan input."
-  [{:keys [feature title body tasks]}]
-  {:ref 'plan
-   :title title
-   :attributes (cond-> {:feature feature
-                        :kind "plan"
-                        :workflow "agent-plan"}
-                 body (assoc :body body))
-   :edges (mapv (fn [{:keys [key]}]
-                  {:type "parent-of" :to (ref-symbol key)})
-                tasks)})
-
-(defn- task-strand
-  "Return one task/review strand for an agent-plan input task."
-  [feature {:keys [key title body kind hitl owner branch validation depends_on harness cwd max-attempts] :as task}]
-  (cond-> {:ref (ref-symbol key)
-           :title title
-           :attributes (cond-> {:feature feature
-                                :kind (or kind "task")
-                                :workflow "agent-plan"
-                                :task_key key}
-                         body (assoc :body body)
-                         hitl (assoc :hitl true)
-                         owner (assoc :owner owner)
-                         branch (assoc :branch branch)
-                         harness (assoc :harness harness)
-                         cwd (assoc :cwd cwd)
-                         max-attempts (assoc :max-attempts max-attempts)
-                         (contains? task :validation) (assoc :validation validation))}
-    (seq depends_on)
-    (assoc :edges (mapv (fn [dep]
-                          {:type "depends-on" :to (ref-symbol dep)})
-                        depends_on))))
-
-(defn agent-plan
-  "Create a feature strand plus task/review children for agent work.
-
-  Input requires `feature`, `title`, and a non-empty `tasks` vector. Optional
-  `body` fields carry issue-style context on the plan or tasks. Task keys become
-  local batch refs. Each task may set `kind` to `task` or `review`, `hitl` to
-  true, and `depends_on` to a vector of task keys. The generated plan has
-  `kind=plan`, children share `feature`, the plan has `parent-of` edges to each
-  child, and task dependencies become `depends-on` edges. Optional coordination
-  attributes include `owner`, `branch`, `validation`, `harness`, `cwd`, and `max-attempts`."
-  [{:keys [input]}]
-  (into [(plan-strand input)]
-        (map #(task-strand (:feature input) %))
-        (:tasks input)))
 
 (s/def ::id ::non-blank-string)
 (s/def ::run_id ::non-blank-string)
@@ -130,7 +60,7 @@
 (defn- pipeline-task-prompt
   "Return the prompt for one delegate-pipeline task."
   [run-id item]
-  (str delegation-policy-text "\n\n"
+  (str agents/worker-contract "\n\n"
        "Delegated pipeline run: " run-id "\n"
        "Task: " (task-value item :title) "\n\n"
        (or (task-value item :body) (task-value item :title))))
@@ -599,12 +529,11 @@
          {:name "devflow-status" :usage "strand op devflow-status <feature>"}
          {:name "workflow-runs" :usage "strand op workflow-runs [family]"}
          {:name "current-dags" :usage "strand op current-dags"}
-         {:name "agent-delegate" :usage "strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]"}
-         {:name "agent-review" :usage "strand op agent review <target-id> [--members n] [--harness a,b] [--synthesize]"}
+         {:name "agent" :usage "strand op agent about — the delegation manual (spawn/delegate/retry/status/ps/await/logs/kill/note/notes/council/review); shipped by skein.spools.agents"}
          {:name "flow-await" :usage "strand op flow-await <workflow-run-id> [--timeout-secs <n>]"}
          {:name "flow-status" :usage "strand op flow-status <workflow-run-id>"}]
    :patterns [{:name "agent-plan"
-               :purpose "Lightweight CLI-created plan/task DAG for general agent work outside the devflow lifecycle."}
+               :purpose "Create a feature strand plus task/review children for agent work; now shipped by skein.spools.agents, not this config."}
               {:name "delegate-pipeline"
                :purpose "Sequential chain-loop workflow of subagent gates with optional acceptance checkpoint."}]
    :queries [{:name "feature-active"
@@ -623,21 +552,8 @@
               :usage "strand ready --query work"}]})
 
 ;; ---------------------------------------------------------------------------
-;; agent-delegate op: repo-local delegated-agent contract over shuttle
+;; op argv helpers shared by the ops below
 ;; ---------------------------------------------------------------------------
-
-(defn- config-dir
-  "Return the active weaver config directory."
-  []
-  (or (get-in (current/runtime) [:metadata :config-dir])
-      (throw (ex-info "agent-delegate requires an active weaver runtime" {}))))
-
-(defn- repo-root-dir
-  "Return the repo root for this config workspace."
-  []
-  (-> (java.io.File. (config-dir))
-      .getParentFile
-      .getCanonicalPath))
 
 (defn- parse-op-argv
   "Parse op argv into positional args and single-value flags."
@@ -668,100 +584,6 @@
     (catch NumberFormatException _
       (throw (ex-info (str flag " must be an integer")
                       {:flag flag :value value})))))
-
-(defn- active-task!
-  "Return task-id's active strand, failing loudly when missing or inactive."
-  [rt task-id]
-  (let [task (or (api/show rt task-id)
-                 (throw (ex-info "agent-delegate task not found" {:task-id task-id})))]
-    (when-not (= "active" (:state task))
-      (throw (ex-info "agent-delegate task must be active"
-                      {:task-id task-id :state (:state task)})))
-    task))
-
-(defn- task-attr-string
-  "Return task attribute k when it is a non-blank string, fail on malformed values."
-  [task k]
-  (let [v (get-in task [:attributes k])]
-    (cond
-      (nil? v) nil
-      (non-blank-string? v) v
-      :else (throw (ex-info (str "agent-delegate task attribute " (name k) " must be a non-blank string")
-                            {:task-id (:id task) :attribute k :value v})))))
-
-(defn- task-attr-long
-  "Return task attribute k as a positive long, fail on malformed values."
-  [task k]
-  (let [v (get-in task [:attributes k])]
-    (cond
-      (nil? v) nil
-      (pos-int? v) v
-      (and (integer? v) (pos? v)) (long v)
-      :else (throw (ex-info (str "agent-delegate task attribute " (name k) " must be a positive integer")
-                            {:task-id (:id task) :attribute k :value v})))))
-
-(defn- validation-text
-  "Return the task validation attribute as prompt text."
-  [validation]
-  (cond
-    (nil? validation) nil
-    (sequential? validation) (str/join "\n" validation)
-    :else (str validation)))
-
-(defn- agent-delegate-prompt
-  "Build the repo-local delegated-agent prompt for an active task strand.
-
-  The shuttle engine prepends its pinned-command run preamble; this prompt only
-  supplies task context, validation, and the repo delegated-agent contract. A
-  task with no body requires explicit extra prompt text, so accidental context-
-  free delegations fail loudly."
-  [task extra]
-  (let [task-id (:id task)
-        title (:title task)
-        attrs (:attributes task)
-        body-text (some-> (:body attrs) str str/trim not-empty)
-        validation (:validation attrs)
-        extra (some-> extra str/trim not-empty)]
-    (when (and (nil? body-text) (nil? extra))
-      (throw (ex-info "agent-delegate requires task body or --prompt"
-                      {:task-id task-id})))
-    (str "You are the delegated implementer for strand `" task-id "` (`" title "`) in the skein-src repo.\n"
-         "Read the assigned strand first with `strand show " task-id "` using the pinned command from the shuttle preamble.\n\n"
-         (when body-text
-           (str "Task body:\n" body-text "\n\n"))
-         (when-let [gate (validation-text validation)]
-           (str "Validation gate:\n" gate "\n\n"))
-         delegation-policy-text "\n"
-         (when extra
-           (str "\nExtra instructions:\n" extra "\n")))))
-
-(defn agent-delegate-op
-  "Spawn a shuttle run to implement an existing active task strand.
-
-  Usage: `strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]`."
-  [ctx]
-  (let [usage "strand op agent-delegate <task-id> [--harness <name>] [--prompt <extra>] [--cwd <dir>] [--max-attempts <n>] [--spawned-by <run-id>]"
-        {:keys [positional flags]}
-        (parse-op-argv "agent-delegate" (:op/argv ctx)
-                       {"--harness" :single "--prompt" :single "--cwd" :single
-                        "--max-attempts" :single "--spawned-by" :single})
-        [task-id] (require-argv-range! "agent-delegate" positional 1 1 usage)
-        _ (require-non-blank! :task-id task-id)
-        rt (current/runtime)
-        task (active-task! rt task-id)
-        harness (or (get flags "--harness") (task-attr-string task :harness) "pi-main")
-        cwd (or (get flags "--cwd") (task-attr-string task :cwd) (repo-root-dir))
-        max-attempts (or (some->> (get flags "--max-attempts")
-                                  (parse-long-flag! "--max-attempts"))
-                         (task-attr-long task :max-attempts))]
-    (shuttle/run-summary
-     (shuttle/spawn-run! (cond-> {:harness harness
-                                  :prompt (agent-delegate-prompt task (get flags "--prompt"))
-                                  :parent task-id
-                                  :cwd cwd
-                                  :title (str "Delegate: " (:title task))}
-                           max-attempts (assoc :max-attempts max-attempts)
-                           (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by")))))))
 
 (defn flow-await-op
   "Block until a workflow run is done or needs coordinator attention.
@@ -979,16 +801,12 @@
     {:installed true
    :namespace 'config
    :harnesses (register-harness-aliases!)
-   ;; agent review consumes the one authoritative policy text by default
-   :review-contract (shuttle/set-default-review-contract! delegation-policy-text)
+   ;; agent review consumes the one authoritative policy text by default; the
+   ;; text itself now ships from skein.spools.agents, set-default-review-contract!
+   ;; still lives on the shuttle engine
+   :review-contract (shuttle/set-default-review-contract! agents/review-contract)
    :chime-rules (register-chime-rules!)
    :patterns [(patterns/register-pattern!
-               runtime
-               'agent-plan
-               "Create a feature strand plus task/review children for agent work. Input: {feature,title,body?,tasks:[{key,title,body?,kind?,hitl?,depends_on?,owner?,branch?,validation?,harness?,cwd?,max-attempts?}]}. Use body for delegated work context."
-               'config/agent-plan
-               ::agent-plan-input)
-              (patterns/register-pattern!
                runtime
                'delegate-pipeline
                "Create a sequential chain-loop workflow of subagent gates. Input: {run_id,tasks:[{id,title,body?,harness?,cwd?,max-attempts?}],harness?,cwd?,accept?}."
@@ -1060,11 +878,6 @@
           'devflow-conventions
           "Show repo-local spools, ops, patterns, and queries"
           'config/devflow-conventions-op)
-         (api/register-op!
-          runtime
-          'agent-delegate
-          "Delegate an active task strand to a shuttle agent run"
-          'config/agent-delegate-op)
          (api/register-op!
           runtime
           'flow-await

@@ -3,8 +3,7 @@
 
   Harness processes in these tests use the shipped `sh` harness (the prompt is
   the script), so runs are cheap and deterministic while still exercising the
-  full readiness-driven spawn engine, result capture, notes, reconciliation,
-  op dispatch, and council wiring."
+  full readiness-driven spawn engine, result capture, notes, and reconciliation."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -247,105 +246,6 @@
               failed (await-phase rt run-id #{"failed"} 10000)]
           (is (str/includes? (get-in failed [:attributes :shuttle/error]) "Harness not found")))))))
 
-(deftest agent-op-dispatches-and-fails-loudly
-  (with-shuttle
-    (fn [_]
-      (testing "about is the default and carries the full manual"
-        (is (= (shuttle/agent-op {:op/argv []}) (shuttle/agent-op {:op/argv ["about"]})))
-        (is (contains? (shuttle/agent-op {:op/argv ["about"]}) :subcommands)))
-      (testing "spawn/ps/await/notes drive a full run over argv"
-        (let [spawned (shuttle/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo via-op"]})]
-          (is (= "pending" (:phase spawned)))
-          (let [{:keys [runs timed-out]}
-                (shuttle/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" "10"]})]
-            (is (false? timed-out))
-            (is (= "via-op" (:result (first runs)))))
-          (shuttle/agent-op {:op/argv ["note" (:id spawned) "op note" "--by" (:id spawned)]})
-          (is (= ["op note"]
-                 (mapv :note (shuttle/agent-op {:op/argv ["notes" (:id spawned)]}))))
-          (is (pos? (count (shuttle/agent-op {:op/argv ["ps"]}))))
-          ;; --active is a bare flag: it must survive flag parsing, alone and
-          ;; combined with the value-carrying --for
-          (is (vector? (shuttle/agent-op {:op/argv ["ps" "--active"]})))
-          (is (= [] (shuttle/agent-op {:op/argv ["ps" "--active" "--for" "no-such-strand"]})))))
-      (testing "invalid input fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown agent subcommand"
-                              (shuttle/agent-op {:op/argv ["dance"]})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown flag"
-                              (shuttle/agent-op {:op/argv ["spawn" "--nope" "x"]})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires --harness"
-                              (shuttle/agent-op {:op/argv ["spawn" "--prompt" "x"]})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"integer"
-                              (shuttle/agent-op {:op/argv ["await" "id" "--timeout-secs" "soon"]})))))))
-
-(deftest agent-logs-read-output-and-error-files
-  (with-shuttle
-    (fn [_]
-      (let [spawned (shuttle/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "printf 'a\\nb\\n'; printf 'e\\n' >&2"]})]
-        (shuttle/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" "10"]})
-        (let [logs (shuttle/agent-op {:op/argv ["logs" (:id spawned) "--tail" "1"]})]
-          (is (= "b" (get-in logs [:out :text])))
-          (is (= "e" (get-in logs [:err :text]))))))))
-
-(deftest review-spawns-independent-reviewers
-  (with-shuttle
-    (fn [rt]
-      (let [target (api/add rt {:title "Review target" :attributes {:body "Inspect me"}})
-            review (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "correctness"}
-                                                              {:harness :sh :focus "tests"}]
-                                                :contract "Review contract"})]
-        (is (= (:id target) (:target review)))
-        (is (= 2 (count (:reviewers review))))
-        (is (nil? (:synthesizer review)))
-        (doseq [run-id (:reviewers review)]
-          (let [run (api/show rt run-id)]
-            (is (= (:id target) (get-in run [:attributes :shuttle/review-target])))
-            (is (str/includes? (get-in run [:attributes :shuttle/prompt]) "Review contract"))))))))
-
-(deftest review-consumes-workspace-default-contract
-  (with-shuttle
-    (fn [rt]
-      (try
-        (shuttle/set-default-review-contract! "Workspace policy contract")
-        (let [target (api/add rt {:title "Default-contract target"})
-              review (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "policy"}]})
-              run (api/show rt (first (:reviewers review)))]
-          (is (str/includes? (get-in run [:attributes :shuttle/prompt])
-                             "Workspace policy contract"))
-          ;; explicit :contract still overrides the workspace default
-          (let [review* (shuttle/review! (:id target) {:reviewers [{:harness :sh :focus "override"}]
-                                                       :contract "Explicit contract"})
-                run* (api/show rt (first (:reviewers review*)))]
-            (is (str/includes? (get-in run* [:attributes :shuttle/prompt]) "Explicit contract"))))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"non-blank"
-                              (shuttle/set-default-review-contract! "  ")))
-        (finally
-          (shuttle/set-default-review-contract! nil))))))
-
-(deftest council-wires-members-and-synthesizer
-  (with-shuttle
-    (fn [rt]
-      (let [{:keys [council members synthesizer]}
-            (shuttle/council! "test topic" {:harness :sh :members 2 :rounds 1})]
-        (is (= 2 (count members)))
-        (testing "council strand is the shared parent of members and synthesizer"
-          (let [edges (:edges (api/subgraph rt [council]))]
-            (is (= (set (conj members synthesizer))
-                   (set (map :to_strand_id edges))))))
-        (testing "synthesizer waits for every member"
-          ;; sh members run their prompt (the council protocol text) as a
-          ;; shell script, which fails — members go failed and stay active,
-          ;; so the synthesizer must still be pending.
-          (shuttle/await-runs members {:timeout-secs 10})
-          (Thread/sleep 200)
-          (is (= "pending"
-                 (get-in (api/show rt synthesizer) [:attributes :shuttle/phase])))
-          (doseq [member members]
-            (api/update rt member {:state "closed"}))
-          (is (contains? #{"done" "failed"}
-                         (get-in (await-phase rt synthesizer #{"done" "failed"} 10000)
-                                 [:attributes :shuttle/phase]))))))))
-
 (deftest spool-loads-through-approved-spool-workspace-flow
   (let [db-file (db-test/temp-db-file)
         config-dir (temp-config-dir)
@@ -365,7 +265,7 @@
             (is (contains? #{:loaded :already-available}
                            (get-in synced [:spools 'skein.spools/shuttle :status])))
             (is (= :loaded (:status used)))
-            (is (some #(= "agent" (:name %)) (api/ops rt))))
+            (is (not-any? #(= "agent" (:name %)) (api/ops rt))))
           (finally
             (runtime/stop! rt))))
       (finally

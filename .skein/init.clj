@@ -28,6 +28,12 @@
    :spools ['skein.spools/shuttle]
    :call 'skein.spools.shuttle/install!
    :required? true})
+(runtime-alpha/use! runtime :skein/spools-agents
+  {:ns 'skein.spools.agents
+   :spools ['skein.spools/agents]
+   :after [:skein/spools-shuttle]
+   :call 'skein.spools.agents/install!
+   :required? true})
 ;; Chime is a vocabulary-agnostic notification engine: it installs bare here,
 ;; config.clj registers this repo's attention rules (HITL checkpoints, agent
 ;; failures, treadle errors), and each developer binds how they are notified
@@ -41,7 +47,7 @@
 (runtime-alpha/use! runtime :config
   {:file "config.clj"
    :after [:skein/spools-ephemeral :skein/spools-workflow :skein/spools-devflow
-           :skein/spools-shuttle :skein/spools-chime]
+           :skein/spools-shuttle :skein/spools-agents :skein/spools-chime]
    :call 'config/install!})
 ;; Treadle installs last: its install! runs an initial gate scan, so every
 ;; harness alias config.clj registers (e.g. pi-main) must already exist or a

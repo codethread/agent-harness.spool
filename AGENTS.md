@@ -22,7 +22,8 @@ Userland reference spools are indexed in [`spools/`](./spools/README.md), with s
 - [Bobbin Context Packs](./spools/bobbin.md)
 - [Selvage Attribute Lint](./spools/selvage.md)
 - [Carder Graph Hygiene](./spools/carder.md)
-- [Agent Shuttle](./spools/shuttle/README.md) (approved local-root spool)
+- [Agent Shuttle](./spools/shuttle/README.md) (approved local-root spool; run engine only)
+- [Agents Spool](./spools/agents/README.md) (approved local-root spool; `strand op agent` surface over shuttle)
 - [Treadle Gate Bridge](./spools/shuttle/treadle.md) (approved local-root spool)
 - [Chime Notifications](./spools/chime/README.md) (approved local-root spool)
 

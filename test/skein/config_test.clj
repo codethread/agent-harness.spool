@@ -1,6 +1,6 @@
 (ns skein.config-test
   "Tests for the repo-local .skein config: registration surface, the
-  agent-plan weave pattern, and the devflow op wrappers over
+  delegate-pipeline weave pattern, and the devflow op wrappers over
   skein.spools.devflow."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -53,14 +53,16 @@
   (.mkdirs (io/file target))
   (doseq [name ["init.clj" "config.clj" "spools.edn"]]
     (io/copy (io/file ".skein" name) (io/file target name)))
-  ;; The shipped spools.edn approves spools/shuttle and spools/chime relative
-  ;; to the config dir, which does not resolve from a copy. Rewrite it to the
-  ;; repo's canonical spool roots so the whole test JVM syncs one root per lib
-  ;; (tools.deps add-libs state is JVM-global; see skein.test-runner's
-  ;; ordering note).
+  ;; The shipped spools.edn approves spools/shuttle, spools/agents, and
+  ;; spools/chime relative to the config dir, which does not resolve from a
+  ;; copy. Rewrite it to the repo's canonical spool roots so the whole test
+  ;; JVM syncs one root per lib (tools.deps add-libs state is JVM-global; see
+  ;; skein.test-runner's ordering note).
   (spit (io/file target "spools.edn")
         (pr-str {:spools {'skein.spools/shuttle
                           {:local/root (.getCanonicalPath (io/file "spools/shuttle"))}
+                          'skein.spools/agents
+                          {:local/root (.getCanonicalPath (io/file "spools/agents"))}
                           'skein.spools/chime
                           {:local/root (.getCanonicalPath (io/file "spools/chime"))}}}))
   ;; The shipped config leaves chime's notifier to each developer's personal
@@ -101,130 +103,63 @@
                    "devflow-choose" "devflow-complete" "devflow-advance"
                    "devflow-describe" "devflow-history" "devflow-archive"
                    "devflow-status" "workflow-runs" "devflow-conventions"
-                   "agent-delegate" "flow-await" "flow-status"]]
+                   "flow-await" "flow-status" "agent"]]
     (is (some #(= op-name (:name %)) (api/ops rt))))
-  (is (some #(= "agent-plan" (:name %)) (api/patterns rt)))
   (is (some #(= "delegate-pipeline" (:name %)) (api/patterns rt)))
-  ;; agent review must consume the one authoritative policy text by default
-  (is (= (var-get (requiring-resolve 'config/delegation-policy-text))
+  ;; agent-plan is spool-owned now; a real startup wires the agents spool in
+  ;; via init.clj, so it must still be registered end to end
+  (is (some #(= "agent-plan" (:name %)) (api/patterns rt)))
+  ;; agent review must consume the one authoritative policy text by default;
+  ;; the text ships from skein.spools.agents, the accessor stays on shuttle
+  (is (= (var-get (requiring-resolve 'skein.spools.agents/review-contract))
          @@(requiring-resolve 'skein.spools.shuttle/default-review-contract)))
   ;; the repo owns chime's attention rules; the chime engine ships none
   (is (= [:agent-failure :hitl-checkpoint-ready :treadle-error]
          (mapv :name ((requiring-resolve 'skein.spools.chime/rules))))))
 
-(deftest agent-plan-weave-creates-plan-and-task-dag
+(deftest current-dags-op-builds-self-contained-plan-task-projection
   (with-config-runtime
     (fn [rt]
-      (api/weave! rt :agent-plan
-                  {:feature "plan-feature"
-                   :title "Feature: plan feature"
-                   :body "Problem and scope."
-                   :tasks [{:key "impl"
-                            :title "Implement it"
-                            :owner "agent-a"
-                            :harness "build"
-                            :cwd "/tmp/work"
-                            :validation ["clojure -M:test"]}
-                           {:key "review"
-                            :kind "review"
-                            :title "Review it"
-                            :hitl true
-                            :depends_on ["impl"]}]})
-      (let [strands (api/list rt (var-get (requiring-resolve 'config/feature-active-query))
-                              {:feature "plan-feature"})
-            by-key (into {} (map (juxt #(get-in % [:attributes :task_key]) identity)) strands)
-            plan (first (filter #(= "plan" (get-in % [:attributes :kind])) strands))
-            children (:edges (api/subgraph rt [(:id plan)] {:type "parent-of"}))
-            ready (api/ready rt (var-get (requiring-resolve 'config/feature-work-query))
-                             {:feature "plan-feature"})]
-        (is (= 3 (count strands)))
-        (is (= "agent-plan" (get-in plan [:attributes :workflow])))
-        (is (= #{(:id (by-key "impl")) (:id (by-key "review"))}
-               (set (map :to_strand_id children))))
-        (is (= true (get-in (by-key "review") [:attributes :hitl])))
-        (is (= "build" (get-in (by-key "impl") [:attributes :harness])))
-        (is (= "/tmp/work" (get-in (by-key "impl") [:attributes :cwd])))
-        ;; review depends on impl, so only impl is ready
-        (is (= ["Implement it"] (mapv :title ready)))
-        ;; current-dags stays self-contained: a blocker outside the plan DAG
-        ;; must not surface as a dangling depends-on edge
-        (let [external (api/add rt {:title "External blocker"
-                                    :state "active"
-                                    :attributes {:kind "task"}})]
-          (api/update rt (:id (by-key "impl"))
-                      {:edges [{:type "depends-on" :to (:id external)}]})
-          (let [dag (->> (:dags (op! "current-dags" []))
-                         (filter #(= (:id plan) (get-in % [:root :id])))
-                         first)
-                dag-ids (set (map :id (:strands dag)))]
-            (is (some? dag))
-            (is (every? #(and (contains? dag-ids (:from_strand_id %))
-                              (contains? dag-ids (:to_strand_id %)))
-                        (concat (:parent_of_edges dag) (:depends_on_edges dag))))))))))
-
-(deftest agent-plan-rejects-invalid-input
-  (with-config-runtime
-    (fn [rt]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"agent-plan"
-                            (api/weave! rt :agent-plan
-                                        {:feature "bad" :title "Bad" :tasks []}))))))
-
-(deftest agent-delegate-op-registers-and-fails-before-creating-runs
-  (with-config-runtime
-    (fn [rt]
-      (is (some #(= "agent-delegate" (:name %)) (api/ops rt)))
-      (is (some? (some #(= "agent-delegate" (:name %)) (:ops ((requiring-resolve 'config/install!))))))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"expects between"
-                            (op! "agent-delegate" [])))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"task not found"
-                            (op! "agent-delegate" ["missing"])))
-      (let [closed (api/add rt {:title "Closed task" :state "closed" :attributes {:body "Do it"}})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be active"
-                              (op! "agent-delegate" [(:id closed)]))))
-      (is (empty? (api/list rt [:= [:attr "shuttle/run"] "true"] {}))))))
-
-(deftest agent-delegate-op-validates-context-and-spawns-run
-  (with-config-runtime
-    (fn [rt]
-      (let [empty-task (api/add rt {:title "Empty task" :attributes {}})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires task body or --prompt"
-                              (op! "agent-delegate" [(:id empty-task)]))))
-      (let [task (api/add rt {:title "Implement delegate"
-                              :attributes {:body "Build the delegate op."
-                                           :validation ["clojure -M:test"]}})
-            run (op! "agent-delegate" [(:id task)])
-            stored (api/show rt (:id run))
-            attrs (:attributes stored)
-            edges (:edges (api/subgraph rt [(:id task)] {:type "parent-of"}))]
-        ;; the op returns shuttle's run summary, not the raw strand
-        (is (= "pending" (:phase run)))
-        (is (= "pi-main" (:harness run)))
-        (is (= "pi-main" (get attrs :shuttle/harness)))
-        (is (= (.getCanonicalPath (.getParentFile (io/file (get-in rt [:metadata :config-dir]))))
-               (get attrs :shuttle/cwd)))
-        (is (= #{(:id stored)}
-               (set (map :to_strand_id edges))))
-        (is (str/includes? (get attrs :shuttle/prompt) "Build the delegate op."))
-        (is (str/includes? (get attrs :shuttle/prompt) "clojure -M:test"))
-        (is (str/includes? (get attrs :shuttle/prompt) "status=implemented"))
-        (is (str/includes? (get attrs :shuttle/prompt) "Never close")))
-      (let [task (api/add rt {:title "Prompt-only task" :attributes {}})
-            run (op! "agent-delegate" [(:id task) "--prompt" "Use only this prompt." "--max-attempts" "5"])
-            attrs (:attributes (api/show rt (:id run)))]
-        (is (= 5 (get attrs :shuttle/max-attempts))))
-      (let [task (api/add rt {:title "Attr-routed task"
-                              :attributes {:body "Use attrs"
-                                           :harness "build"
-                                           :cwd "/tmp/attr-work"
-                                           :max-attempts 2}})
-            run (op! "agent-delegate" [(:id task)])
-            attrs (:attributes (api/show rt (:id run)))]
-        (is (= "build" (get attrs :shuttle/harness)))
-        (is (= "/tmp/attr-work" (get attrs :shuttle/cwd)))
-        (is (= 2 (get attrs :shuttle/max-attempts))))
-      (let [task (api/add rt {:title "Bad attempts" :attributes {:body "Try"}})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be an integer"
-                              (op! "agent-delegate" [(:id task) "--max-attempts" "nope"])))))))
+      (let [plan (api/add rt {:title "Feature: plan feature"
+                              :state "active"
+                              :attributes {:feature "plan-feature" :kind "plan" :workflow "agent-plan"}})
+            impl (api/add rt {:title "Implement it"
+                              :state "active"
+                              :attributes {:feature "plan-feature" :kind "task" :workflow "agent-plan"
+                                           :task_key "impl" :owner "agent-a" :harness "build"
+                                           :cwd "/tmp/work" :validation ["clojure -M:test"]}})
+            review (api/add rt {:title "Review it"
+                                :state "active"
+                                :attributes {:feature "plan-feature" :kind "review" :workflow "agent-plan"
+                                             :task_key "review" :hitl true}})]
+        (api/update rt (:id plan) {:edges [{:type "parent-of" :to (:id impl)}
+                                           {:type "parent-of" :to (:id review)}]})
+        (api/update rt (:id review) {:edges [{:type "depends-on" :to (:id impl)}]})
+        (let [strands (api/list rt (var-get (requiring-resolve 'config/feature-active-query))
+                                {:feature "plan-feature"})
+              children (:edges (api/subgraph rt [(:id plan)] {:type "parent-of"}))
+              ready (api/ready rt (var-get (requiring-resolve 'config/feature-work-query))
+                               {:feature "plan-feature"})]
+          (is (= 3 (count strands)))
+          (is (= #{(:id impl) (:id review)}
+                 (set (map :to_strand_id children))))
+          ;; review depends on impl, so only impl is ready
+          (is (= ["Implement it"] (mapv :title ready)))
+          ;; current-dags stays self-contained: a blocker outside the plan DAG
+          ;; must not surface as a dangling depends-on edge
+          (let [external (api/add rt {:title "External blocker"
+                                      :state "active"
+                                      :attributes {:kind "task"}})]
+            (api/update rt (:id impl)
+                        {:edges [{:type "depends-on" :to (:id external)}]})
+            (let [dag (->> (:dags (op! "current-dags" []))
+                           (filter #(= (:id plan) (get-in % [:root :id])))
+                           first)
+                  dag-ids (set (map :id (:strands dag)))]
+              (is (some? dag))
+              (is (every? #(and (contains? dag-ids (:from_strand_id %))
+                                (contains? dag-ids (:to_strand_id %)))
+                          (concat (:parent_of_edges dag) (:depends_on_edges dag)))))))))))
 
 (deftest delegate-pipeline-weave-creates-chain-loop-gates
   (with-config-runtime
@@ -245,7 +180,7 @@
                        (get-in s [:attributes (name k)])))]
         (is (= #{"a" "b"} (set (keys by-task))))
         (is (str/includes? (attr (by-task "a") :shuttle/prompt)
-                           "Repo delegated-agent contract"))
+                           "[worker contract]"))
         (is (= "pi-main" (attr (by-task "b") :shuttle/harness))))))
   (testing "acceptance checkpoint is optional and task max-attempts pass through"
     (with-config-runtime
