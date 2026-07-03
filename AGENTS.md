@@ -13,10 +13,10 @@ Canonical shipped contracts live in root specs:
 - [REPL API](./devflow/specs/repl-api.md)
 - [Weaver Runtime](./devflow/specs/daemon-runtime.md)
 
-Userland reference spools are indexed in [`spools/`](./spools/README.md), with shipped sources under `spools/src` and contract docs beside them:
+Userland reference spools are indexed in [`spools/`](./spools/README.md), with classpath-shipped sources under `spools/src`, externally git-distributed spools consumed by coordinate, and contract docs beside them:
 
 - [Workflow Engine](./spools/workflow.md)
-- [Devflow Lifecycle](./spools/devflow.md)
+- [Devflow Lifecycle](./spools/devflow.md) (external RFC-017 git-distributed spool: source in [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool), consumed via the `.skein/spools.edn` git coordinate)
 - [Ephemeral Strands](./spools/ephemeral.md)
 - [Weaver Guild](./spools/guild.md)
 - [Bobbin Context Packs](./spools/bobbin.md)
@@ -110,7 +110,7 @@ The canonical repo `.skein` workspace is the **shared coordination world**: back
 
 Always read `docs/skein.md` from the repository root before changing the `.skein` config itself.
 
-This repo's `.skein` world is thin glue over the shipped reference spools. `.skein/init.clj` activates `skein.spools.ephemeral`, `skein.spools.workflow`, and `skein.spools.devflow` from the weaver classpath, plus `skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from the approved `spools/shuttle` / `spools/agents` local roots, `skein.spools.chime` from the approved `spools/chime` local root, and `skein.spools.backlog` from the approved `spools/backlog` local root. Together, the installed spools and `.skein/config.clj` register:
+This repo's `.skein` world is thin glue over the reference spools. `.skein/init.clj` activates `skein.spools.ephemeral` and `skein.spools.workflow` from the weaver classpath, `skein.spools.devflow` from the approved `codethread/devflow` git coordinate (an RFC-017 git-distributed spool: `.skein/spools.edn` pins the `:git/sha`, a developer's gitignored `spools.local.edn` overrides it with a local root), plus `skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from the approved `spools/shuttle` / `spools/agents` local roots, `skein.spools.chime` from the approved `spools/chime` local root, and `skein.spools.backlog` from the approved `spools/backlog` local root. Together, the installed spools and `.skein/config.clj` register:
 
 - ops: `agent`, `backlog`, `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`, `devflow-complete`, `devflow-advance`, `devflow-describe`, `devflow-history`, `devflow-archive`, `devflow-status`, `workflow-runs`, `current-dags`, `flow-await`, `flow-status`, `devflow-conventions`
 - queries: `work`, `backlog-items`, `backlog-unstarted`, `feature-active`, `feature-work`, `feature-owner-work`, `feature-run`, `workflow-runs`, `devflow-runs`, `agent-failures`

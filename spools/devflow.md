@@ -1,5 +1,19 @@
 # Skein Devflow Spool
 
+> **Source has moved.** `skein.spools.devflow` no longer ships on the weaver
+> classpath from this repo. Its source lives in the external
+> [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool)
+> repository and is consumed as an RFC-017 git-distributed spool: this workspace
+> approves it with a sha-pinned `:git/url`+`:git/sha` coordinate in
+> `.skein/spools.edn` and activates it (`:required? true`) from `.skein/init.clj`.
+> The test JVM pins the same sha as a tools.deps git dep (`deps.edn`), and
+> developers override the coordinate with a gitignored `spools.local.edn` local
+> root to work against a checkout. See
+> [Writing shared spools](../docs/writing-shared-spools.md#publishing-a-shared-spool-with-git-distribution)
+> for the distribution mechanism. This contract doc will migrate into the
+> `devflow.spool` repo in a follow-up; it stays here for now as the shipped
+> reference.
+
 ## 1. Overview
 
 `skein.spools.devflow` is the reference higher-level spool built on

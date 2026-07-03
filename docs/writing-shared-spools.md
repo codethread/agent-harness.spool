@@ -61,6 +61,14 @@ workspace `spools.edn` by explicit approval of a pinned commit. The approving
 workspace chooses the coordinate symbol; that symbol is the consent handle used
 by manifests, unmet-need reports, and local overrides.
 
+> **Worked example.** Skein's own devflow lifecycle is distributed exactly this
+> way: its source lives in [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool),
+> this repo approves it with a sha-pinned `:git/url`+`:git/sha` coordinate in
+> `.skein/spools.edn`, activates it (`:required? true`) from `.skein/init.clj`,
+> pins the same sha as a tools.deps git dep for the test JVM (`deps.edn`), and
+> developers override it with a gitignored `spools.local.edn` local root. See
+> [`spools/devflow.md`](../spools/devflow.md) for the consumer side.
+
 A consumer pins the exact content they consent to run:
 
 ```clojure

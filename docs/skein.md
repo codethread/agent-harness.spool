@@ -81,8 +81,9 @@ User-facing Skein documentation lives in the source checkout under `docs/`; the 
 
 When working in this repository, also read the "Repo coordination workspace (.skein)" section of the root [`AGENTS.md`](../AGENTS.md).
 This repo-local guidance documents the installed runtime surface loaded from
-`.skein/init.clj` and `.skein/config.clj`: the shipped `skein.spools.workflow`
-and `skein.spools.devflow` spools, the `devflow-*` CLI ops that drive the
+`.skein/init.clj` and `.skein/config.clj`: the classpath `skein.spools.workflow`
+spool, the git-distributed `skein.spools.devflow` spool (approved via a
+`.skein/spools.edn` git coordinate), the `devflow-*` CLI ops that drive the
 feature lifecycle, feature-scoped queries, and the `agent-plan` pattern for
 lightweight work DAGs.
 
@@ -373,8 +374,9 @@ Reload clears weaver-lifetime spool sync state, module-use state, named queries,
 
 Skein treats runtime extensions as trusted Clojure code. Before writing your
 own, see the [shipped reference spools](../spools/README.md) — a
-workflow engine, a devflow lifecycle, and an ephemeral-strand helper that
-double as worked examples of spool design. A common layout is:
+workflow engine and an ephemeral-strand helper (plus the external,
+git-distributed devflow lifecycle) that double as worked examples of spool
+design. A common layout is:
 
 ```text
 workspace/
