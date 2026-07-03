@@ -40,13 +40,13 @@ of a pinned commit before the weaver will fetch or activate them.
 
 | Spool | Source | Contract doc | Purpose |
 |---|---|---|---|
-| `skein.spools.devflow` | [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool) | [devflow.md](./devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
+| `skein.spools.devflow` | [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool) | [devflow.md](https://github.com/codethread/devflow.spool/blob/de735e74b4bae2f9e9f5e005033c969ad103749c/devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
 
 This repo consumes devflow via a sha-pinned `:git/url`+`:git/sha` coordinate in
 `.skein/spools.edn`, activates it with `:required? true` in `.skein/init.clj`,
 and pins the same sha as a tools.deps git dep for the test JVM; developers
 override the coordinate with a gitignored `spools.local.edn` local root to work
-against a checkout. See [devflow.md](./devflow.md) for the full consumption
+against a checkout. See the devflow.spool repo contract doc for the full consumption
 recipe.
 
 ## Approved local-root examples
@@ -79,8 +79,7 @@ overrides, see [Writing shared spools](../docs/writing-shared-spools.md#publishi
 - The test suites drive every documented behavior against a real weaver
   runtime and double as executable examples:
   [`test/skein/spools/workflow_test.clj`](../test/skein/spools/workflow_test.clj),
-  [`test/skein/spools/devflow_test.clj`](../test/skein/spools/devflow_test.clj),
-  and the ephemeral cases in
+  the standalone devflow.spool test suite, and the ephemeral cases in
   [`test/skein/spools_test.clj`](../test/skein/spools_test.clj).
 
 ## Using and extending

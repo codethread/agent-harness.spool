@@ -1,7 +1,7 @@
 (ns skein.spools.test-support
   "Shared fixtures for spool tests: disposable temp config-dir
   workspaces and a started weaver runtime wrapper, used by skein.spools-test,
-  skein.spools.workflow-test, and skein.spools.devflow-test."
+  and skein.spools.workflow-test."
   (:require [clojure.java.io :as io]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.config :as daemon-config]

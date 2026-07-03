@@ -11,8 +11,7 @@
 (def parallel-namespaces
   "Test namespaces that are safe to run concurrently, one namespace per worker."
   ['skein.core.db-test 'skein.plugin-test 'skein.relations-test
-   'skein.spools.bobbin-test 'skein.spools.carder-test
-   'skein.spools.devflow-test 'skein.spools.selvage-test 'skein.guild-test
+   'skein.spools.bobbin-test 'skein.spools.carder-test 'skein.spools.selvage-test 'skein.guild-test
    'skein.agents-test 'skein.treadle-test 'skein.test.alpha-test])
 
 (def serial-namespaces
