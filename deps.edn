@@ -9,6 +9,11 @@
         com.bhauman/rebel-readline {:mvn/version "0.1.5"}}
  :aliases
  {:test {:extra-paths ["test" "spools/shuttle/src" "spools/agents/src" "spools/chime/src"]
+         ;; devflow is a git-distributed spool (the weaver consumes it via the
+         ;; .skein/spools.edn coordinate); tests pin the same sha for the JVM classpath.
+         :extra-deps {io.github.codethread/devflow.spool
+                      {:git/url "https://github.com/codethread/devflow.spool.git"
+                       :git/sha "9dbd6a20eab7ca54e127a123d1d90b33e0424989"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "skein.test-runner"]}
   :repl {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}

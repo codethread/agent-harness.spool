@@ -141,3 +141,13 @@ Outcome: Migrate the weaver-world library-author-style cases `daemon-init-runs-w
 
 - All eight tasks complete; no cut scope. Feature-local deltas were merged into the root specs (`daemon-runtime.md`, `repl-api.md`, `cli.md`) and marked Merged. RFC-005 archived with this feature as implemented, together with its five 2026-06-26 spikes (the only occupants of `devflow/spikes/`).
 - Backlog outcomes: `wbs6r` done; `nq2pg` done (satisfied by `docs/library-authoring.md`); `sh835` closed as merged into `wbs6r` scope; `emsff` stays in Refinement as the post-ship follow-up RFC-005.REC6 anticipated.
+
+### LAT-PLAN-001.DN8 Follow-up from devflow extraction — 2026-07-03
+
+- The spool-git-distribution/devflow-extraction work added
+  `skein.spools.test-support/spool-checkout-root` (resolve a spool's checkout
+  root from a classpath source file, gitlib or local override) so the repo
+  config test can approve the extracted devflow spool offline. Dependency-code
+  resolution helpers like this belong in `skein.test.alpha` once this feature's
+  helper namespace ships — promote it (and migrate the test-support caller)
+  when branches converge.

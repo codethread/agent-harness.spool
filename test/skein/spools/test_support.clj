@@ -7,6 +7,24 @@
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]))
 
+(defn spool-checkout-root
+  "Resolve the checkout root of a spool from one of its classpath source files.
+
+  `resource-path` is the spool source's classpath-relative path (e.g.
+  \"skein/spools/devflow.clj\"). The returned root is the directory holding the
+  spool's `src/`, whichever checkout backs the classpath — a tools.deps gitlib
+  procurement or a developer's local override. Fails loudly when the resource
+  is not on the classpath."
+  [resource-path]
+  (let [resource (io/resource resource-path)]
+    (when-not resource
+      (throw (ex-info "Spool source not on the test classpath"
+                      {:resource resource-path})))
+    (let [segments (inc (count (clojure.string/split resource-path #"/")))]
+      (reduce (fn [f _] (.getParentFile f))
+              (io/file (.toURI resource))
+              (range segments)))))
+
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")

@@ -2,4 +2,6 @@
           skein.spools/agents {:local/root "../spools/agents"}
           skein.spools/chime {:local/root "../spools/chime"}
           skein.spools/backlog {:local/root "../spools/backlog"}
-          skein.macros/macros {:local/root "spools/macros"}}}
+          skein.macros/macros {:local/root "spools/macros"}
+          codethread/devflow {:git/url "https://github.com/codethread/devflow.spool.git"
+                              :git/sha "9dbd6a20eab7ca54e127a123d1d90b33e0424989"}}}
