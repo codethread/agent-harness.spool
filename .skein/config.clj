@@ -864,7 +864,20 @@
    (shuttle/defalias! :build
      {:alias-of :claude
       :extra-args ["--model" "opus"]
-      :doc "Claude Opus: feature building, reviews, and council seats."})])
+      :doc "Claude Opus: feature building, reviews, and council seats."})
+   ;; GPT seats for cross-vendor validation. Routing policy: build (opus) is
+   ;; favoured for anything prose/docs-heavy, but never signs off its own
+   ;; work — sign-off review of opus-authored output always includes a GPT
+   ;; harness. review-gpt is the standing reviewer seat; hard-gpt is for the
+   ;; occasional difficult implementation task that wants a non-Claude model.
+   (shuttle/defalias! :review-gpt
+     {:alias-of :pi
+      :extra-args ["--provider" "openai" "--model" "gpt-5.4" "--thinking" "high"]
+      :doc "GPT-5.4 high reasoning via pi: independent review/validation seat; required sign-off reviewer for opus-authored docs work."})
+   (shuttle/defalias! :hard-gpt
+     {:alias-of :codex
+      :extra-args ["-m" "gpt-5.5" "-c" "model_reasoning_effort=medium"]
+      :doc "GPT-5.5 medium reasoning via codex exec: occasional difficult implementation tasks needing a second frontier model."})])
 
 (defn install!
   "Install repo-local Skein runtime configuration."
