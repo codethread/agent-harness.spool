@@ -4,17 +4,19 @@ This repo's `.skein` world is thin glue over the shipped reference spools.
 `.skein/init.clj` activates `skein.spools.ephemeral`, `skein.spools.workflow`,
 and `skein.spools.devflow` from the weaver classpath, plus
 `skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from
-the approved `spools/shuttle` / `spools/agents` local roots and
-`skein.spools.chime` from the approved `spools/chime` local root. Together, the
-installed spools and `.skein/config.clj` register:
+the approved `spools/shuttle` / `spools/agents` local roots,
+`skein.spools.chime` from the approved `spools/chime` local root, and
+`skein.spools.backlog` from the approved `spools/backlog` local root. Together,
+the installed spools and `.skein/config.clj` register:
 
-- ops: `agent`, `devflow-start`, `devflow-next`, `devflow-choices`,
-  `devflow-choose`, `devflow-complete`, `devflow-advance`,
-  `devflow-describe`, `devflow-history`, `devflow-archive`,
-  `devflow-status`, `workflow-runs`, `current-dags`, `flow-await`,
-  `flow-status`, `devflow-conventions`
-- queries: `work`, `feature-active`, `feature-work`, `feature-owner-work`,
-  `feature-run`, `workflow-runs`, `devflow-runs`, `agent-failures`
+- ops: `agent`, `backlog`, `devflow-start`, `devflow-next`,
+  `devflow-choices`, `devflow-choose`, `devflow-complete`,
+  `devflow-advance`, `devflow-describe`, `devflow-history`,
+  `devflow-archive`, `devflow-status`, `workflow-runs`, `current-dags`,
+  `flow-await`, `flow-status`, `devflow-conventions`
+- queries: `work`, `backlog-items`, `backlog-unstarted`, `feature-active`,
+  `feature-work`, `feature-owner-work`, `feature-run`, `workflow-runs`,
+  `devflow-runs`, `agent-failures`
 - patterns: `agent-plan`, `delegate-pipeline`
 - shuttle harness aliases: `pi-main` (delegation default), plus claude tiers
   matched to roles — `explore` (haiku: fan-out search/read-only recon),
@@ -93,6 +95,30 @@ strand list --query feature-run --param feature=<feature>
 `work` is the default repo-local ready query for agents: it keeps normal tasks,
 workflow steps, and checkpoints visible, but hides bookkeeping strands whose
 `workflow/role` is `molecule`, `procedure`, or `digest`.
+
+## Backlog convention
+
+`BACKLOG.md` is the repo's Git-visible feature queue. New feature requests that
+should survive the current conversation go through the backlog helper first:
+
+```sh
+strand op backlog add "Build the thing; see devflow/rfcs/..."
+```
+
+The helper creates a backlog item strand and appends a Markdown checkbox row:
+
+```md
+- [ ] `<strand-id>` Build the thing; see devflow/rfcs/...
+```
+
+Agents asked to "pick up the next backlog item" should run
+`strand op backlog next`, claim the returned id with `strand op backlog claim
+<id> --owner <name> --branch <branch> --worktree <path>`, then create feature
+plans, devflow runs, or task DAGs under that backlog strand using `parent-of`.
+The backlog strand is the parent/audit root; child strands are the executable
+work. Finish with `strand op backlog finish <id>` after merge, archive, or
+explicit abandonment, and run `strand op backlog sync` when checking for drift
+between `BACKLOG.md` and the strand graph.
 
 ## Custom workflows
 

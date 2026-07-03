@@ -516,8 +516,12 @@
              :purpose "Feature lifecycle (intake -> proposal -> spec-plan -> tasks/implementation) keyed by feature name."}
             {:namespace "skein.spools.ephemeral"
              :doc "spools/ephemeral.md"
-             :purpose "Temporary parent-owned strands burned via a userland attribute."}]
-   :ops [{:name "devflow-start" :usage "strand op devflow-start <feature> [required|already-in-worktree-ok]"}
+             :purpose "Temporary parent-owned strands burned via a userland attribute."}
+            {:namespace "skein.spools.backlog"
+             :doc "spools/backlog.md"
+             :purpose "BACKLOG.md feature queue backed by backlog item strands."}]
+   :ops [{:name "backlog" :usage "strand op backlog <about|add|next|claim|finish|sync> ..."}
+         {:name "devflow-start" :usage "strand op devflow-start <feature> [required|already-in-worktree-ok]"}
          {:name "devflow-next" :usage "strand op devflow-next <feature>"}
          {:name "devflow-choices" :usage "strand op devflow-choices <feature> [step=<id>]"}
          {:name "devflow-choose" :usage "strand op devflow-choose <feature> <choice> [json-input] [step=<id>]"}
@@ -536,7 +540,11 @@
                :purpose "Create a feature strand plus task/review children for agent work; now shipped by skein.spools.agents, not this config."}
               {:name "delegate-pipeline"
                :purpose "Sequential chain-loop workflow of subagent gates with optional acceptance checkpoint."}]
-   :queries [{:name "feature-active"
+   :queries [{:name "backlog-items"
+              :usage "strand list --query backlog-items"}
+             {:name "backlog-unstarted"
+              :usage "strand ready --query backlog-unstarted"}
+             {:name "feature-active"
               :usage "strand list --query feature-active --param feature=<feature>"}
              {:name "feature-work"
               :usage "strand ready --query feature-work --param feature=<feature>"}

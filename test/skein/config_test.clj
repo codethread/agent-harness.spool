@@ -53,18 +53,20 @@
   (.mkdirs (io/file target))
   (doseq [name ["init.clj" "config.clj" "spools.edn"]]
     (io/copy (io/file ".skein" name) (io/file target name)))
-  ;; The shipped spools.edn approves spools/shuttle, spools/agents, and
-  ;; spools/chime relative to the config dir, which does not resolve from a
-  ;; copy. Rewrite it to the repo's canonical spool roots so the whole test
-  ;; JVM syncs one root per lib (tools.deps add-libs state is JVM-global; see
-  ;; skein.test-runner's ordering note).
+  ;; The shipped spools.edn approves local roots relative to the config dir,
+  ;; which does not resolve from a copy. Rewrite it to the repo's canonical
+  ;; spool roots so the whole test JVM syncs one root per lib
+  ;; (tools.deps add-libs state is JVM-global; see skein.test-runner's
+  ;; ordering note).
   (spit (io/file target "spools.edn")
         (pr-str {:spools {'skein.spools/shuttle
                           {:local/root (.getCanonicalPath (io/file "spools/shuttle"))}
                           'skein.spools/agents
                           {:local/root (.getCanonicalPath (io/file "spools/agents"))}
                           'skein.spools/chime
-                          {:local/root (.getCanonicalPath (io/file "spools/chime"))}}}))
+                          {:local/root (.getCanonicalPath (io/file "spools/chime"))}
+                          'skein.spools/backlog
+                          {:local/root (.getCanonicalPath (io/file "spools/backlog"))}}}))
   ;; The shipped config leaves chime's notifier to each developer's personal
   ;; init.local.clj. Bind an inert command through that same overlay hook
   ;; (loaded after init.clj on startup and on every reload) so the test also
@@ -96,10 +98,10 @@
 (defn- assert-config-registrations
   "Assert the repo-local query/op/pattern registrations are present."
   [rt]
-  (doseq [query-name ["feature-active" "feature-work" "feature-owner-work"
-                      "feature-run" "workflow-runs" "devflow-runs" "work"]]
+  (doseq [query-name ["backlog-items" "backlog-unstarted" "feature-active" "feature-work"
+                      "feature-owner-work" "feature-run" "workflow-runs" "devflow-runs" "work"]]
     (is (contains? (api/queries rt) query-name)))
-  (doseq [op-name ["current-dags" "devflow-start" "devflow-next" "devflow-choices"
+  (doseq [op-name ["backlog" "current-dags" "devflow-start" "devflow-next" "devflow-choices"
                    "devflow-choose" "devflow-complete" "devflow-advance"
                    "devflow-describe" "devflow-history" "devflow-archive"
                    "devflow-status" "workflow-runs" "devflow-conventions"

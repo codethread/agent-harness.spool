@@ -49,6 +49,7 @@ as the worked example of authoring your own spool
 | `skein.spools.agents` | [agents/README.md](./agents/README.md) | Cross-harness subagent surface over shuttle: the `strand op agent` verbs, the `agent-plan` weave pattern, delegation/retry/status, and the worker + coordinator guidance. |
 | `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
 | `skein.spools.chime` | [chime/README.md](./chime/README.md) | Notification engine: watches graph mutations, evaluates user-registered rules, and sends matches through a user-bound local notifier command. |
+| `skein.spools.backlog` | [backlog.md](./backlog.md) | Repo-local `BACKLOG.md` feature queue backed by backlog item strands and `strand op backlog`. |
 
 ## Reference examples
 

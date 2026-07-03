@@ -44,6 +44,11 @@
    :spools ['skein.spools/chime]
    :call 'skein.spools.chime/install!
    :required? true})
+(runtime-alpha/use! runtime :skein/spools-backlog
+  {:ns 'skein.spools.backlog
+   :spools ['skein.spools/backlog]
+   :call 'skein.spools.backlog/install!
+   :required? true})
 (runtime-alpha/use! runtime :config
   {:file "config.clj"
    :after [:skein/spools-ephemeral :skein/spools-workflow :skein/spools-devflow
