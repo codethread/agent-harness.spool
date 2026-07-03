@@ -38,7 +38,7 @@ _No active items currently listed here._
 - [x] `8kisd` Investigate refinement backlog items: audited refinement entries for current relevance; results synthesized from delegated run `4z4f9`. Outdated delegated-agent failure visibility item was removed; retained items now carry notes.
 - [x] `h5lcx` Decide scheduler durable wake storage shape: delegated run `osia1` recommended dedicated weaver-owned SQLite storage; decision recorded in `devflow/rfcs/2026-06-29-weaver-scheduler.md`.
   - amend: user does not agree, veto
-- [ ] `r4268` Rebase spool-git-distribution + devflow-extraction onto main, revalidate, HITL merge sign-off (gate for all fold-in work)
+- [x] `r4268` Rebase spool-git-distribution + devflow-extraction onto main, revalidate, HITL merge sign-off (gate for all fold-in work)
 - [ ] `fyu6x` Docs pass: git spool distribution + devflow extraction (spools/README, devflow.md banner, root AGENTS.md coordination section, docs/skein.md, writing-shared-spools link)
 - [ ] `16u3p` Promote spool-checkout-root from skein.spools.test-support into skein.test.alpha (LAT-PLAN-001.DN3)
 - [ ] `sjd2m` Make devflow.spool self-hosting: own test suite (skein.test.alpha tiers) + contract doc, resync dual sha pins in skein-src
