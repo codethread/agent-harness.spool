@@ -17,6 +17,7 @@
 (defonce ^:private rule-registry (atom {}))
 (defonce ^:private seen-notifications (atom #{}))
 (defonce ^:private failure-log (atom []))
+(defonce ^:private scanned-batch-ids (atom []))
 
 (def ^:dynamic *runtime*
   "Runtime captured for asynchronous notifier worker threads."
@@ -54,9 +55,10 @@
   @failure-log)
 
 (defn reset-seen!
-  "Clear per-weaver notification deduplication state."
+  "Clear per-weaver notification deduplication and batch-scan state."
   []
   (reset! seen-notifications #{})
+  (reset! scanned-batch-ids [])
   {:seen 0})
 
 (defn- validate-notifier! [binding]
@@ -185,18 +187,35 @@
 (defn- ready-id-set []
   (set (map :id (api/ready (rt)))))
 
+;; batch/applied and its per-strand fanout share a :batch/id, and weave emits
+;; batch/applied with no fanout, so scan-once-per-batch keeps both correctness
+;; and cost bounded
+(def ^:private scanned-batch-memory 64)
+
+(defn- already-scanned-batch? [event]
+  (when-let [batch-id (:batch/id event)]
+    (let [[old _] (swap-vals! scanned-batch-ids
+                              (fn [ids]
+                                (if (some #(= batch-id %) ids)
+                                  ids
+                                  (vec (take-last scanned-batch-memory (conj ids batch-id))))))]
+      (boolean (some #(= batch-id %) old)))))
+
 (defn- checkpoint-hitl? [strand]
   (let [value (attr strand :workflow/hitl)]
     (and (= "checkpoint" (attr strand :workflow/role))
          (or (= true value) (= "true" value)))))
 
 (defn hitl-checkpoint-ready
-  "Return a notification when a HITL checkpoint strand is currently ready."
-  [{:keys [strand]}]
+  "Return a notification when a HITL checkpoint strand is currently ready.
+
+  Reads the scan-shared `:ready-ids` set so readiness is computed once per
+  scan rather than once per candidate strand."
+  [{:keys [strand ready-ids]}]
   (when (and strand
              (= "active" (:state strand))
              (checkpoint-hitl? strand)
-             (contains? (ready-id-set) (:id strand)))
+             (contains? (or ready-ids (ready-id-set)) (:id strand)))
     {:title (str "HITL checkpoint ready: " (:title strand))
      :body (str "Checkpoint " (:id strand) " is ready for human attention.")}))
 
@@ -221,34 +240,46 @@
   (defrule! :agent-failure 'skein.spools.chime/agent-failure)
   (defrule! :treadle-error 'skein.spools.chime/treadle-error))
 
-(defn- dispatch-rule! [event strand {:keys [name fn]}]
-  (let [seen-key [name (:id strand)]]
-    (when-not (contains? @seen-notifications seen-key)
-      (let [rule-fn @(resolve-rule-fn fn)
-            notification (try
-                           (when-let [notification (rule-fn {:event event :strand strand})]
-                             (validate-notification! notification))
-                           (catch Throwable t
-                             (record-failure! {:kind :rule
-                                               :rule name
-                                               :strand (:id strand)
-                                               :message (ex-message t)
-                                               :data (ex-data t)})
-                             nil))]
-        (when notification
-          (swap! seen-notifications conj seen-key)
-          (notify! notification))))))
+(defn- dispatch-rule! [context strand {:keys [name fn]}]
+  (let [seen-key [name (:id strand)]
+        rule-fn @(resolve-rule-fn fn)
+        notification (try
+                       (when-let [notification (rule-fn (assoc context :strand strand))]
+                         (validate-notification! notification))
+                       (catch Throwable t
+                         (record-failure! {:kind :rule
+                                           :rule name
+                                           :strand (:id strand)
+                                           :message (ex-message t)
+                                           :data (ex-data t)})
+                         nil))]
+    (if notification
+      (when-not (contains? @seen-notifications seen-key)
+        ;; mark seen only when the notifier process actually started, so a
+        ;; missing or failing notifier does not permanently swallow the alert
+        (when (= :started (:status (notify! notification)))
+          (swap! seen-notifications conj seen-key)))
+      ;; the condition no longer holds: re-arm so a later recurrence
+      ;; (e.g. a checkpoint blocked and made ready again) notifies again
+      (swap! seen-notifications disj seen-key))))
 
 (defn scan!
-  "Evaluate registered rules against currently affected strands."
+  "Evaluate registered rules against currently affected strands.
+
+  Rules receive `{:event .. :strand .. :ready-ids #{..}}`; `:ready-ids` is
+  computed once per scan. Batch events and their per-strand fanout share a
+  `:batch/id`, and only the first event of a batch triggers a scan."
   ([event]
-   (let [runtime (rt)]
-     (binding [*runtime* runtime]
-       (let [strands (affected-strands event)]
-         (doseq [strand strands
-                 rule (vals @rule-registry)]
-           (dispatch-rule! event strand rule))
-         {:scanned (count strands) :rules (count @rule-registry)}))))
+   (if (already-scanned-batch? event)
+     {:scanned 0 :rules (count @rule-registry) :skipped :batch/already-scanned}
+     (let [runtime (rt)]
+       (binding [*runtime* runtime]
+         (let [strands (affected-strands event)
+               context {:event event :ready-ids (ready-id-set)}]
+           (doseq [strand strands
+                   rule (vals @rule-registry)]
+             (dispatch-rule! context strand rule))
+           {:scanned (count strands) :rules (count @rule-registry)})))))
   ([] (scan! {:event/type :manual/scan})))
 
 (defn on-event

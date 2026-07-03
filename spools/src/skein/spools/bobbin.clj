@@ -130,7 +130,10 @@
   ([strand-id opts]
    (let [include (validate-include! (:include opts))
          target (strand-by-id! strand-id)
-         section (fn [k f] (when (contains? include k) [k (f)]))]
+         ;; nil section values (a target with no workflow attrs) are dropped so
+         ;; consumers can detect workflow context by key presence
+         section (fn [k f] (when (contains? include k)
+                             (when-some [v (f)] [k v])))]
      (into {:bobbin/version 1
             :include (vec (filter include section-order))}
            (keep identity)

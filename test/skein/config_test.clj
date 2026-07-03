@@ -53,13 +53,23 @@
   (.mkdirs (io/file target))
   (doseq [name ["init.clj" "config.clj" "spools.edn"]]
     (io/copy (io/file ".skein" name) (io/file target name)))
-  ;; The shipped spools.edn approves spools/shuttle relative to the config dir,
-  ;; which does not resolve from a copy. Rewrite it to the repo's canonical
-  ;; spool root so the whole test JVM syncs one root for the lib (tools.deps
-  ;; add-libs state is JVM-global; see skein.test-runner's ordering note).
+  ;; The shipped spools.edn approves spools/shuttle and spools/chime relative
+  ;; to the config dir, which does not resolve from a copy. Rewrite it to the
+  ;; repo's canonical spool roots so the whole test JVM syncs one root per lib
+  ;; (tools.deps add-libs state is JVM-global; see skein.test-runner's
+  ;; ordering note).
   (spit (io/file target "spools.edn")
         (pr-str {:spools {'skein.spools/shuttle
-                          {:local/root (.getCanonicalPath (io/file "spools/shuttle"))}}})))
+                          {:local/root (.getCanonicalPath (io/file "spools/shuttle"))}
+                          'skein.spools/chime
+                          {:local/root (.getCanonicalPath (io/file "spools/chime"))}}}))
+  ;; config.clj binds chime's notifier to the real cc-notify command; overlay
+  ;; the personal init.local.clj hook (loaded after init.clj on startup and on
+  ;; every reload) so test-created HITL checkpoints do not raise desktop
+  ;; notifications on developer machines.
+  (spit (io/file target "init.local.clj")
+        (pr-str '(do (require '[skein.spools.chime :as chime])
+                     (chime/set-notifier! {:argv ["true"]})))))
 
 (defn- with-startup-config-runtime
   "Run f with an isolated runtime started through copied .skein/init.clj."

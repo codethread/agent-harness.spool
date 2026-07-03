@@ -69,10 +69,12 @@ Manual sends use the same path:
 
 ## Rules
 
-Rule functions receive a context map containing at least `:event` and `:strand`.
+Rule functions receive a context map containing at least `:event`, `:strand`,
+and `:ready-ids` (the set of ready strand ids, computed once per scan).
 Chime scans current strands after graph mutation events so readiness changes caused by
-another strand closing can be observed. Rule functions return nil for no notification
-or `{:title "..." :body "..."}` to send one.
+another strand closing can be observed; batch events and their per-strand fanout
+share a `:batch/id` and trigger only one scan. Rule functions return nil for no
+notification or `{:title "..." :body "..."}` to send one.
 
 ```clojure
 (chime/defrule! :my-rule 'my.workspace/rule-fn)
@@ -88,8 +90,12 @@ or `{:title "..." :body "..."}` to send one.
   `"exhausted"`; the body includes `shuttle/error` when present.
 - `:treadle-error` — a strand carrying `treadle/error`.
 
-Chime deduplicates notifications per `[rule strand]` for the weaver lifetime.
-Use `(chime/reset-seen!)` from tests or config to clear that memory.
+Chime deduplicates notifications per `[rule strand]` while the rule keeps
+matching: a strand is marked seen only after the notifier process starts, so a
+missing or failing notifier does not swallow the alert, and the mark clears when
+the rule stops matching so a recurrence (a checkpoint blocked and made ready
+again) notifies again. Use `(chime/reset-seen!)` from tests or config to clear
+that memory.
 
 Rule, notifier, and process failures are recorded by `(chime/failures)` and event
 handler failures remain visible through the Skein event failure surface.

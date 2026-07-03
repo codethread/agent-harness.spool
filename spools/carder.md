@@ -9,6 +9,14 @@ conditions as JSON-compatible data and mutates nothing.
 
 The name follows the textile metaphor: carding untangles fibers before spinning.
 
+`orphans`, `blocked-by-failure`, and `report` inspect `strand_edges` directly
+through the active runtime's datasource, because the public graph helpers
+expose relation-scoped traversal rather than a workspace-wide edge listing.
+They therefore require an **in-process weaver runtime** — trusted startup
+config, the weaver's own nREPL, or an in-process test runtime — and fail
+loudly with `ex-info` when none is active. `stale` composes only the public
+strand-listing surface.
+
 ## 2. Usage
 
 ```clojure

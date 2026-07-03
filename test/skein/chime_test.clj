@@ -167,6 +167,23 @@
           (chime/scan! {:strand/id (:id run)})
           (eventually #(> (count (re-seq #"flaky agent" (slurp out-file))) 1)))))))
 
+(deftest dedup-rearms-when-rule-stops-matching
+  (with-chime
+    (fn [rt config-dir]
+      (let [out-file (bind-file-notifier! config-dir)
+            run (api/add rt {:title "retried agent"
+                             :attributes {"shuttle/phase" "failed"
+                                          "shuttle/error" "first crash"}})]
+        (chime/scan! {:strand/id (:id run)})
+        (eventually #(file-contains? out-file "retried agent"))
+        ;; recovery clears the seen mark, so a later recurrence notifies again
+        (api/update rt (:id run) {:attributes {"shuttle/phase" "done"}})
+        (chime/scan! {:strand/id (:id run)})
+        (api/update rt (:id run) {:attributes {"shuttle/phase" "failed"
+                                               "shuttle/error" "second crash"}})
+        (chime/scan! {:strand/id (:id run)})
+        (eventually #(> (count (re-seq #"retried agent" (slurp out-file))) 1))))))
+
 (deftest rule-failures-are-recorded
   (with-chime
     (fn [rt _]
