@@ -712,6 +712,39 @@
               (is (= :already-available (:status result)))
               (is (= :cached (:fetch result))))))))))
 
+(deftest sync-git-concurrent-cache-publish-race-loads-winner-tree
+  (with-runtime
+    (fn [rt config-dir]
+      (let [cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_publish_race_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            sha "0123456789abcdef0123456789abcdef01234567"
+            url "file:///tmp/race-winner-supplies-cache"
+            lib 'demo/git-publish-race]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url url :git/sha sha}}}))
+            (let [cache-root (io/file cache-dir "skein" "spools" sha)
+                  original-checkout @#'api/checkout-git-spool!]
+              (try
+                (alter-var-root
+                 #'api/checkout-git-spool!
+                 (constantly
+                  (fn [_entry tmp]
+                    ;; The pre-check in materialize-git-spool! has already
+                    ;; missed. Simulate a concurrent winner publishing a valid,
+                    ;; non-empty tree immediately before this materializer's
+                    ;; atomic move, so the loser must treat the move failure as
+                    ;; a cache hit rather than :fetch-failed.
+                    (write-git-lib! cache-root ns-sym)
+                    (spit (io/file tmp "loser.txt") "loser"))))
+                (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+                  (is (= :loaded (:status result)))
+                  (is (= :cached (:fetch result)))
+                  (is (= :loaded (:status (runtime-alpha/use! rt :race/winner {:ns ns-sym :spools [lib]})))))
+                (finally
+                  (alter-var-root #'api/checkout-git-spool! (constantly original-checkout)))))))))))
+
 (deftest sync-rejects-deps-edn-paths-escaping-the-spool-root
   (with-runtime
     (fn [rt config-dir]
@@ -879,6 +912,27 @@
               (is (= :loaded (:status result)))
               (is (= :fetched (:fetch result)))
               (is (= (.getPath (io/file cache-dir "skein" "spools" sha "nested/spool")) (:root result))))))))))
+
+(deftest sync-git-deps-root-missing-after-fetch-keeps-fetch-outcome
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "missing-root-repo")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_missing_root_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            sha (init-git-repo! repo ns-sym)
+            lib 'demo/git-missing-root]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url (file-url repo)
+                                                          :git/sha sha
+                                                          :deps/root "missing/spool"}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :failed (:status result)))
+              (is (= :missing-root (:reason result)))
+              (is (= :fetched (:fetch result)))
+              (is (= (.getPath (io/file cache-dir "skein" "spools" sha "missing/spool"))
+                     (:root result))))))))))
 
 (defn- write-module-file! [config-dir relative-path content]
   (let [file (io/file config-dir relative-path)]

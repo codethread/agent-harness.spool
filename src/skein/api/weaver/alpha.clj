@@ -11,7 +11,7 @@
             [skein.core.query :as query])
   (:import [java.time Instant]
            [java.util UUID]
-           [java.nio.file FileVisitResult Files LinkOption SimpleFileVisitor StandardCopyOption]
+           [java.nio.file FileSystemException FileVisitResult Files LinkOption SimpleFileVisitor StandardCopyOption]
            [java.nio.file.attribute FileAttribute]))
 
 (defn- normalize-row
@@ -444,6 +444,22 @@
   (checked-git tmp "checkout" "--detach" "FETCH_HEAD")
   (delete-tree! (io/file tmp ".git")))
 
+(defn- move-git-spool-to-cache! [tmp cache-root]
+  (try
+    (Files/move (.toPath tmp) (.toPath cache-root)
+                (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+    :fetched
+    (catch FileSystemException t
+      ;; Concurrent materializers for the same pinned SHA can both fetch into
+      ;; temporary directories, then race to publish the content-addressed cache
+      ;; root. Platform-specific target-exists failures for non-empty
+      ;; directories all extend FileSystemException; if the winner left a usable
+      ;; tree, the loser has a cache hit. Otherwise preserve the move failure
+      ;; loudly.
+      (if (non-empty-directory? cache-root)
+        :cached
+        (throw t)))))
+
 (defn- materialize-git-spool! [entry]
   (let [cache-root (cache-root-file entry)]
     (if (non-empty-directory? cache-root)
@@ -456,9 +472,10 @@
           (when-let [_ (:git/tag entry)]
             (verify-git-tag! entry))
           (checkout-git-spool! entry tmp)
-          (Files/move (.toPath tmp) (.toPath cache-root)
-                      (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE]))
-          :fetched
+          (let [outcome (move-git-spool-to-cache! tmp cache-root)]
+            (when (= :cached outcome)
+              (delete-tree! tmp))
+            outcome)
           (catch Throwable t
             (delete-tree! tmp)
             (throw t)))))))
