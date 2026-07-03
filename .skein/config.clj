@@ -845,10 +845,14 @@
    ;; stderr), so :raw parses cleanly; --ephemeral skips session files the
    ;; disposable run never resumes. The bypass flag mirrors the shipped claude
    ;; harness: runs must reach the weaver socket outside any codex sandbox —
-   ;; redefine with --sandbox workspace-write to tighten.
+   ;; redefine with --sandbox workspace-write to tighten. Env inheritance must
+   ;; be explicit: codex's default shell_environment_policy strips the PATH
+   ;; entries that carry the strand/mill CLIs, leaving workers unable to reach
+   ;; the coordination surface.
    (shuttle/defharness! :codex
      {:argv ["codex" "exec" "--skip-git-repo-check" "--ephemeral" "--color" "never"
-             "--dangerously-bypass-approvals-and-sandbox"]
+             "--dangerously-bypass-approvals-and-sandbox"
+             "-c" "shell_environment_policy.inherit=all"]
       :parse :raw
       :doc "Codex CLI (gpt-5.5) headless; final message on stdout."})
    ;; claude tiers mirror how we use agents: haiku explores, sonnet does
