@@ -54,6 +54,137 @@ the wrong world or throws.
    forever, and holds a process-local runtime binding that is meaningless — and
    actively wrong — inside a reusable spool.
 
+## Publishing a shared spool with git distribution
+
+A shared spool can be published as an ordinary git repository and consumed from a
+workspace `spools.edn` by explicit approval of a pinned commit. The approving
+workspace chooses the coordinate symbol; that symbol is the consent handle used
+by manifests, unmet-need reports, and local overrides.
+
+A consumer pins the exact content they consent to run:
+
+```clojure
+{:spools
+ {acme/priority
+  {:git/url "https://github.com/acme/skein-priority-spool.git"
+   :git/sha "0123456789abcdef0123456789abcdef01234567"
+   :git/tag "v0.1.0"}}}
+```
+
+- `:git/sha` is the behavior contract: it must be exactly 40 lowercase hex
+  characters, and the weaver caches the fetched tree by sha.
+- `:git/tag` is an optional human-readable label. When a fetch occurs, the tag
+  must resolve to the same sha or sync records a `:tag-mismatch` failure. Cache
+  hits trust the sha and do not re-check the tag.
+- `:git/url` is passed to system `git` as-is, so users can choose HTTPS, SSH, or
+  `file://` transports that match their own credentials and trust model.
+- `:deps/root` is available for monorepos. It is a relative path inside the
+  checkout, with no leading `/`, `~`, or `..` segment:
+
+  ```clojure
+  {:spools
+   {acme/priority
+    {:git/url "https://github.com/acme/tooling.git"
+     :git/sha "0123456789abcdef0123456789abcdef01234567"
+     :git/tag "priority-v0.1.0"
+     :deps/root "spools/priority"}}}
+  ```
+
+After editing `spools.edn`, users run `sync!` and then activate modules with
+`use!` from trusted config or the REPL. Git coordinates and local roots share the
+same activation path once synced.
+
+```clojure
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime])
+
+(def rt (current/runtime))
+(runtime/sync! rt)
+(runtime/use! rt :acme/priority
+  {:ns 'acme.priority.alpha
+   :spools '[acme/priority]})
+```
+
+### Authoring `spool.edn`
+
+A shared spool root may include `spool.edn`. It is optional, but it gives agents
+and humans machine-readable facts without expanding the CLI surface:
+
+```clojure
+{:coordinate acme/priority
+ :provides [acme.priority.alpha]
+ :needs {acme/graph {:suggest {:git/url "https://github.com/acme/skein-graph-spool.git"}}
+         acme/audit nil}
+ :docs {acme.priority.alpha "Priority promotion helpers. Call public functions with runtime first."}}
+```
+
+The manifest grammar is deliberately small:
+
+- `:coordinate`, when present, must equal the approving coordinate. A mismatch
+  fails that spool's sync loudly.
+- `:provides` is a vector or set of namespace symbols. During `use!`, the weaver
+  verifies that each declared namespace can be required from the synced spool
+  classloader. A miss skips activation with `:provides-unloadable` (or throws for
+  `:required? true`).
+- `:needs` maps coordinate symbols to either `nil` or `{:suggest {:git/url
+  "..."}}`. A suggestion is a hint for an agent or human, not a resolver.
+- `:docs` is either one string or a map of namespace symbol to string.
+
+Unknown keys or malformed values make sync fail with `:manifest-invalid`; do not
+use the manifest as an unstructured metadata dump. Keep richer narrative docs in
+your README and use `spool.edn` only for data that helps composition.
+
+### Consent loop for needs
+
+Needs are intentionally not transitive package resolution. If `acme/priority`
+declares a need for `acme/graph`, the weaver never fetches `acme/graph` on its
+own. Instead:
+
+1. `runtime/sync!` records `:unmet-needs` on `acme/priority` when `acme/graph`
+   is not approved, or when it is approved but failed to sync.
+2. An agent or human reads the unmet need and any `:suggest` URL, proposes a
+   `spools.edn` addition with an explicit `:git/sha`, and asks the user to
+   approve it.
+3. The user approves by editing `spools.edn`.
+4. The user reruns `runtime/sync!`, then `runtime/use!`.
+
+Until the need is resolved, `runtime/use!` enforces it: activating a module
+whose spools carry unmet needs is skipped with `:reason :unmet-needs` (and
+throws under `:required? true`).
+
+That loop preserves the core rule: each coordinate is user-approved at a pinned
+sha before code is fetched or activated.
+
+### Local development overrides
+
+Use the same coordinate in shared `spools.edn` and gitignored
+`spools.local.edn` to develop against a checkout while other users stay pinned
+to the git sha. Local entries overlay shared entries by coordinate.
+
+Shared `spools.edn`:
+
+```clojure
+{:spools
+ {acme/priority
+  {:git/url "https://github.com/acme/skein-priority-spool.git"
+   :git/sha "0123456789abcdef0123456789abcdef01234567"
+   :git/tag "v0.1.0"}}}
+```
+
+Developer-only `spools.local.edn`:
+
+```clojure
+{:spools
+ {acme/priority
+  {:local/root "~/dev/projects/skein-priority-spool"}}}
+```
+
+The manifest is read from whichever effective root wins the overlay. In the
+example above, the developer's local checkout provides `spool.edn`; consumers
+without the override read the manifest from the cached git tree. `:deps/root` is
+git-only because a local root can already point directly at any subdirectory you
+want to use.
+
 ## The pattern pair
 
 ### A shared spool exposes explicit-runtime functions

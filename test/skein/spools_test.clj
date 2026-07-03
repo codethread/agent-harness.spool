@@ -3,6 +3,7 @@
   spools.local.edn reading, sync!, layered use!, reload!, event helper routing,
   daemon init, and the ephemeral helper spool."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [skein.core.client :as client]
             [skein.core.db-test :as db-test]
@@ -55,6 +56,14 @@
   {:kind :local
    :file (.getPath (io/file (.getCanonicalPath config-dir) "spools.local.edn"))})
 
+(defn- with-cache-base [cache-dir f]
+  (let [original @#'api/cache-base]
+    (try
+      (alter-var-root #'api/cache-base (constantly (fn [] cache-dir)))
+      (f)
+      (finally
+        (alter-var-root #'api/cache-base (constantly original))))))
+
 (defn- write-local-lib! [config-dir lib-name ns-sym]
   (let [root (io/file config-dir "spools" lib-name)
         ns-path (-> (str ns-sym)
@@ -65,6 +74,57 @@
     (spit src-file (str "(ns " ns-sym ")\n(defn marker [] :synced-lib-loaded)\n(defn event-handler [_] :handled)\n"))
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     root))
+
+(defn- write-spool-manifest! [root manifest]
+  (spit (io/file root "spool.edn") (pr-str manifest)))
+
+(defn- write-spool-ns! [root ns-sym content]
+  (let [ns-path (-> (str ns-sym)
+                    (.replace \- \_)
+                    (.replace \. java.io.File/separatorChar))
+        src-file (io/file root "src" (str ns-path ".clj"))]
+    (.mkdirs (.getParentFile src-file))
+    (spit src-file content)
+    src-file))
+
+(defn- run-git! [dir & args]
+  (let [process (-> (ProcessBuilder. (into-array String (cons "git" args)))
+                    (.directory dir)
+                    (.start))
+        stderr (future (slurp (.getErrorStream process)))
+        stdout (future (slurp (.getInputStream process)))
+        exit (.waitFor process)]
+    (when-not (zero? exit)
+      (throw (ex-info "git fixture command failed"
+                      {:args args :exit exit :stdout @stdout :stderr @stderr})))
+    @stdout))
+
+(defn- write-git-lib! [root ns-sym]
+  (let [ns-path (-> (str ns-sym)
+                    (.replace \- \_)
+                    (.replace \. java.io.File/separatorChar))
+        src-file (io/file root "src" (str ns-path ".clj"))]
+    (.mkdirs (.getParentFile src-file))
+    (spit src-file (str "(ns " ns-sym ")\n(defn marker [] :git-spool-loaded)\n"))
+    (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")))
+
+(defn- file-url [file]
+  (str "file://" (.getCanonicalPath file)))
+
+(defn- init-git-repo! [root ns-sym & {:keys [tag annotated-tag]}]
+  (.mkdirs root)
+  (run-git! root "init")
+  (run-git! root "config" "user.email" "skein-test@example.invalid")
+  (run-git! root "config" "user.name" "Skein Test")
+  (write-git-lib! root ns-sym)
+  (run-git! root "add" ".")
+  (run-git! root "commit" "-m" "fixture")
+  (let [sha (str/trim (run-git! root "rev-parse" "HEAD"))]
+    (when tag
+      (run-git! root "tag" tag))
+    (when annotated-tag
+      (run-git! root "tag" "-a" annotated-tag "-m" annotated-tag))
+    sha))
 
 (deftest approved-returns-empty-spools-when-files-are-missing
   (with-runtime
@@ -97,10 +157,12 @@
             local-root (io/file config-dir "spools" "local")]
         (write-spools! config-dir (pr-str {:spools {'demo/shared {:local/root "spools/shared"}}}))
         (write-local-spools! config-dir (pr-str {:spools {'demo/local {:local/root "spools/local"}}}))
-        (is (= {:spools {'demo/shared {:local/root "spools/shared"
+        (is (= {:spools {'demo/shared {:kind :local
+                                     :local/root "spools/shared"
                                      :root (.getCanonicalPath shared-root)
                                      :source (shared-source config-dir)}
-                       'demo/local {:local/root "spools/local"
+                       'demo/local {:kind :local
+                                    :local/root "spools/local"
                                     :root (.getCanonicalPath local-root)
                                     :source (local-source config-dir)}}}
                (runtime-alpha/approved rt)))))))
@@ -112,7 +174,8 @@
             local-root (io/file config-dir "spools" "local")]
         (write-spools! config-dir (pr-str {:spools {'demo/override {:local/root "spools/shared"}}}))
         (write-local-spools! config-dir (pr-str {:spools {'demo/override {:local/root "spools/local"}}}))
-        (is (= {:local/root "spools/local"
+        (is (= {:kind :local
+                :local/root "spools/local"
                 :root (.getCanonicalPath local-root)
                 :source (local-source config-dir)}
                (get-in (runtime-alpha/approved rt) [:spools 'demo/override])))
@@ -137,10 +200,12 @@
         (write-spools! config-dir
                      (pr-str {:spools {'demo/relative {:local/root "spools/demo"}
                                      'demo/absolute {:local/root (.getAbsolutePath absolute-root)}}}))
-        (is (= {:spools {'demo/absolute {:local/root (.getAbsolutePath absolute-root)
+        (is (= {:spools {'demo/absolute {:kind :local
+                                       :local/root (.getAbsolutePath absolute-root)
                                        :root (.getCanonicalPath absolute-root)
                                        :source (shared-source config-dir)}
-                       'demo/relative {:local/root "spools/demo"
+                       'demo/relative {:kind :local
+                                       :local/root "spools/demo"
                                        :root (.getCanonicalPath relative-root)
                                        :source (shared-source config-dir)}}}
                (runtime-alpha/approved rt)))))))
@@ -151,7 +216,8 @@
       (let [home (System/getProperty "user.home")
             home-root (io/file home "dev" "projects" "my-lib")]
         (write-spools! config-dir (pr-str {:spools {'demo/home {:local/root "~/dev/projects/my-lib"}}}))
-        (is (= {:spools {'demo/home {:local/root "~/dev/projects/my-lib"
+        (is (= {:spools {'demo/home {:kind :local
+                                   :local/root "~/dev/projects/my-lib"
                                    :root (.getCanonicalPath home-root)
                                    :source (shared-source config-dir)}}}
                (runtime-alpha/approved rt)))))))
@@ -165,7 +231,8 @@
         (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath target)
                                                 (make-array java.nio.file.attribute.FileAttribute 0))
         (write-spools! config-dir (pr-str {:spools {'demo/link {:local/root "spools/link"}}}))
-        (is (= {:spools {'demo/link {:local/root "spools/link"
+        (is (= {:spools {'demo/link {:kind :local
+                                   :local/root "spools/link"
                                    :root (.getCanonicalPath target)
                                    :source (shared-source config-dir)}}}
                (runtime-alpha/approved rt)))))))
@@ -175,10 +242,55 @@
     (fn [rt config-dir]
       (let [missing (io/file config-dir "spools" "missing")]
         (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}}}))
-        (is (= {:spools {'demo/missing {:local/root "spools/missing"
+        (is (= {:spools {'demo/missing {:kind :local
+                                      :local/root "spools/missing"
                                       :root (.getCanonicalPath missing)
                                       :source (shared-source config-dir)}}}
                (runtime-alpha/approved rt)))))))
+
+(deftest approved-normalizes-git-spools-with-cache-base-and-deps-root
+  (with-runtime
+    (fn [rt config-dir]
+      (let [cache-dir (io/file config-dir "cache")
+            sha "0123456789abcdef0123456789abcdef01234567"]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {'demo/git {:git/url "file:///tmp/repo"
+                                                                 :git/sha sha
+                                                                 :git/tag "v1"
+                                                                 :deps/root "nested/spool"}}}))
+            (is (= {:spools {'demo/git {:kind :git
+                                      :git/url "file:///tmp/repo"
+                                      :git/sha sha
+                                      :git/tag "v1"
+                                      :deps/root "nested/spool"
+                                      :root (.getPath (io/file cache-dir "skein" "spools" sha "nested/spool"))
+                                      :source (shared-source config-dir)}}}
+                   (runtime-alpha/approved rt)))))))))
+
+(deftest approved-rejects-malformed-git-spools
+  (with-runtime
+    (fn [rt config-dir]
+      (doseq [[label entry pattern data-keys]
+              [["absolute deps root" {:git/url "u" :git/sha "0123456789abcdef0123456789abcdef01234567" :deps/root "/abs"} #":deps/root" [:deps/root]]
+               ["parent deps root" {:git/url "u" :git/sha "0123456789abcdef0123456789abcdef01234567" :deps/root "a/../b"} #":deps/root" [:deps/root]]
+               ["deps root on local" {:local/root "spools/demo" :deps/root "src"} #"exactly one coordinate kind" [:entry]]
+               ["short sha" {:git/url "u" :git/sha "012345"} #":git/sha" [:git/sha]]
+               ["uppercase sha" {:git/url "u" :git/sha "0123456789abcdef0123456789abcdef0123456A"} #":git/sha" [:git/sha]]
+               ["non-hex sha" {:git/url "u" :git/sha "0123456789abcdef0123456789abcdef0123456g"} #":git/sha" [:git/sha]]
+               ["blank url" {:git/url " " :git/sha "0123456789abcdef0123456789abcdef01234567"} #":git/url" [:git/url]]
+               ["unknown key" {:git/url "u" :git/sha "0123456789abcdef0123456789abcdef01234567" :extra true} #"unknown keys" [:keys]]
+               ["mixed local and git" {:local/root "spools/demo" :git/url "u" :git/sha "0123456789abcdef0123456789abcdef01234567"} #"exactly one coordinate kind" [:entry]]]]
+        (testing label
+          (write-spools! config-dir (pr-str {:spools {'demo/lib entry}}))
+          (try
+            (runtime-alpha/approved rt)
+            (is false "expected approved spool validation to fail")
+            (catch clojure.lang.ExceptionInfo e
+              (is (re-find pattern (ex-message e)))
+              (doseq [k data-keys]
+                (is (contains? (ex-data e) k))))))))))
 
 (deftest ephemeral-spool-composes-public-helper-surfaces
   (is (= '#{skein.api.current.alpha skein.api.graph.alpha skein.api.weaver.alpha}
@@ -281,23 +393,183 @@
             root (write-local-lib! config-dir "demo" ns-sym)]
         (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/demo"}}}))
         (is (= {:spools {lib {:lib lib
+                            :kind :local
                             :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :loaded}}}
                (runtime-alpha/sync! rt)))
         (is (= {:spools {lib {:lib lib
+                            :kind :local
                             :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :loaded}}}
                (runtime-alpha/syncs rt)))
         (is (= {:spools {lib {:lib lib
+                            :kind :local
                             :local/root "spools/demo"
                             :root (.getCanonicalPath root)
                             :source (shared-source config-dir)
                             :status :already-available}}}
                (runtime-alpha/sync! rt)))))))
+
+(deftest sync-parses-optional-spool-manifest
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.manifest_" suffix))
+            lib (symbol (str "demo/manifest-" suffix))
+            root (write-local-lib! config-dir "manifest" ns-sym)
+            manifest {:coordinate lib
+                      :provides #{ns-sym}
+                      :needs {'demo/needed nil}
+                      :docs {ns-sym "docs"}}]
+        (write-spool-manifest! root manifest)
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/manifest"}}}))
+        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+          (is (= :loaded (:status result)))
+          (is (= {:coordinate lib
+                  :provides [ns-sym]
+                  :needs {'demo/needed nil}
+                  :docs {ns-sym "docs"}}
+                 (:manifest result)))
+          (is (= [{:lib 'demo/needed :reason :not-approved}]
+                 (:unmet-needs result))))))))
+
+(deftest sync-omits-manifest-key-when-spool-manifest-is-absent
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.no_manifest_" suffix))
+            lib (symbol (str "demo/no-manifest-" suffix))]
+        (write-local-lib! config-dir "no-manifest" ns-sym)
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/no-manifest"}}}))
+        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+          (is (= :loaded (:status result)))
+          (is (not (contains? result :manifest))))))))
+
+(deftest sync-fails-malformed-spool-manifests-loudly-without-loading-root
+  (with-runtime
+    (fn [rt config-dir]
+      (doseq [[label manifest]
+              [["non-map" []]
+               ["unknown key" {:extra true}]
+               ["bad coordinate" {:coordinate "demo/lib"}]
+               ["bad provides shape" {:provides 'demo.core}]
+               ["bad provides entry" {:provides ["demo.core"]}]
+               ["bad needs shape" {:needs []}]
+               ["bad need coordinate" {:needs {"demo/lib" nil}}]
+               ["bad need value" {:needs {'demo/lib true}}]
+               ["unknown suggestion key" {:needs {'demo/lib {:suggest {:git/url "u"} :extra true}}}]
+               ["blank suggestion url" {:needs {'demo/lib {:suggest {:git/url " "}}}}]
+               ["bad docs shape" {:docs []}]
+               ["bad docs key" {:docs {"demo.core" "docs"}}]
+               ["bad docs value" {:docs {'demo.core 1}}]]]
+        (testing label
+          (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+                ns-sym (symbol (str "demo.bad_manifest_" suffix))
+                lib (symbol (str "demo/bad-manifest-" suffix))
+                root (write-local-lib! config-dir (str "bad-manifest-" suffix) ns-sym)]
+            (write-spool-manifest! root manifest)
+            (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/bad-manifest-" suffix)}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :failed (:status result)))
+              (is (= :manifest-invalid (:reason result)))
+              (is (not (contains? result :manifest)))
+              (when (= label "non-map")
+                (is (= [] (:invalid-manifest result))))
+              (is (thrown? Exception (requiring-resolve (symbol (str ns-sym "/marker"))))))))))))
+
+(deftest sync-fails-coordinate-mismatched-spool-manifest
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.coordinate_mismatch_" suffix))
+            lib (symbol (str "demo/coordinate-mismatch-" suffix))
+            root (write-local-lib! config-dir "coordinate-mismatch" ns-sym)]
+        (write-spool-manifest! root {:coordinate 'demo/other})
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/coordinate-mismatch"}}}))
+        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+          (is (= :failed (:status result)))
+          (is (= :coordinate-mismatch (:reason result)))
+          (is (= lib (:expected result)))
+          (is (= 'demo/other (:actual result))))))))
+
+(deftest sync-reports-satisfied-and-unmet-manifest-needs
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            base-ns (symbol (str "demo.need_base_" suffix))
+            needing-ns (symbol (str "demo.need_consumer_" suffix))
+            failed-ns (symbol (str "demo.need_failed_" suffix))
+            base-lib (symbol (str "demo/need-base-" suffix))
+            needing-lib (symbol (str "demo/need-consumer-" suffix))
+            failed-lib (symbol (str "demo/need-failed-" suffix))
+            base-root (write-local-lib! config-dir (str "need-base-" suffix) base-ns)
+            needing-root (write-local-lib! config-dir (str "need-consumer-" suffix) needing-ns)
+            failed-root (write-local-lib! config-dir (str "need-failed-" suffix) failed-ns)]
+        (write-spool-manifest! base-root {:coordinate base-lib})
+        (write-spool-manifest! needing-root {:needs {base-lib nil
+                                                     'demo/unapproved {:suggest {:git/url "file:///tmp/suggested"}}
+                                                     failed-lib nil}})
+        (spit (io/file failed-root "deps.edn") "{:paths [}")
+        (write-spools! config-dir (pr-str {:spools {base-lib {:local/root (str "spools/need-base-" suffix)}
+                                                needing-lib {:local/root (str "spools/need-consumer-" suffix)}
+                                                failed-lib {:local/root (str "spools/need-failed-" suffix)}}}))
+        (let [results (:spools (runtime-alpha/sync! rt))]
+          (is (= :loaded (get-in results [base-lib :status])))
+          (is (= :loaded (get-in results [needing-lib :status])))
+          (is (= :failed (get-in results [failed-lib :status])))
+          (is (= #{{:lib 'demo/unapproved
+                    :reason :not-approved
+                    :suggest {:git/url "file:///tmp/suggested"}}
+                   {:lib failed-lib
+                    :reason :sync-failed}}
+                 (set (get-in results [needing-lib :unmet-needs])))))))))
+
+(deftest use-gates-on-manifest-unmet-needs-and-required-throws
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.unmet_gate_" suffix))
+            lib (symbol (str "demo/unmet-gate-" suffix))
+            root (write-local-lib! config-dir "unmet-gate" ns-sym)]
+        (write-spool-manifest! root {:needs {'demo/missing nil}})
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/unmet-gate"}}}))
+        (runtime-alpha/sync! rt)
+        (let [result (runtime-alpha/use! rt :unmet/gate {:ns ns-sym :spools [lib]})]
+          (is (= :skipped (:status result)))
+          (is (= :unmet-needs (:reason result)))
+          (is (= [{:lib 'demo/missing :reason :not-approved}] (:unmet-needs result))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Required module use was skipped"
+                              (runtime-alpha/use! rt :unmet/required {:ns ns-sym :spools [lib] :required? true})))))))
+
+(deftest use-verifies-manifest-provides-before-activation
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            good-ns (symbol (str "demo.provides_good_" suffix))
+            bad-ns (symbol (str "demo.provides_missing_" suffix))
+            good-lib (symbol (str "demo/provides-good-" suffix))
+            bad-lib (symbol (str "demo/provides-bad-" suffix))
+            good-root (write-local-lib! config-dir "provides-good" good-ns)
+            bad-root (write-local-lib! config-dir "provides-bad" good-ns)]
+        (write-spool-manifest! good-root {:provides [good-ns]})
+        (write-spool-manifest! bad-root {:provides [bad-ns]})
+        (write-spools! config-dir (pr-str {:spools {good-lib {:local/root "spools/provides-good"}
+                                                bad-lib {:local/root "spools/provides-bad"}}}))
+        (runtime-alpha/sync! rt)
+        (is (= :loaded (:status (runtime-alpha/use! rt :provides/good {:ns good-ns :spools [good-lib]}))))
+        (let [result (runtime-alpha/use! rt :provides/bad {:ns good-ns :spools [bad-lib]})]
+          (is (= :skipped (:status result)))
+          (is (= :provides-unloadable (:reason result)))
+          (is (= bad-ns (get-in result [:provides-unloadable :ns])))
+          (is (string? (get-in result [:provides-unloadable :message]))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Required module use was skipped"
+                              (runtime-alpha/use! rt :provides/required {:ns good-ns :spools [bad-lib] :required? true})))))))
 
 ;; Dogfoods skein.test.alpha for author-visible weaver-world behavior
 ;; (LAT-PLAN-001.PH6). Uses an explicit :root because synced local roots must
@@ -337,6 +609,7 @@
       (let [missing (io/file config-dir "spools" "missing")]
         (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}}}))
         (is (= {:spools {'demo/missing {:lib 'demo/missing
+                                      :kind :local
                                       :local/root "spools/missing"
                                       :root (.getCanonicalPath missing)
                                       :source (shared-source config-dir)
@@ -356,12 +629,13 @@
         (write-spools! config-dir (pr-str {:spools {'demo/bad-deps {:local/root "spools/bad-deps"}}}))
         (let [result (get-in (runtime-alpha/sync! rt) [:spools 'demo/bad-deps])]
           (is (= {:lib 'demo/bad-deps
+                  :kind :local
                   :local/root "spools/bad-deps"
                   :root (.getCanonicalPath root)
                   :source (shared-source config-dir)
                   :status :failed
                   :reason :runtime-add-failed}
-                 (select-keys result [:lib :local/root :root :source :status :reason])))
+                 (select-keys result [:lib :kind :local/root :root :source :status :reason])))
           (is (string? (:message result)))
           (is (string? (:class result))))))))
 
@@ -374,18 +648,237 @@
         (write-spools! config-dir (pr-str {:spools {'demo/missing {:local/root "spools/missing"}
                                                 'demo/not-dir {:local/root "spools/not-dir"}}}))
         (is (= {:spools {'demo/missing {:lib 'demo/missing
+                                      :kind :local
                                       :local/root "spools/missing"
                                       :root (.getCanonicalPath (io/file config-dir "spools" "missing"))
                                       :source (shared-source config-dir)
                                       :status :failed
                                       :reason :missing-root}
                        'demo/not-dir {:lib 'demo/not-dir
+                                      :kind :local
                                       :local/root "spools/not-dir"
                                       :root (.getCanonicalPath not-dir)
                                       :source (shared-source config-dir)
                                       :status :failed
                                       :reason :unreadable-root}}}
                (runtime-alpha/sync! rt)))))))
+
+(deftest sync-git-missing-root-outcome-is-kind-shaped
+  (with-runtime
+    (fn [rt config-dir]
+      (let [cache-dir (io/file config-dir "cache")
+            sha "0123456789abcdef0123456789abcdef01234567"]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {'demo/git {:git/url "file:///tmp/repo"
+                                                                 :git/sha sha
+                                                                 :git/tag "v1"
+                                                                 :deps/root "spool"}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools 'demo/git])]
+              (is (= {:lib 'demo/git
+                      :kind :git
+                      :git/url "file:///tmp/repo"
+                      :git/sha sha
+                      :git/tag "v1"
+                      :deps/root "spool"
+                      :root (.getPath (io/file cache-dir "skein" "spools" sha "spool"))
+                      :source (shared-source config-dir)
+                      :status :failed
+                      :reason :fetch-failed}
+                     (select-keys result [:lib :kind :git/url :git/sha :git/tag :deps/root :root :source :status :reason])))
+              (is (integer? (:exit result)))
+              (is (string? (:stderr result)))
+              (is (not (contains? result :local/root))))))))))
+
+(deftest sync-fetches-git-spool-and-uses-cache-hit-without-origin
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_fetch_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            sha (init-git-repo! repo ns-sym)
+            url (file-url repo)
+            lib 'demo/git-fetch]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url url :git/sha sha}}}))
+            (is (= :loaded (get-in (runtime-alpha/sync! rt) [:spools lib :status])))
+            (is (= :fetched (get-in (runtime-alpha/syncs rt) [:spools lib :fetch])))
+            (is (false? (.exists (io/file cache-dir "skein" "spools" sha ".git"))))
+            (delete-recursive repo)
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :already-available (:status result)))
+              (is (= :cached (:fetch result))))))))))
+
+(deftest sync-rejects-deps-edn-paths-escaping-the-spool-root
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.escape_" suffix))
+            lib (symbol (str "demo/escape-" suffix))
+            root (write-local-lib! config-dir (str "escape-" suffix) ns-sym)
+            outside (io/file config-dir "outside-src")]
+        (.mkdirs outside)
+        (spit (io/file root "deps.edn") (pr-str {:paths ["src" "../../outside-src"]}))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/escape-" suffix)}}}))
+        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+          (is (= :failed (:status result)))
+          (is (= :runtime-add-failed (:reason result)))
+          (is (re-find #"stay inside the spool root" (:message result))))))))
+
+(deftest sync-accepts-deps-edn-path-naming-the-spool-root-itself
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.rootpath_" suffix))
+            lib (symbol (str "demo/rootpath-" suffix))
+            root (write-local-lib! config-dir (str "rootpath-" suffix) ns-sym)]
+        (spit (io/file root "deps.edn") (pr-str {:paths ["." "src"]}))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/rootpath-" suffix)}}}))
+        (is (#{:loaded :already-available}
+             (get-in (runtime-alpha/sync! rt) [:spools lib :status])))))))
+
+(deftest sync-git-spool-rejects-transitive-deps
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_deps_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            _ (init-git-repo! repo ns-sym)
+            _ (spit (io/file repo "deps.edn") (pr-str {:paths ["src"] :deps {'org.example/lib {:mvn/version "1.0.0"}}}))
+            _ (run-git! repo "add" ".")
+            _ (run-git! repo "commit" "-m" "deps")
+            sha (str/trim (run-git! repo "rev-parse" "HEAD"))
+            lib 'demo/git-deps]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url (file-url repo) :git/sha sha}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :failed (:status result)))
+              (is (= :runtime-add-failed (:reason result)))
+              (is (re-find #"must not declare :deps" (:message result)))
+              (is (= :fetched (:fetch result))))))))))
+
+(deftest delete-tree-removes-symlinks-without-following-them
+  (let [base (.toFile (java.nio.file.Files/createTempDirectory "skein-delete-tree" (make-array java.nio.file.attribute.FileAttribute 0)))
+        outside (io/file base "outside")
+        outside-file (io/file outside "keep.txt")
+        tree (io/file base "tree")]
+    (try
+      (.mkdirs outside)
+      (spit outside-file "keep")
+      (.mkdirs tree)
+      (spit (io/file tree "inner.txt") "inner")
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file tree "link-out"))
+       (.toPath outside)
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (#'api/delete-tree! tree)
+      (is (false? (.exists tree)))
+      (is (true? (.exists outside-file)))
+      (finally
+        (delete-recursive base)))))
+
+(deftest sync-git-manifest-failure-keeps-fetch-outcome
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_bad_manifest_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            _ (init-git-repo! repo ns-sym)
+            _ (write-spool-manifest! repo [])
+            _ (run-git! repo "add" ".")
+            _ (run-git! repo "commit" "-m" "manifest")
+            sha (str/trim (run-git! repo "rev-parse" "HEAD"))
+            lib 'demo/git-bad-manifest]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url (file-url repo) :git/sha sha}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :failed (:status result)))
+              (is (= :manifest-invalid (:reason result)))
+              (is (= :fetched (:fetch result)))
+              (is (not (contains? result :manifest))))))))))
+
+(deftest sync-git-unknown-sha-is-fetch-failed
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            sha (init-git-repo! repo 'demo.unknown_sha)
+            unknown (apply str (repeat 40 \a))]
+        (is (not= sha unknown))
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {'demo/unknown {:git/url (file-url repo) :git/sha unknown}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools 'demo/unknown])]
+              (is (= :failed (:status result)))
+              (is (= :fetch-failed (:reason result)))
+              (is (integer? (:exit result)))
+              (is (string? (:stderr result))))))))))
+
+(deftest sync-git-tag-verification-loads-and-rejects-mismatch
+  (with-runtime
+    (fn [rt config-dir]
+      (let [matching-repo (io/file config-dir "matching-repo")
+            mismatching-repo (io/file config-dir "mismatching-repo")
+            cache-dir (io/file config-dir "cache")
+            matching-sha (init-git-repo! matching-repo 'demo.matching_tag :annotated-tag "v1")
+            mismatching-sha (init-git-repo! mismatching-repo 'demo.mismatching_tag :tag "v1")]
+        (spit (io/file mismatching-repo "extra.txt") "new")
+        (run-git! mismatching-repo "add" ".")
+        (run-git! mismatching-repo "commit" "-m" "second")
+        (let [new-sha (str/trim (run-git! mismatching-repo "rev-parse" "HEAD"))]
+          (with-cache-base
+            cache-dir
+            (fn []
+              (write-spools! config-dir (pr-str {:spools {'demo/matching {:git/url (file-url matching-repo)
+                                                                        :git/sha matching-sha
+                                                                        :git/tag "v1"}
+                                                          'demo/mismatching {:git/url (file-url mismatching-repo)
+                                                                           :git/sha new-sha
+                                                                           :git/tag "v1"}}}))
+              (let [results (:spools (runtime-alpha/sync! rt))]
+                (is (= :loaded (get-in results ['demo/matching :status])))
+                (is (= :fetched (get-in results ['demo/matching :fetch])))
+                (is (= :failed (get-in results ['demo/mismatching :status])))
+                (is (= :tag-mismatch (get-in results ['demo/mismatching :reason])))
+                (is (= new-sha (get-in results ['demo/mismatching :expected])))
+                (is (= mismatching-sha (get-in results ['demo/mismatching :actual])))
+                (is (false? (.exists (io/file cache-dir "skein" "spools" new-sha))))))))))))
+
+(deftest sync-git-deps-root-selects-monorepo-subdir
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "mono")
+            spool-root (io/file repo "nested" "spool")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_mono_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            sha (do
+                  (.mkdirs repo)
+                  (run-git! repo "init")
+                  (run-git! repo "config" "user.email" "skein-test@example.invalid")
+                  (run-git! repo "config" "user.name" "Skein Test")
+                  (write-git-lib! spool-root ns-sym)
+                  (spit (io/file repo "README.md") "root only")
+                  (run-git! repo "add" ".")
+                  (run-git! repo "commit" "-m" "monorepo")
+                  (str/trim (run-git! repo "rev-parse" "HEAD")))]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {'demo/mono {:git/url (file-url repo)
+                                                                 :git/sha sha
+                                                                 :deps/root "nested/spool"}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools 'demo/mono])]
+              (is (= :loaded (:status result)))
+              (is (= :fetched (:fetch result)))
+              (is (= (.getPath (io/file cache-dir "skein" "spools" sha "nested/spool")) (:root result))))))))))
 
 (defn- write-module-file! [config-dir relative-path content]
   (let [file (io/file config-dir relative-path)]

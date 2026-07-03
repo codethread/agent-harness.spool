@@ -41,7 +41,10 @@ that other code builds on ships on the classpath above; a spool that
 user's authority) or exists to exercise the userland distribution path sits
 here, behind the workspace's explicit `spools.edn` consent. They also serve
 as the worked example of authoring your own spool
-([docs/skein.md](../docs/skein.md#authoring-your-own-spool-code)).
+([docs/skein.md](../docs/skein.md#authoring-your-own-spool-code)). For
+publishing a spool for others by git coordinate, SHA-pinned approval,
+`spool.edn` manifests, unmet-need consent loops, and local development
+overrides, see [Writing shared spools](../docs/writing-shared-spools.md#publishing-a-shared-spool-with-git-distribution).
 
 | Spool | Contract doc | Purpose |
 |---|---|---|

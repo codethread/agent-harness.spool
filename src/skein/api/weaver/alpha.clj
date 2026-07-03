@@ -10,7 +10,9 @@
             [skein.core.weaver.runtime :as runtime]
             [skein.core.query :as query])
   (:import [java.time Instant]
-           [java.util UUID]))
+           [java.util UUID]
+           [java.nio.file FileVisitResult Files LinkOption SimpleFileVisitor StandardCopyOption]
+           [java.nio.file.attribute FileAttribute]))
 
 (defn- normalize-row
   "Decode JSON-backed row fields returned by persistence."
@@ -85,16 +87,67 @@
                    (io/file (config-dir runtime) expanded-path))]
     (.getCanonicalPath resolved)))
 
+(defn- cache-base
+  "Return Skein's cache base for git-backed spool materialization."
+  []
+  (io/file (let [xdg-cache-home (System/getenv "XDG_CACHE_HOME")]
+             (if (and (string? xdg-cache-home) (not (str/blank? xdg-cache-home)))
+               xdg-cache-home
+               (str (System/getProperty "user.home") java.io.File/separator ".cache")))))
+
+(def ^:private local-spool-keys #{:local/root})
+(def ^:private git-spool-keys #{:git/url :git/sha :git/tag :deps/root})
+(def ^:private approved-spool-keys (into local-spool-keys git-spool-keys))
+(def ^:private git-sha-pattern #"[0-9a-f]{40}")
+(def ^:private manifest-keys #{:coordinate :provides :needs :docs})
+(def ^:private need-suggestion-keys #{:suggest})
+(def ^:private suggest-keys #{:git/url})
+
+(defn- non-blank-string? [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn- deps-root-segments [deps-root]
+  (str/split deps-root #"/"))
+
+(defn- relative-deps-root? [deps-root]
+  (and (non-blank-string? deps-root)
+       (not (.isAbsolute (io/file deps-root)))
+       (not (str/starts-with? deps-root "~"))
+       (not (some #{".."} (deps-root-segments deps-root)))))
+
 (defn- validate-approved-spool-entry! [source lib entry]
   (when-not (symbol? lib)
     (throw (ex-info "Spool coordinate must be a symbol" (assoc source :lib lib))))
   (when-not (map? entry)
     (throw (ex-info "Spool entry must be a map" (assoc source :lib lib :entry entry))))
-  (when-let [unknown (seq (remove #{:local/root} (keys entry)))]
+  (when-let [unknown (seq (remove approved-spool-keys (keys entry)))]
     (throw (ex-info "Spool entry contains unknown keys" (assoc source :lib lib :keys (vec unknown)))))
-  (when-not (and (string? (:local/root entry)) (not (str/blank? (:local/root entry))))
-    (throw (ex-info "Spool entry requires non-blank string :local/root"
-                    (assoc source :lib lib :local/root (:local/root entry))))))
+  (let [local? (contains? entry :local/root)
+        git? (some #(contains? entry %) git-spool-keys)]
+    (when (and (not local?) (not git?))
+      (throw (ex-info "Spool entry requires non-blank string :local/root"
+                      (assoc source :lib lib :local/root (:local/root entry) :entry entry))))
+    (when (and local? git?)
+      (throw (ex-info "Spool entry requires exactly one coordinate kind"
+                      (assoc source :lib lib :entry entry))))
+    (if local?
+      (when-not (and (= local-spool-keys (set (keys entry)))
+                     (non-blank-string? (:local/root entry)))
+        (throw (ex-info "Spool entry requires non-blank string :local/root"
+                        (assoc source :lib lib :local/root (:local/root entry) :entry entry))))
+      (do
+        (when-not (non-blank-string? (:git/url entry))
+          (throw (ex-info "Git spool entry requires non-blank string :git/url"
+                          (assoc source :lib lib :git/url (:git/url entry)))))
+        (when-not (and (string? (:git/sha entry)) (re-matches git-sha-pattern (:git/sha entry)))
+          (throw (ex-info "Git spool entry requires 40 lowercase hex characters :git/sha"
+                          (assoc source :lib lib :git/sha (:git/sha entry)))))
+        (when (and (contains? entry :git/tag) (not (non-blank-string? (:git/tag entry))))
+          (throw (ex-info "Git spool entry :git/tag must be a non-blank string"
+                          (assoc source :lib lib :git/tag (:git/tag entry)))))
+        (when (and (contains? entry :deps/root) (not (relative-deps-root? (:deps/root entry))))
+          (throw (ex-info "Git spool entry :deps/root must be a relative path with no ~ or .. segments"
+                          (assoc source :lib lib :deps/root (:deps/root entry)))))))))
 
 (defn- normalize-approved-spools-file
   "Validate one approved-spool config file and resolve roots for this runtime."
@@ -108,9 +161,21 @@
   {:spools (into {}
                (map (fn [[lib entry]]
                       (validate-approved-spool-entry! source lib entry)
-                      [lib {:local/root (:local/root entry)
-                            :root (canonical-root runtime (:local/root entry))
-                            :source source}]))
+                      (if (contains? entry :local/root)
+                        [lib {:kind :local
+                              :local/root (:local/root entry)
+                              :root (canonical-root runtime (:local/root entry))
+                              :source source}]
+                        (let [cache-root (io/file (cache-base) "skein" "spools" (:git/sha entry))
+                              root (cond-> cache-root
+                                     (:deps/root entry) (io/file (:deps/root entry)))]
+                          [lib (cond-> {:kind :git
+                                        :git/url (:git/url entry)
+                                        :git/sha (:git/sha entry)
+                                        :root (.getPath root)
+                                        :source source}
+                                 (contains? entry :git/tag) (assoc :git/tag (:git/tag entry))
+                                 (contains? entry :deps/root) (assoc :deps/root (:deps/root entry)))]))))
                (:spools config))})
 
 (defn- approved-spools-file [runtime name kind]
@@ -157,24 +222,246 @@
   {:spools (merge (:spools (approved-spools-file runtime "spools.edn" :shared))
                   (:spools (approved-spools-file runtime "spools.local.edn" :local)))})
 
+(defn- spool-source-fields [entry]
+  (case (:kind entry)
+    :local (select-keys entry [:local/root])
+    :git (select-keys entry [:git/url :git/sha :git/tag :deps/root])))
+
+(defn- sync-result-base [lib entry]
+  (merge {:lib lib
+          :kind (:kind entry)
+          :root (:root entry)
+          :source (:source entry)}
+         (spool-source-fields entry)))
+
 (defn- sync-failed [lib entry reason data]
-  [lib (merge {:lib lib
-               :local/root (:local/root entry)
-               :root (:root entry)
-               :source (:source entry)
-               :status :failed
+  [lib (merge (sync-result-base lib entry)
+              {:status :failed
                :reason reason}
               data)])
+
+(defn- manifest-invalid [lib entry message data]
+  ;; Validator ex-data may carry :manifest (the invalid value) or :reason;
+  ;; :manifest must keep meaning "normalized manifest on success" and the
+  ;; outcome :reason must stay authoritative, so both are shielded here.
+  (let [data (cond-> (dissoc data :reason)
+               (contains? data :manifest)
+               (-> (assoc :invalid-manifest (:manifest data))
+                   (dissoc :manifest)))]
+    (sync-failed lib entry :manifest-invalid (merge {:message message} data))))
+
+(defn- coordinate-mismatch [lib entry actual]
+  (sync-failed lib entry :coordinate-mismatch {:expected lib :actual actual}))
+
+(defn- normalize-provides [provides]
+  (when-not (or (vector? provides) (set? provides))
+    (throw (ex-info "spool.edn :provides must be a vector or set" {:provides provides})))
+  (doseq [ns-sym provides]
+    (when-not (symbol? ns-sym)
+      (throw (ex-info "spool.edn :provides entries must be namespace symbols" {:ns ns-sym}))))
+  (vec (sort-by str provides)))
+
+(defn- normalize-need-suggestion [need]
+  (cond
+    (nil? need) nil
+    (map? need)
+    (do
+      (when-let [unknown (seq (remove need-suggestion-keys (keys need)))]
+        (throw (ex-info "spool.edn :needs entries contain unknown keys" {:keys (vec unknown) :need need})))
+      (let [suggest (:suggest need)]
+        (when-not (and (map? suggest) (= suggest-keys (set (keys suggest))) (non-blank-string? (:git/url suggest)))
+          (throw (ex-info "spool.edn :needs :suggest requires non-blank string :git/url" {:suggest suggest})))
+        {:suggest {:git/url (:git/url suggest)}}))
+    :else
+    (throw (ex-info "spool.edn :needs values must be nil or suggestion maps" {:need need}))))
+
+(defn- normalize-needs [needs]
+  (when-not (map? needs)
+    (throw (ex-info "spool.edn :needs must be a map" {:needs needs})))
+  (into (sorted-map)
+        (map (fn [[need-lib need]]
+               (when-not (symbol? need-lib)
+                 (throw (ex-info "spool.edn :needs keys must be coordinate symbols" {:lib need-lib})))
+               [need-lib (normalize-need-suggestion need)]))
+        needs))
+
+(defn- normalize-docs [docs]
+  (cond
+    (string? docs) docs
+    (map? docs) (into (sorted-map)
+                      (map (fn [[ns-sym doc]]
+                             (when-not (symbol? ns-sym)
+                               (throw (ex-info "spool.edn :docs keys must be namespace symbols" {:ns ns-sym})))
+                             (when-not (string? doc)
+                               (throw (ex-info "spool.edn :docs values must be strings" {:ns ns-sym :doc doc})))
+                             [ns-sym doc]))
+                      docs)
+    :else (throw (ex-info "spool.edn :docs must be a string or namespace doc map" {:docs docs}))))
+
+(defn- normalize-manifest! [lib manifest]
+  (when-not (map? manifest)
+    (throw (ex-info "spool.edn must contain a map" {:manifest manifest})))
+  (when-let [unknown (seq (remove manifest-keys (keys manifest)))]
+    (throw (ex-info "spool.edn contains unknown keys" {:keys (vec unknown)})))
+  (when (and (contains? manifest :coordinate) (not (symbol? (:coordinate manifest))))
+    (throw (ex-info "spool.edn :coordinate must be a symbol" {:coordinate (:coordinate manifest)})))
+  (when (and (contains? manifest :coordinate) (not= lib (:coordinate manifest)))
+    (throw (ex-info "spool.edn :coordinate does not match approved coordinate"
+                    {:reason :coordinate-mismatch
+                     :expected lib
+                     :actual (:coordinate manifest)})))
+  (cond-> {}
+    (contains? manifest :coordinate) (assoc :coordinate (:coordinate manifest))
+    (contains? manifest :provides) (assoc :provides (normalize-provides (:provides manifest)))
+    (contains? manifest :needs) (assoc :needs (normalize-needs (:needs manifest)))
+    (contains? manifest :docs) (assoc :docs (normalize-docs (:docs manifest)))))
+
+(defn- read-spool-manifest [lib entry root]
+  (let [manifest-file (io/file root "spool.edn")]
+    (when (.isFile manifest-file)
+      (try
+        {:manifest (normalize-manifest! lib (query/read-edn-file manifest-file))}
+        (catch clojure.lang.ExceptionInfo e
+          (if (= :coordinate-mismatch (:reason (ex-data e)))
+            {:failed (coordinate-mismatch lib entry (:actual (ex-data e)))}
+            {:failed (manifest-invalid lib entry (ex-message e) (ex-data e))}))
+        (catch Throwable t
+          {:failed (manifest-invalid lib entry (or (ex-message t) "spool.edn is malformed or unreadable")
+                                     {:class (str (class t))})})))))
 
 (defn- root-paths [root]
   (let [deps-file (io/file root "deps.edn")]
     (when-not (.isFile deps-file)
-      (throw (ex-info "Local root must contain deps.edn" {:root root})))
+      (throw (ex-info "Spool root must contain deps.edn" {:root root})))
     (let [deps (query/read-edn-file deps-file)
-          paths (or (:paths deps) ["src"])]
+          paths (or (:paths deps) ["src"])
+          ;; Approval covers the root only; a :paths entry resolving outside it
+          ;; (via .. or a symlink) would load code the user never consented to.
+          canonical-root (.getCanonicalPath (io/file root))
+          root-prefix (str canonical-root java.io.File/separator)]
       (when-not (and (vector? paths) (every? string? paths))
-        (throw (ex-info "Local root deps.edn :paths must be a vector of strings" {:root root :paths paths})))
-      (mapv #(.getCanonicalFile (io/file root %)) paths))))
+        (throw (ex-info "Spool root deps.edn :paths must be a vector of strings" {:root root :paths paths})))
+      (mapv (fn [path]
+              (let [resolved (.getCanonicalFile (io/file root path))]
+                (when-not (or (= (str resolved) canonical-root)
+                              (str/starts-with? (str resolved) root-prefix))
+                  (throw (ex-info "Spool root deps.edn :paths must stay inside the spool root"
+                                  {:root root :path path :resolved (str resolved)})))
+                resolved))
+            paths))))
+
+(defn- non-empty-directory? [file]
+  (and (.isDirectory file)
+       (boolean (seq (.list file)))))
+
+(defn- delete-tree!
+  "Delete a tree without following symlinks: links are removed as links, so a
+  checkout containing a symlink can never delete content outside `file`."
+  [file]
+  (let [path (.toPath file)]
+    (when (Files/exists path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+      (Files/walkFileTree
+       path
+       (proxy [SimpleFileVisitor] []
+         (visitFile [p _attrs]
+           (Files/delete p)
+           FileVisitResult/CONTINUE)
+         (postVisitDirectory [p exc]
+           (when exc (throw exc))
+           (Files/delete p)
+           FileVisitResult/CONTINUE))))))
+
+(defn- run-git [dir & args]
+  (let [process (try
+                  (-> (ProcessBuilder. (into-array String (cons "git" args)))
+                      (.directory dir)
+                      (.redirectErrorStream false)
+                      (.start))
+                  (catch java.io.IOException e
+                    {:exit 127
+                     :stderr (ex-message e)}))]
+    (if (map? process)
+      process
+      (let [stderr (future (slurp (.getErrorStream process)))
+            stdout (future (slurp (.getInputStream process)))
+            exit (.waitFor process)]
+        {:exit exit
+         :stdout @stdout
+         :stderr @stderr}))))
+
+(defn- stderr-tail [stderr]
+  (let [trimmed (str/trim (or stderr ""))]
+    (if (<= (count trimmed) 4000)
+      trimmed
+      (subs trimmed (- (count trimmed) 4000)))))
+
+(defn- fetch-failure [result]
+  {:exit (:exit result)
+   :stderr (stderr-tail (:stderr result))})
+
+(defn- checked-git [dir & args]
+  (let [result (apply run-git dir args)]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "git command failed" (fetch-failure result))))
+    result))
+
+(defn- cache-root-file [entry]
+  (io/file (cache-base) "skein" "spools" (:git/sha entry)))
+
+(defn- tag-refs [tag]
+  [tag (str tag "^{}")])
+
+(defn- ls-remote-ref-shas [stdout]
+  (->> (str/split-lines stdout)
+       (keep (fn [line]
+               (let [[sha ref] (str/split line #"\s+" 2)]
+                 (when (and (not (str/blank? sha)) (not (str/blank? ref)))
+                   [ref sha]))))
+       (into {})))
+
+(defn- verify-git-tag! [entry]
+  (let [result (apply run-git nil "ls-remote" "--tags" (:git/url entry) (tag-refs (:git/tag entry)))]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "git tag lookup failed" (fetch-failure result))))
+    (let [refs (ls-remote-ref-shas (:stdout result))
+          tag-ref (str "refs/tags/" (:git/tag entry))
+          peeled-ref (str tag-ref "^{}")
+          actual (or (get refs peeled-ref) (get refs tag-ref))]
+      (when-not (= (:git/sha entry) actual)
+        (throw (ex-info "git tag does not match pinned sha"
+                        {:reason :tag-mismatch
+                         :tag (:git/tag entry)
+                         :expected (:git/sha entry)
+                         :actual actual}))))))
+
+(defn- checkout-git-spool! [entry tmp]
+  (checked-git tmp "init")
+  (let [shallow (run-git tmp "fetch" "--depth" "1" (:git/url entry) (:git/sha entry))]
+    (when-not (zero? (:exit shallow))
+      (let [full (run-git tmp "fetch" (:git/url entry) (:git/sha entry))]
+        (when-not (zero? (:exit full))
+          (throw (ex-info "git fetch failed" (fetch-failure full)))))))
+  (checked-git tmp "checkout" "--detach" "FETCH_HEAD")
+  (delete-tree! (io/file tmp ".git")))
+
+(defn- materialize-git-spool! [entry]
+  (let [cache-root (cache-root-file entry)]
+    (if (non-empty-directory? cache-root)
+      :cached
+      (let [parent (.getParentFile cache-root)
+            _ (.mkdirs parent)
+            tmp-path (Files/createTempDirectory (.toPath parent) (str (:git/sha entry) ".tmp.") (make-array FileAttribute 0))
+            tmp (.toFile tmp-path)]
+        (try
+          (when-let [_ (:git/tag entry)]
+            (verify-git-tag! entry))
+          (checkout-git-spool! entry tmp)
+          (Files/move (.toPath tmp) (.toPath cache-root)
+                      (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+          :fetched
+          (catch Throwable t
+            (delete-tree! tmp)
+            (throw t)))))))
 
 (defn- add-root-paths-to-spool-loader! [runtime root]
   (let [loader (:spool-classloader runtime)]
@@ -183,42 +470,106 @@
         (throw (ex-info "Local root classpath entry must be a directory" {:root root :path (.getPath path)})))
       (.addURL ^clojure.lang.DynamicClassLoader loader (.toURL (.toURI path))))))
 
+(defn- materialize-git-spool-outcome
+  "Materialize a git entry, returning {:fetch ...} or {:failed <sync-failed>}.
+
+  Only the materialization call may translate throws into fetch/tag outcomes;
+  anything thrown elsewhere in sync is a real error and must stay loud."
+  [lib entry]
+  (try
+    {:fetch (materialize-git-spool! entry)}
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :tag-mismatch (:reason (ex-data e)))
+        {:failed (sync-failed lib entry :tag-mismatch (select-keys (ex-data e) [:tag :expected :actual]))}
+        {:failed (sync-failed lib entry :fetch-failed (fetch-failure (ex-data e)))}))
+    (catch Throwable t
+      {:failed (sync-failed lib entry :fetch-failed {:exit 1
+                                                     :stderr (stderr-tail (ex-message t))})})))
+
 (defn- sync-approved-spool! [runtime lib entry]
-  (let [root-file (io/file (:root entry))]
+  (let [{:keys [fetch failed]} (when (= :git (:kind entry))
+                                 (materialize-git-spool-outcome lib entry))
+        root-file (io/file (:root entry))]
     (cond
+      failed
+      failed
+
       (not (.exists root-file))
-      (sync-failed lib entry :missing-root {})
+      (sync-failed lib entry :missing-root (cond-> {} fetch (assoc :fetch fetch)))
 
       (not (.isDirectory root-file))
-      (sync-failed lib entry :unreadable-root {})
+      (sync-failed lib entry :unreadable-root (cond-> {} fetch (assoc :fetch fetch)))
 
       (not (.canRead root-file))
-      (sync-failed lib entry :unreadable-root {})
+      (sync-failed lib entry :unreadable-root (cond-> {} fetch (assoc :fetch fetch)))
 
       :else
-      (try
-        (let [added (with-spool-classloader
-                      runtime
-                      #(binding [clojure.core/*repl* true]
-                         (repl-deps/add-libs {lib {:local/root (:root entry)}})))]
-          (add-root-paths-to-spool-loader! runtime (:root entry))
-          [lib {:lib lib
-                :local/root (:local/root entry)
-                :root (:root entry)
-                :source (:source entry)
-                :status (if (seq added) :loaded :already-available)}])
-        (catch Throwable t
-          (sync-failed lib entry :runtime-add-failed {:message (ex-message t)
-                                                      :class (str (class t))}))))))
+      (let [{:keys [manifest failed]} (read-spool-manifest lib entry (:root entry))]
+        (if failed
+          (cond-> failed fetch (clojure.core/update 1 assoc :fetch fetch))
+          (try
+            ;; Third-party git spools may not smuggle transitive resolution in
+            ;; through their own deps.edn: dependencies are approved coordinates
+            ;; declared as spool.edn :needs, never tools.deps :deps.
+            (when (= :git (:kind entry))
+              (let [deps-file (io/file (:root entry) "deps.edn")]
+                (when (.isFile deps-file)
+                  (let [deps (query/read-edn-file deps-file)]
+                    (when (seq (:deps deps))
+                      (throw (ex-info "Git spool deps.edn must not declare :deps; declare needed spools as spool.edn :needs instead"
+                                      {:root (:root entry) :deps (vec (keys (:deps deps)))})))))))
+            (let [added (with-spool-classloader
+                          runtime
+                          #(binding [clojure.core/*repl* true]
+                             (repl-deps/add-libs {lib {:local/root (:root entry)}})))]
+              (add-root-paths-to-spool-loader! runtime (:root entry))
+              [lib (cond-> (assoc (sync-result-base lib entry)
+                                  :status (if (seq added) :loaded :already-available))
+                     fetch (assoc :fetch fetch)
+                     manifest (assoc :manifest manifest))])
+            (catch Throwable t
+              (sync-failed lib entry :runtime-add-failed (cond-> {:message (ex-message t)
+                                                                  :class (str (class t))}
+                                                           fetch (assoc :fetch fetch))))))))))
+
+(defn- successful-sync? [sync]
+  (#{:loaded :already-available} (:status sync)))
+
+(defn- unmet-needs [approved-spools results sync]
+  (let [needs (get-in sync [:manifest :needs])]
+    (vec
+     (keep (fn [[need-lib need]]
+             (cond
+               (not (contains? approved-spools need-lib))
+               (cond-> {:lib need-lib
+                        :reason :not-approved}
+                 (:suggest need) (assoc :suggest (:suggest need)))
+
+               (not (successful-sync? (get results need-lib)))
+               (cond-> {:lib need-lib
+                        :reason :sync-failed}
+                 (:suggest need) (assoc :suggest (:suggest need)))))
+           needs))))
+
+(defn- add-unmet-needs [approved results]
+  (let [approved-spools (:spools approved)]
+    (into (sorted-map)
+          (map (fn [[lib sync]]
+                 [lib (if (successful-sync? sync)
+                        (let [unmet (unmet-needs approved-spools results sync)]
+                          (cond-> sync (seq unmet) (assoc :unmet-needs unmet)))
+                        sync)]))
+          results)))
 
 (defn sync-approved-spools
   "Load approved local spools into the runtime classloader and record sync status."
   [runtime]
   (reset! (approved-spool-sync-state runtime) {})
   (let [approved (approved-spools runtime)
-        results (into (sorted-map)
-                      (map (fn [[lib entry]] (sync-approved-spool! runtime lib entry)))
-                      (:spools approved))]
+        initial-results (into (sorted-map)
+                              (map (fn [[lib entry]] (sync-approved-spool! runtime lib entry)))
+                              (:spools approved))
+        results (add-unmet-needs approved initial-results)]
     (reset! (approved-spool-sync-state runtime) results)
     {:spools results}))
 
@@ -294,21 +645,44 @@
   result)
 
 (defn- skip-use [runtime key opts reason data]
-  (record-use! runtime key (merge {:key key :opts opts :status :skipped :reason reason} data)))
+  (let [result (record-use! runtime key (merge {:key key :opts opts :status :skipped :reason reason} data))]
+    (when (and (:required? opts) (#{:unmet-needs :provides-unloadable} reason))
+      (throw (ex-info "Required module use was skipped" result)))
+    result))
+
+(defn- require-provided-ns [runtime ns-sym]
+  (try
+    (with-spool-classloader runtime #(require ns-sym))
+    nil
+    (catch Throwable t
+      {:ns ns-sym
+       :message (ex-message t)
+       :class (str (class t))
+       :data (ex-data t)})))
 
 (defn- use-spool-skip [runtime opts]
   (let [approved (approved-spools runtime)
         syncs @(approved-spool-sync-state runtime)]
     (some (fn [lib]
-            (cond
-              (not (contains? (:spools approved) lib))
-              [:not-approved {:lib lib}]
+            (let [sync (get syncs lib)]
+              (cond
+                (not (contains? (:spools approved) lib))
+                [:not-approved {:lib lib}]
 
-              (not (contains? syncs lib))
-              [:not-synced {:lib lib}]
+                (not (contains? syncs lib))
+                [:not-synced {:lib lib}]
 
-              (= :failed (:status (get syncs lib)))
-              [:sync-failed {:lib lib :sync (get syncs lib)}]))
+                (= :failed (:status sync))
+                [:sync-failed {:lib lib :sync sync}]
+
+                (seq (:unmet-needs sync))
+                [:unmet-needs {:lib lib :unmet-needs (:unmet-needs sync)}]
+
+                :else
+                (some (fn [ns-sym]
+                        (when-let [failure (require-provided-ns runtime ns-sym)]
+                          [:provides-unloadable {:lib lib :provides-unloadable failure}]))
+                      (get-in sync [:manifest :provides])))))
           (:spools opts))))
 
 (defn- use-after-skip [runtime opts]
