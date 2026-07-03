@@ -79,7 +79,7 @@ From a Skein source checkout, `make install` installs the Go CLIs (`strand` and 
 
 User-facing Skein documentation lives in the source checkout under `docs/`; the canonical user reference is `docs/skein.md`.
 
-When working in this repository, also read [`.skein/AGENTS.md`](../.skein/AGENTS.md).
+When working in this repository, also read the "Repo coordination workspace (.skein)" section of the root [`AGENTS.md`](../AGENTS.md).
 This repo-local guidance documents the installed runtime surface loaded from
 `.skein/init.clj` and `.skein/config.clj`: the shipped `skein.spools.workflow`
 and `skein.spools.devflow` spools, the `devflow-*` CLI ops that drive the
