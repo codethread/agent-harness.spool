@@ -63,24 +63,27 @@
    :concepts {:read-first true
               :traps ["A RUN is a strand carrying shuttle/* attributes; a TASK is an ordinary work strand you delegate. Their ids look identical; each verb states which kind it takes."
                       "Run success never closes the task it served: YOU verify, then close the task to unblock dependents. Skip the close and the plan silently stalls."
-                      "A task's FILE SCOPE is the set of files its body names as owned; every scope rule (disjoint siblings, one mutator per scope) refers to that owned set."]
+                      "A task's FILE SCOPE is the set of files its body names as owned; every scope rule (disjoint siblings, one mutator per scope) refers to that owned set."
+                      "An INTERACTIVE run is a live multiplexer session (mode=interactive): it completes when the strand it serves closes, not when a process exits. ps shows its attach command; a session that dies early fails the run loudly."]
               :scheduler "depends-on readiness is the only scheduler: a pending run starts the moment its blockers close."
               :run-result "A successful run closes itself with the worker's final message in shuttle/result. A failed run stays active, loud, and visible until retry or kill."
               :phase-enum ["pending" "running" "done" "failed" "exhausted" "superseded"]
               :terminal-phases ["done" "failed" "exhausted" "superseded"]
               :active-terminal-phases ["failed" "exhausted"]}
    :verbs {:spawn {:group "engine"
-                   :usage "agent spawn --harness <name> --prompt ... [--title t] [--depends-on <strand-id>]... [--for <strand-id>] [--spawned-by <run-id>] [--cwd <dir>] [--max-attempts n]"
+                   :usage "agent spawn --harness <name> --prompt ... [--title t] [--depends-on <strand-id>]... [--for <strand-id>] [--spawned-by <run-id>] [--cwd <dir>] [--max-attempts n] [--interactive --backend <name> [--reap auto|manual]]"
                    :takes "No positional args; raw run creation, no task contract."
                    :semantics ["Async; the run starts when ready."
                                "--for is the strand this run serves and creates the parent-of edge."
-                               "--spawned-by is the caller's run id for helper provenance only. Helpers usually pass only --spawned-by."]
-                   :fails ["missing --harness" "missing --prompt" "unknown flag" "malformed --max-attempts"]
-                   :returns {"id" "run id" "title" "string" "state" "active|closed" "phase" "pending" "harness" "string"}}
+                               "--spawned-by is the caller's run id for helper provenance only. Helpers usually pass only --spawned-by."
+                               "--interactive launches the harness into a multiplexer session via --backend instead of exec-and-wait. With --for the run completes when that strand closes; without it, when the run strand itself is closed. --reap manual leaves the session open for the human after completion (default auto tears it down)."]
+                   :fails ["missing --harness" "missing --prompt" "unknown flag" "malformed --max-attempts" "--interactive without --backend" "--backend/--reap without --interactive"]
+                   :returns {"id" "run id" "title" "string" "state" "active|closed" "phase" "pending" "harness" "string" "mode" "optional interactive" "session" "optional session name" "attach" "optional human attach command"}}
            :ps {:group "engine"
                 :usage "agent ps [--active] [--for <strand-id>]"
-                :semantics ["List shuttle run summaries; --active restricts to active run strands; --for restricts to runs serving one strand."]
-                :returns [{"id" "run id" "title" "string" "state" "string" "phase" "string" "harness" "string" "for" "optional served strand" "spawned-by" "optional parent run" "attempt" "optional integer" "result" "optional string" "error" "optional string"}]}
+                :semantics ["List shuttle run summaries; --active restricts to active run strands; --for restricts to runs serving one strand."
+                            "Listing doubles as an interactive liveness check: a dead session is failed here. Interactive summaries carry mode/backend/session and the attach command to hand the human."]
+                :returns [{"id" "run id" "title" "string" "state" "string" "phase" "string" "harness" "string" "for" "optional served strand" "spawned-by" "optional parent run" "attempt" "optional integer" "result" "optional string" "error" "optional string" "mode" "optional interactive" "backend" "optional string" "session" "optional string" "attach" "optional string"}]}
            :await {:group "engine"
                    :usage "agent await <run-id>... [--under <root-id>] [--timeout-secs n]"
                    :semantics ["Block until every listed run is terminal: closed, failed, or exhausted."
@@ -90,29 +93,35 @@
                    :returns {"timed-out" false "runs" ["ps summary shape including result/error"]}}
            :logs {:group "engine"
                   :usage "agent logs <run-id> [--tail n]"
-                  :semantics ["Return captured stdout/stderr text and paths for debugging and failure forensics."]
-                  :fails ["missing run id" "run has no shuttle/log" "log file missing" "malformed --tail"]
-                  :returns {"id" "run id" "out" {"path" "string" "text" "string"} "err" {"path" "string" "text" "string"}}}
+                  :semantics ["Return captured stdout/stderr text and paths for debugging and failure forensics."
+                              "For a RUNNING interactive run, logs captures the session transcript fresh (harness :capture when configured, else backend scrollback) — a coordinator peek without attaching. Finished interactive runs return the transcript persisted at teardown; err is omitted for interactive runs."]
+                  :fails ["missing run id" "run has no shuttle/log" "log file missing" "malformed --tail" "interactive run with no capture op"]
+                  :returns {"id" "run id" "out" {"path" "string" "text" "string"} "err" {"path" "string" "text" "string (headless only)"}}}
            :kill {:group "engine"
                   :usage "agent kill <run-id>"
-                  :semantics ["Kill a running run's live process and mark it failed. For an already failed run, use retry instead."]
-                  :fails ["missing run id" "run has no live process"]
+                  :semantics ["Kill a running run's live process or interactive session and mark it failed. For an already failed run, use retry instead."]
+                  :fails ["missing run id" "run has no live process" "run has no live session"]
                   :returns {"killed" "run id"}}
            :harnesses {:group "engine"
                        :usage "agent harnesses"
                        :semantics ["List configured harnesses and aliases."
                                    "A harness picks who does the work; validation remains in task attributes and proves the work independently."]
                        :returns [{"name" "string" "kind" "harness|alias" "alias-of" "optional string" "argv" "optional vector" "doc" "optional string"}]}
+           :backends {:group "engine"
+                      :usage "agent backends"
+                      :semantics ["List configured interactive session backends (terminal multiplexers registered with defbackend! in trusted config)."]
+                      :returns [{"name" "string" "ops" ["start alive stop capture attach subset"] "doc" "optional string"}]}
            :delegate {:group "delegation"
-                      :usage "agent delegate <task-id> [--harness h] [--cwd dir] [--prompt extra] [--spawned-by run]"
+                      :usage "agent delegate <task-id> [--harness h] [--cwd dir] [--prompt extra] [--spawned-by run] [--interactive [--backend b] [--reap auto|manual]]"
                       :takes "An active, ready task strand."
                       :semantics ["Builds the worker prompt from the task's current title, body, and validation attribute."
                                   "Injects the worker contract and spawns a run attached --for the task."
                                   "Harness resolution is --harness flag > task harness attribute > loud failure; there is no default."
                                   "cwd resolution is --cwd flag > task cwd attribute > workspace root."
-                                  "A task with any non-superseded run is not delegable: pending/running is active, failed/exhausted wants retry, done must be verified and closed."]
-                      :fails ["task not found" "task not active" "task not ready" "missing body and --prompt" "missing harness" "hitl=true" "has active run" "failed/exhausted run wants retry" "successful run awaits verification"]
-                      :returns {"task" "task id" "run" {"id" "run id" "phase" "pending" "harness" "string"}}}
+                                  "A task with any non-superseded run is not delegable: pending/running is active, failed/exhausted wants retry, done must be verified and closed."
+                                  "--interactive opens a live multiplexer session for the task instead of a headless run — this is how hitl=true tasks are delegated. Backend resolution is --backend flag > task backend attribute > loud failure. The session is torn down when the task closes (the agent closes it once the human agrees the work is done)."]
+                      :fails ["task not found" "task not active" "task not ready" "missing body and --prompt" "missing harness" "hitl=true without --interactive" "missing backend with --interactive" "--backend/--reap without --interactive" "has active run" "failed/exhausted run wants retry" "successful run awaits verification"]
+                      :returns {"task" "task id" "run" {"id" "run id" "phase" "pending" "harness" "string" "attach" "optional string"}}}
            :delegate-ready {:group "delegation"
                             :usage "agent delegate --ready <plan-id> [--cwd dir]"
                             :takes "A plan/root strand."
@@ -127,7 +136,8 @@
                    :usage "agent retry <task-or-run-id> [--harness h] [--cwd dir] [--prompt extra]"
                    :semantics ["The recovery verb. Given a task id, find its failed/exhausted run, close it with phase superseded, rebuild the prompt from the task's current body, and spawn fresh."
                                "When the contract was wrong, edit the task body first with `strand update <task-id> --attr-file body=<path>` or `--attr-stdin body`."
-                               "Given a raw run id, supersede and respawn from the original prompt while preserving served target, spawned-by provenance, depends-on edges, cwd, and max-attempts."]
+                               "Given a raw run id, supersede and respawn from the original prompt while preserving served target, spawned-by provenance, depends-on edges, cwd, and max-attempts."
+                               "A failed interactive run retries as a fresh session preserving mode, backend, and reap policy; there are deliberately no retry flags to change them — respawn with spawn/delegate if the backend itself was the problem."]
                    :fails ["target not found" "nothing failed/exhausted to supersede"]
                    :returns {"superseded" "old run id" "task" "optional task id" "run" {"id" "new run id" "phase" "pending" "harness" "string"}}}
            :status {:group "delegation"
@@ -221,15 +231,20 @@
 (defn- task-runs [task-id]
   (->> (children-ids task-id) (map #(api/show (rt) %)) (filter run?) vec))
 
-(defn- prompt-for-task [task extra]
-  (let [body (some-> (attr task :body) str str/trim not-empty)
-        extra (some-> extra str str/trim not-empty)]
-    (when (and (nil? body) (nil? extra)) (fail! "delegate requires task body or --prompt" {:task (:id task)}))
-    (str "You are the delegated implementer for strand `" (:id task) "` (`" (:title task) "`).\n"
-         "Read the assigned strand first with the pinned strand command.\n\n"
-         (when body (str "Task body:\n" body "\n\n"))
-         (when-let [v (attr task :validation)] (str "Validation gate:\n" (if (sequential? v) (str/join "\n" v) v) "\n\n"))
-         (when extra (str "Extra instructions:\n" extra "\n")))))
+(defn- prompt-for-task
+  ([task extra] (prompt-for-task task extra false))
+  ([task extra interactive?]
+   (let [body (some-> (attr task :body) str str/trim not-empty)
+         extra (some-> extra str str/trim not-empty)]
+     (when (and (nil? body) (nil? extra)) (fail! "delegate requires task body or --prompt" {:task (:id task)}))
+     (str (if interactive?
+            (str "You are an interactive session working WITH the user on strand `" (:id task) "` (`" (:title task) "`).\n"
+                 "The task body below is the working contract; the human in this session is the authority on scope and completion.\n")
+            (str "You are the delegated implementer for strand `" (:id task) "` (`" (:title task) "`).\n"))
+          "Read the assigned strand first with the pinned strand command.\n\n"
+          (when body (str "Task body:\n" body "\n\n"))
+          (when-let [v (attr task :validation)] (str "Validation gate:\n" (if (sequential? v) (str/join "\n" v) v) "\n\n"))
+          (when extra (str "Extra instructions:\n" extra "\n"))))))
 
 (defn- active-task! [id]
   (let [task (or (api/show (rt) id) (fail! "task not found" {:task id}))]
@@ -244,25 +259,35 @@
   (or (get flags "--harness") (attr task :harness) (fail! "delegate requires --harness or task harness attribute" {:task (:id task)})))
 
 (defn- delegate-task [task flags]
-  (when-not (ready? (:id task)) (fail! "task is not ready" {:task (:id task)}))
-  (when (hitl? task) (fail! "task is hitl" {:task (:id task)}))
-  (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (active-run-phases (sattr % "phase"))) (task-runs (:id task))))]
-    (fail! "task has an ACTIVE run" {:task (:id task) :run (:id r)}))
-  (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (failed-phases (sattr % "phase"))) (task-runs (:id task))))]
-    (fail! "task wants retry" {:task (:id task) :run (:id r)}))
-  (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (success-phases (sattr % "phase"))) (task-runs (:id task))))]
-    (fail! "task already has a successful run (verify + close it)" {:task (:id task) :run (:id r)}))
-  (let [harness (harness-for task flags)
-        run (shuttle/spawn-run! (cond-> {:harness harness
-                                         :prompt (prompt-for-task task (get flags "--prompt"))
-                                         :title (str "Delegate: " (:title task))
-                                         :parent (:id task)
-                                         :cwd (or (get flags "--cwd")
-                                                  (attr task :cwd)
-                                                  (workspace-root-dir))}
-                                  (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
-                                  (attr task :max-attempts) (assoc :max-attempts (attr task :max-attempts))))]
-    {:task (:id task) :run (select-keys (shuttle/run-summary run) [:id :phase :harness])}))
+  (let [interactive? (boolean (get flags "--interactive"))]
+    (when (and (not interactive?) (or (get flags "--backend") (get flags "--reap")))
+      (fail! "delegate --backend/--reap require --interactive"
+             {:task (:id task) :backend (get flags "--backend") :reap (get flags "--reap")}))
+    (when-not (ready? (:id task)) (fail! "task is not ready" {:task (:id task)}))
+    (when (and (hitl? task) (not interactive?))
+      (fail! "task is hitl: delegate it with --interactive" {:task (:id task)}))
+    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (active-run-phases (sattr % "phase"))) (task-runs (:id task))))]
+      (fail! "task has an ACTIVE run" {:task (:id task) :run (:id r)}))
+    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (failed-phases (sattr % "phase"))) (task-runs (:id task))))]
+      (fail! "task wants retry" {:task (:id task) :run (:id r)}))
+    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (success-phases (sattr % "phase"))) (task-runs (:id task))))]
+      (fail! "task already has a successful run (verify + close it)" {:task (:id task) :run (:id r)}))
+    (let [harness (harness-for task flags)
+          run (shuttle/spawn-run! (cond-> {:harness harness
+                                           :prompt (prompt-for-task task (get flags "--prompt") interactive?)
+                                           :title (str "Delegate: " (:title task))
+                                           :parent (:id task)
+                                           :cwd (or (get flags "--cwd")
+                                                    (attr task :cwd)
+                                                    (workspace-root-dir))}
+                                    interactive? (assoc :mode :interactive
+                                                        :backend (or (get flags "--backend")
+                                                                     (attr task :backend)
+                                                                     (fail! "delegate --interactive requires --backend or task backend attribute" {:task (:id task)}))
+                                                        :reap (get flags "--reap"))
+                                    (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
+                                    (attr task :max-attempts) (assoc :max-attempts (attr task :max-attempts))))]
+      {:task (:id task) :run (select-keys (shuttle/run-summary run) [:id :phase :harness :attach])})))
 
 (defn- skip-reason [task]
   (cond
@@ -272,9 +297,12 @@
     (some #(and (not= "superseded" (sattr % "phase")) (success-phases (sattr % "phase"))) (task-runs (:id task))) "already-succeeded"))
 
 (defn- op-delegate [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--ready" :single "--harness" :single "--cwd" :single "--prompt" :single "--spawned-by" :single})]
+  (let [{:keys [positional flags]} (parse-argv argv {"--ready" :single "--harness" :single "--cwd" :single "--prompt" :single "--spawned-by" :single
+                                                     "--interactive" :bool "--backend" :single "--reap" :single})]
     (if-let [plan (get flags "--ready")]
       (do (when (seq positional) (fail! "delegate --ready takes no task positional" {:got positional}))
+          (when (or (get flags "--interactive") (get flags "--backend") (get flags "--reap"))
+            (fail! "delegate --ready is headless fan-out; interactive flags are per-task so live sessions never swamp the human" {:plan plan}))
           (let [tasks (filter #(and (= "active" (:state %)) (not (run? %)) (ready? (:id %))) (parent-descendants plan))
                 missing (filter #(and (nil? (skip-reason %)) (not (non-blank? (attr % :harness)))) tasks)]
             (when (seq missing) (fail! "ready tasks missing harness" {:tasks (mapv :id missing)}))
@@ -286,7 +314,8 @@
         (delegate-task (active-task! task-id) flags)))))
 
 (defn- op-spawn [argv]
-  (let [{:keys [positional flags]} (parse-argv argv {"--harness" :single "--prompt" :single "--title" :single "--depends-on" :multi "--for" :single "--spawned-by" :single "--cwd" :single "--max-attempts" :single})]
+  (let [{:keys [positional flags]} (parse-argv argv {"--harness" :single "--prompt" :single "--title" :single "--depends-on" :multi "--for" :single "--spawned-by" :single "--cwd" :single "--max-attempts" :single
+                                                     "--interactive" :bool "--backend" :single "--reap" :single})]
     (when (seq positional) (fail! "spawn takes only flags" {:unexpected positional}))
     (shuttle/run-summary (shuttle/spawn-run! {:harness (or (get flags "--harness") (fail! "spawn requires --harness" {}))
                                              :prompt (or (get flags "--prompt") (fail! "spawn requires --prompt" {}))
@@ -295,7 +324,10 @@
                                              :parent (get flags "--for")
                                              :spawned-by (get flags "--spawned-by")
                                              :cwd (get flags "--cwd")
-                                             :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))}))))
+                                             :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))
+                                             :mode (when (get flags "--interactive") :interactive)
+                                             :backend (get flags "--backend")
+                                             :reap (get flags "--reap")}))))
 
 (defn- runs-under [root]
   (->> (parent-descendants root) (filter run?) (remove terminal-run?) (mapv :id)))
@@ -311,10 +343,20 @@
   (let [{:keys [positional flags]} (parse-argv argv {"--tail" :single}) [run-id] positional]
     (when-not (= 1 (count positional)) (fail! "logs requires <run-id>" {:got positional}))
     (let [run (or (api/show (rt) run-id) (fail! "Run not found" {:id run-id}))
-          p (or (sattr run "log") (fail! "Run has no shuttle/log" {:id run-id}))
           n (some->> (get flags "--tail") (parse-int! "--tail"))
-          rf (fn [path] (let [f (java.io.File. path)] (when-not (.exists f) (fail! "Run log file missing" {:id run-id :path path})) (let [lines (str/split-lines (slurp f))] (str/join "\n" (if n (take-last n lines) lines)))))]
-      {:id run-id :out {:path p :text (rf p)} :err {:path (str/replace p #"\.out$" ".err") :text (rf (str/replace p #"\.out$" ".err"))}})))
+          clip (fn [text] (let [lines (str/split-lines text)] (str/join "\n" (if n (take-last n lines) lines))))
+          rf (fn [path] (let [f (java.io.File. path)] (when-not (.exists f) (fail! "Run log file missing" {:id run-id :path path})) (clip (slurp f))))]
+      (if (= "interactive" (sattr run "mode"))
+        ;; phase running alone keys the fresh capture: a closed-but-unreaped
+        ;; run (mid-teardown) has no persisted transcript yet, but its session
+        ;; is still capturable
+        (if (= "running" (sattr run "phase"))
+          (let [{:keys [path text]} (shuttle/capture! run-id)]
+            {:id run-id :out {:path path :text (clip text)}})
+          (let [p (or (sattr run "log") (fail! "Run has no captured transcript" {:id run-id}))]
+            {:id run-id :out {:path p :text (rf p)}}))
+        (let [p (or (sattr run "log") (fail! "Run has no shuttle/log" {:id run-id}))]
+          {:id run-id :out {:path p :text (rf p)} :err {:path (str/replace p #"\.out$" ".err") :text (rf (str/replace p #"\.out$" ".err"))}})))))
 
 (defn- review-prompt [{:keys [target-id focus contract]}]
   (let [cmd (shuttle/pinned-strand-command)]
@@ -507,14 +549,19 @@
             deps (->> (:edges (api/subgraph (rt) [(:id run)] {:type "depends-on"}))
                       (filter #(= (:id run) (:from_strand_id %)))
                       (mapv :to_strand_id))
+            interactive? (= "interactive" (sattr run "mode"))
             new-run (shuttle/spawn-run! (cond-> {:harness (or (get flags "--harness") (sattr run "harness"))
-                                                 :prompt (if task (prompt-for-task task (get flags "--prompt")) (str (sattr run "prompt") (when-let [e (get flags "--prompt")] (str "\n\n" e))))
+                                                 :prompt (if task (prompt-for-task task (get flags "--prompt") interactive?) (str (sattr run "prompt") (when-let [e (get flags "--prompt")] (str "\n\n" e))))
                                                  :title (str "Retry: " (:title (or task run)))
                                                  :parent served-target
                                                  :depends-on deps
                                                  :cwd (or (get flags "--cwd")
                                                           (sattr run "cwd")
                                                           (workspace-root-dir))}
+                                          ;; a retried interactive task gets a fresh session on the same backend
+                                          interactive? (assoc :mode :interactive
+                                                              :backend (sattr run "backend")
+                                                              :reap (sattr run "reap"))
                                           (sattr run "spawned-by") (assoc :spawned-by (sattr run "spawned-by"))
                                           (sattr run "max-attempts") (assoc :max-attempts (sattr run "max-attempts"))))]
         (cond-> {:superseded (:id run) :run (select-keys (shuttle/run-summary new-run) [:id :phase :harness])}
@@ -569,6 +616,7 @@
       "logs" (op-logs args)
       "kill" (do (when-not (= 1 (count args)) (fail! "kill requires <run-id>" {:got args})) (shuttle/kill! (first args)))
       "harnesses" (shuttle/harnesses)
+      "backends" (shuttle/backends)
       "note" (op-note args)
       "notes" (op-notes args)
       "council" (op-council args)
@@ -576,7 +624,7 @@
       "delegate" (op-delegate args)
       "retry" (op-retry args)
       "status" (op-status args)
-      (fail! "Unknown agent subcommand" {:subcommand sub :available ["about" "spawn" "ps" "await" "logs" "kill" "harnesses" "note" "notes" "council" "review" "delegate" "retry" "status"]}))))
+      (fail! "Unknown agent subcommand" {:subcommand sub :available ["about" "spawn" "ps" "await" "logs" "kill" "harnesses" "backends" "note" "notes" "council" "review" "delegate" "retry" "status"]}))))
 
 ;; agent-plan pattern
 (s/def ::non-blank-string non-blank?)

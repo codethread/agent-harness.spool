@@ -322,3 +322,85 @@
         (let [status (agents/agent-op {:op/argv ["status"]})]
           (is (some #{(:id implemented)} (:awaiting_verification status)))
           (is (some #(= (:id failed-run) (:run %)) (:failed status))))))))
+
+;; ---------------------------------------------------------------------------
+;; Interactive delegation
+
+(def ^:private fake-mux
+  {:start ["sh" "-c" "nohup \"$1\" >/dev/null 2>&1 & printf '{\"pid\":\"%s\"}' \"$!\"" "fake-mux" :command]
+   :alive ["kill" "-0" :handle/pid]
+   :stop ["kill" :handle/pid]
+   :attach ["echo" "attach" :handle/pid]
+   :doc "test-only fake multiplexer over detached processes"})
+
+(defn- await-handle-pid
+  "Poll until the run's backend handle pid lands (it is written strictly
+  after phase running) or timeout; return the strand."
+  [rt id]
+  (let [deadline (+ (System/currentTimeMillis) 10000)]
+    (loop []
+      (let [s (api/show rt id)]
+        (cond
+          (get-in s [:attributes (keyword "shuttle" "handle.pid")]) s
+          (> (System/currentTimeMillis) deadline) (throw (ex-info "timeout waiting handle" {:id id :strand s}))
+          :else (do (Thread/sleep 50) (recur)))))))
+
+(deftest backends-verb-lists-registered-backends
+  (with-agents
+    (fn [_]
+      (shuttle/defbackend! :fake-mux fake-mux)
+      (let [names (set (map :name (agents/agent-op {:op/argv ["backends"]})))]
+        (is (contains? names "tmux"))
+        (is (contains? names "fake-mux"))))))
+
+(deftest hitl-task-delegates-only-interactively-and-reaps-on-close
+  (with-agents
+    (fn [rt]
+      (shuttle/defbackend! :fake-mux fake-mux)
+      (let [task (api/add rt {:title "pair on the plan"
+                              :attributes {:body "Discuss and agree the plan with the user."
+                                           :harness "sh" :hitl "true"}})]
+        (testing "headless delegation of a hitl task fails loudly"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"hitl"
+                                (agents/agent-op {:op/argv ["delegate" (:id task)]}))))
+        (testing "interactive delegation requires a backend"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"backend"
+                                (agents/agent-op {:op/argv ["delegate" (:id task) "--interactive"]}))))
+        (testing "interactive-only flags without --interactive fail loudly"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"require --interactive"
+                                (agents/agent-op {:op/argv ["delegate" (:id task) "--backend" "fake-mux"]})))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"per-task"
+                                (agents/agent-op {:op/argv ["delegate" "--ready" "some-plan" "--backend" "fake-mux"]}))))
+        (testing "interactive delegation opens a session serving the task"
+          (let [d (agents/agent-op {:op/argv ["delegate" (:id task) "--interactive" "--backend" "fake-mux"]})
+                run-id (get-in d [:run :id])
+                running (await-handle-pid rt run-id)
+                pid (get-in running [:attributes (keyword "shuttle" "handle.pid")])]
+            (testing "ps carries the attach command"
+              (let [summary (first (filter #(= run-id (:id %)) (agents/agent-op {:op/argv ["ps" "--active"]})))]
+                (is (= "interactive" (:mode summary)))
+                (is (= (str "echo attach " pid) (:attach summary)))))
+            (testing "the session prompt carries the interactive pairing framing"
+              (is (clojure.string/includes? (get-in running [:attributes :shuttle/prompt])
+                                            "working WITH the user")))
+            (testing "closing the task reaps the session run"
+              (api/update rt (:id task) {:state "closed"})
+              (let [done (await-phase rt run-id #{"done"})]
+                (is (= "closed" (:state done)))))))))))
+
+(deftest interactive-retry-preserves-mode-and-backend
+  (with-agents
+    (fn [rt]
+      (shuttle/defbackend! :fake-mux fake-mux)
+      (let [task (api/add rt {:title "session task"
+                              :attributes {:body "work with the user" :harness "sh" :hitl "true"}})
+            d (agents/agent-op {:op/argv ["delegate" (:id task) "--interactive" "--backend" "fake-mux"]})
+            run-id (get-in d [:run :id])]
+        (await-handle-pid rt run-id)
+        (agents/agent-op {:op/argv ["kill" run-id]})
+        (await-phase rt run-id #{"failed"})
+        (let [retried (agents/agent-op {:op/argv ["retry" (:id task)]})
+              new-run (await-handle-pid rt (get-in retried [:run :id]))]
+          (is (= "interactive" (get-in new-run [:attributes :shuttle/mode])))
+          (is (= "fake-mux" (get-in new-run [:attributes :shuttle/backend])))
+          (agents/agent-op {:op/argv ["kill" (:id new-run)]}))))))

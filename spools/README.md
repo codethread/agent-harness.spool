@@ -45,7 +45,7 @@ as the worked example of authoring your own spool
 
 | Spool | Contract doc | Purpose |
 |---|---|---|
-| `skein.spools.shuttle` | [shuttle/README.md](./shuttle/README.md) | Agent shuttle **engine**: readiness-driven headless coding-agent runs, harness aliases, crash reconciliation, append-only run memory, and the preamble seam. Registers no ops. |
+| `skein.spools.shuttle` | [shuttle/README.md](./shuttle/README.md) | Agent shuttle **engine**: readiness-driven headless coding-agent runs plus interactive multiplexer sessions (backend registry, claims-model reaping), harness aliases, crash reconciliation, append-only run memory, and the preamble seam. Registers no ops. |
 | `skein.spools.agents` | [agents/README.md](./agents/README.md) | Cross-harness subagent surface over shuttle: the `strand op agent` verbs, the `agent-plan` weave pattern, delegation/retry/status, and the worker + coordinator guidance. |
 | `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
 | `skein.spools.chime` | [chime/README.md](./chime/README.md) | Notification engine: watches graph mutations, evaluates user-registered rules, and sends matches through a user-bound local notifier command. |

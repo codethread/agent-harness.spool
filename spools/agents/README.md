@@ -15,6 +15,7 @@ One consistent way to run and coordinate coding-agent subagents, across every ha
 - **Cross-harness.** A subagent can be Claude, pi, or any tool you registered as a harness. Switching a whole workspace to a new provider is one `defharness!`/`defalias!` line in trusted config — no prompts, scripts, or workflows change.
 - **Everything is durable, observable, and awaitable.** Each subagent is a strand. You (or another agent) can list it, read its result, await it, read its notes, and see how it hangs off the plan — long after the session that spawned it ended. Nothing lives only in one harness's private memory.
 - **The graph is the scheduler.** You describe work and its dependencies once as a plan; readiness starts each piece the moment its blockers close. There is no separate queue to babysit.
+- **Human-in-the-loop tasks are plan nodes too.** `delegate --interactive` opens the agent in a live terminal-multiplexer session (tmux by default; your multiplexer is one `defbackend!` in trusted config) serving the task. You attach with the command `ps` hands you, pair with the agent, and when you agree the work is done the agent closes the task — the session is torn down and dependents unblock, exactly like any other task. This is how `hitl=true` tasks get delegated instead of stalling the plan.
 
 ### The vocabulary your agents already know
 
@@ -93,6 +94,7 @@ Every operational verb returns JSON; all verbs are flat under `strand op agent <
 - `depends-on` **readiness is the only scheduler**: a pending run starts the moment its blockers close.
 - A successful run closes itself, carrying the worker's final message in `shuttle/result`. A **failed run stays active** (loud, visible) until you `retry` or `kill` it.
 - Run phases: `pending → running → done | failed | exhausted | superseded`. The last four are terminal; only `failed`/`exhausted` leave the run active.
+- An **interactive run** (`mode=interactive`) is a live multiplexer session: it completes when the strand it serves closes, not when a process exits. `ps` carries its `attach` command; a session that dies before its work completes fails the run loudly (no auto-respawn — `retry` opens a fresh session).
 - **Run success never closes the task it served.** You verify, then close the task — and closing the task is what makes dependent tasks ready. Skip the close and the plan silently stalls.
 - A task's **file scope** is the set of files its body names as owned. Every scope rule (disjoint siblings, one mutator per scope) refers to that owned set.
 
@@ -101,15 +103,16 @@ Every operational verb returns JSON; all verbs are flat under `strand op agent <
 ```
 agent spawn --harness <name> --prompt "..." [--title t] [--depends-on <strand-id>]...
             [--for <strand-id>] [--spawned-by <run-id>] [--cwd <dir>] [--max-attempts n]
+            [--interactive --backend <name> [--reap auto|manual]]
 ```
-Raw run creation, no task contract. Async; the run starts when ready. `--for` = the strand this run serves (gets a `parent-of` edge); `--spawned-by` = *your* run id when you are an agent spawning a helper (provenance only). Helpers usually pass only `--spawned-by`.
+Raw run creation, no task contract. Async; the run starts when ready. `--for` = the strand this run serves (gets a `parent-of` edge); `--spawned-by` = *your* run id when you are an agent spawning a helper (provenance only). Helpers usually pass only `--spawned-by`. `--interactive` launches the harness into a multiplexer session via `--backend`: with `--for` the run completes when that strand closes, without it when the run strand itself is closed; `--reap manual` leaves the finished session open for the human (default `auto` tears it down, capturing scrollback first when the backend supports it).
 → `{"id","title","state","phase","harness", …}` (run summary)
 
 ```
 agent ps [--active] [--for <strand-id>]
 ```
-List run summaries.
-→ `[{"id","title","state","phase","harness","for"?,"spawned-by"?,"attempt"?,"result"?,"error"?}]`
+List run summaries. Listing doubles as an interactive liveness check: a dead session is failed here. Interactive summaries add `mode`, `backend`, `session`, and the `attach` command to hand the human.
+→ `[{"id","title","state","phase","harness","for"?,"spawned-by"?,"attempt"?,"result"?,"error"?,"mode"?,"backend"?,"session"?,"attach"?}]`
 
 ```
 agent await <run-id>... [--under <root-id>] [--timeout-secs n]
@@ -121,13 +124,13 @@ A finished helper's findings are in `result` right here — you rarely need logs
 ```
 agent logs <run-id> [--tail n]
 ```
-The harness process's captured stdout/stderr (debugging, failure forensics).
-→ `{"id","out":{"path","text"},"err":{"path","text"}}`
+The harness process's captured stdout/stderr (debugging, failure forensics). For a **running interactive** run, logs captures the session transcript fresh (harness `:capture` when configured, else backend scrollback) — a coordinator peek without attaching; finished interactive runs return the transcript persisted at teardown, and `err` is omitted.
+→ `{"id","out":{"path","text"},"err":{"path","text"}?}`
 
 ```
 agent kill <run-id>
 ```
-Kill a **running** run's live process and mark the run failed. Fails loudly on a run with no live process — for a run that already failed, use `retry`.
+Kill a **running** run's live process or interactive session and mark the run failed. Fails loudly on a run with no live process/session — for a run that already failed, use `retry`.
 → `{"killed":"<run-id>"}`
 
 ```
@@ -135,27 +138,35 @@ agent harnesses
 ```
 → `[{"name","kind":"harness|alias","alias-of"?,"argv"?,"doc"?}]`
 
+```
+agent backends
+```
+List configured interactive session backends (terminal multiplexers registered with `defbackend!` in trusted config; see the [shuttle backend registry](../shuttle/README.md#4-backend-registry-interactive-sessions)).
+→ `[{"name","ops":["start","alive","stop",...],"doc"?}]`
+
 ### Delegation verbs (the task-contract layer)
 
 ```
 agent delegate <task-id> [--harness h] [--cwd dir] [--prompt <extra>] [--spawned-by <run-id>]
+                         [--interactive [--backend b] [--reap auto|manual]]
 ```
 Delegate one **active** task strand: builds the worker prompt from the task's current title + body + `validation` attribute, injects the worker contract, and spawns a run attached `--for` the task.
 - **Harness resolution:** `--harness` flag > task's `harness` attribute > fail loudly (no default).
 - **cwd resolution:** `--cwd` flag > task's `cwd` attribute > workspace root.
-- Fails loudly when: task not active; task not **ready** (still has active `depends-on` blockers — delegation follows readiness); task has no body and no `--prompt`; no harness resolvable; task is `hitl=true` (coordinator/user must do it); task already has an **active** run (kill or await it first; a failed/exhausted one wants `retry`; a successful one must be verified and closed).
-→ `{"task":"<task-id>","run":{"id","phase","harness"}}`
+- **`--interactive`** opens a live multiplexer session for the task instead of a headless run — this is how `hitl=true` tasks are delegated. Backend resolution: `--backend` flag > task's `backend` attribute > fail loudly. The prompt frames the agent as pairing *with* the user (the human is the authority on scope and completion), and the session is reaped when the task closes.
+- Fails loudly when: task not active; task not **ready** (still has active `depends-on` blockers — delegation follows readiness); task has no body and no `--prompt`; no harness resolvable; task is `hitl=true` and `--interactive` was not passed; no backend resolvable with `--interactive`; task already has an **active** run (kill or await it first; a failed/exhausted one wants `retry`; a successful one must be verified and closed).
+→ `{"task":"<task-id>","run":{"id","phase","harness","attach"?}}`
 
 ```
 agent delegate --ready <plan-id> [--cwd dir]
 ```
-Fan-out: delegate every **ready** task under the plan (all blockers closed) that has no active or successful run and is not `hitl`. Harness comes from **each task's** `harness` attribute (this is how mixed-harness fan-out works); fails loudly up front, delegating nothing, if any ready task lacks one. Idempotent: re-invoke after verifying + closing finished tasks to pick up newly-unblocked work.
+Fan-out: delegate every **ready** task under the plan (all blockers closed) that has no active or successful run and is not `hitl`. Harness comes from **each task's** `harness` attribute (this is how mixed-harness fan-out works); fails loudly up front, delegating nothing, if any ready task lacks one. Idempotent: re-invoke after verifying + closing finished tasks to pick up newly-unblocked work. `--interactive` is deliberately rejected here — live sessions are delegated one task at a time so the human is never swamped.
 → `{"plan":"<plan-id>","delegated":[{"task","run":{"id","phase","harness"}}],"skipped":[{"task","reason":"hitl|has-active-run|failed-needs-retry|already-succeeded"}]}`
 
 ```
 agent retry <task-or-run-id> [--harness h] [--cwd dir] [--prompt <extra>]
 ```
-**The** recovery verb. Given a **task id**: finds its failed/exhausted run, marks that run `superseded` (closed with phase `superseded` — it stops blocking delegate-eligibility; its logs and notes remain), rebuilds the prompt from the task's **current** body, and spawns a fresh run. When the contract was the problem, fix the body **first** (`strand update <task-id> --attr-file body=<path>`). Given a **raw run id**: same supersede-and-respawn with the original prompt. Fails loudly if the target has no failed/exhausted run to supersede.
+**The** recovery verb. Given a **task id**: finds its failed/exhausted run, marks that run `superseded` (closed with phase `superseded` — it stops blocking delegate-eligibility; its logs and notes remain), rebuilds the prompt from the task's **current** body, and spawns a fresh run. When the contract was the problem, fix the body **first** (`strand update <task-id> --attr-file body=<path>`). Given a **raw run id**: same supersede-and-respawn with the original prompt. A failed interactive run retries as a fresh session on the same backend. Fails loudly if the target has no failed/exhausted run to supersede.
 → `{"superseded":"<old-run-id>","task":"<task-id>"?,"run":{"id","phase","harness"}}`
 
 ```
@@ -207,7 +218,7 @@ printf '%s' '{"feature":"<slug>","title":"...","body":"...?","tasks":[
 ```
 → `{"plan":{"id","title"},"tasks":{"<your-key>":{"id","title"}}}`
 
-Task fields: `key`, `title`, `body` (the full worker contract: scope, owned files, validation commands, commit policy), `depends_on?` (sibling **keys**, resolved to strand ids at weave time), `harness?` (set it here — `delegate --ready` requires it), `cwd?`, `validation?` (list of commands), `max-attempts?`, `hitl?` (true = coordinator/user work; `delegate` refuses it), `kind?` (`task` or `review`). Harness and validation are independent axes: harness picks **who** does the work; validation lists the commands that **prove** it.
+Task fields: `key`, `title`, `body` (the full worker contract: scope, owned files, validation commands, commit policy), `depends_on?` (sibling **keys**, resolved to strand ids at weave time), `harness?` (set it here — `delegate --ready` requires it), `cwd?`, `validation?` (list of commands), `max-attempts?`, `hitl?` (true = human-in-the-loop work; headless `delegate` refuses it, `delegate --interactive` opens it as a live session), `kind?` (`task` or `review`). Harness and validation are independent axes: harness picks **who** does the work; validation lists the commands that **prove** it.
 
 ---
 
