@@ -108,6 +108,32 @@
    :event/at "2026-06-27T00:00:00Z"
    :event/source :test})
 
+;; Event handlers are registered by var symbol, not by closure, so the test
+;; drain handler receives the per-call promise through namespace state. This
+;; namespace is deliberately run as a serial test island.
+(def ^:private event-drain-signal (atom nil))
+
+(defn event-drain-handler
+  "Signal that the event drain sentinel has reached the event worker."
+  [_event]
+  (deliver @event-drain-signal true))
+
+(defn drain-events!
+  "Block until every event enqueued before this call has been delivered.
+
+  Relies on the runtime event worker being a single FIFO consumer."
+  [rt]
+  (let [signal (promise)]
+    (reset! event-drain-signal signal)
+    (api/register-event-handler! rt :event-drain #{:test/event-drain}
+                                 'skein.weaver-test/event-drain-handler {})
+    (try
+      (api/enqueue-event! rt (test-event :test/event-drain (str (random-uuid))))
+      (when-not (deref signal 5000 false)
+        (throw (ex-info "Timed out draining event queue" {})))
+      (finally
+        (api/unregister-event-handler! rt :event-drain)))))
+
 (def not-callable-event-handler 42)
 
 (def hook-contexts (atom []))
@@ -803,6 +829,7 @@
       (let [existing-b (api/add rt {:title "Existing B" :attributes {:owner "agent"}})
             existing-a (api/add rt {:title "Existing A" :attributes {:owner "agent"}})
             burned (api/add rt {:title "Burned"})]
+        (drain-events! rt)
         (reset! delivered-events [])
         (api/register-event-handler! rt :capture #{:batch/applied :strand/added :strand/updated :strand/burned}
                                      'skein.weaver-test/capture-event {})
@@ -859,7 +886,7 @@
           (is (= {:attributes {:phase "done-a"}} (:strand/patch update-a-event)))
           (is (= [(:id burned)] (:strand/burned-ids burn-event)))
           (is (= [burned] (:strand/before burn-event)))
-          (Thread/sleep 100)
+          (drain-events! rt)
           (is (= [:batch/applied :strand/added :strand/added :strand/updated :strand/updated :strand/burned]
                  (mapv :event/type @delivered-events))))))))
 
@@ -898,6 +925,7 @@
       (api/register-hook! rt :capture-batch #{:batch/apply-before-commit} 'skein.weaver-test/capture-hook {})
       (let [existing (api/add rt {:title "Existing" :attributes {:owner "agent"}})
             burnable (api/add rt {:title "Burnable"})]
+        (drain-events! rt)
         (reset! hook-contexts [])
         (reset! delivered-events [])
         (let [payload {:refs {:existing (:id existing) :burnable (:id burnable)}
@@ -932,6 +960,7 @@
         (let [keep (api/add rt {:title "Keep" :attributes {:stable true}})
               burn-reject (api/add rt {:title "Burn reject"})
               before (db-test/graph-snapshot (:datasource rt))]
+          (drain-events! rt)
           (reset! delivered-events [])
           (try
             (api/apply-batch rt {:refs {:keep (:id keep) :burn (:id burn-reject)}
@@ -945,7 +974,7 @@
               (is (= :batch/apply-before-commit (:hook/type (ex-data e))))
               (is (= :reject-batch (:hook/key (ex-data e))))
               (is (= "policy/rejected" (:hook/cause-code (ex-data e))))))
-          (Thread/sleep 100)
+          (drain-events! rt)
           (is (= before (db-test/graph-snapshot (:datasource rt))))
           (is (empty? @delivered-events)))))))
 
