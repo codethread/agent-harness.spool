@@ -4,11 +4,11 @@
             [nrepl.core :as nrepl]
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]))
+
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")
                        (str config-dir "/data")))
-
 
 (defn- temp-dir [prefix]
   (.toFile (java.nio.file.Files/createTempDirectory
@@ -16,9 +16,11 @@
              prefix
              (make-array java.nio.file.attribute.FileAttribute 0))))
 
-(defn- delete-recursive [file]
-  (doseq [child (reverse (file-seq file))]
-    (.delete child)))
+(defn- keep-add-libs-root! [_file]
+  ;; tools.deps keeps add-libs local roots in JVM-global basis state. Retaining
+  ;; temp spool roots prevents later add-libs calls in this shard from failing
+  ;; while canonicalizing an earlier, now-deleted local/root coordinate.
+  nil)
 
 (defn- write-hot-lib! [config-dir suffix]
   (let [root (io/file config-dir "spools" "runtime-spike")
@@ -30,6 +32,27 @@
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     {:root (.getCanonicalPath root)
      :lib (symbol (str "runtime-spike/lib-" suffix))
+     :ns ns-sym
+     :marker (symbol (str ns-sym "/marker"))}))
+
+(defn- write-maven-spool! [config-dir suffix]
+  (let [root (io/file config-dir "spools" "maven-spike")
+        ns-sym (symbol (str "maven-spike.hot-" suffix))
+        src-dir (io/file root "src" "maven_spike")
+        lib (symbol (str "maven-spike/lib-" suffix))]
+    (.mkdirs src-dir)
+    (spit (io/file src-dir (str "hot_" suffix ".clj"))
+          (str "(ns " ns-sym ")\n"
+               "(defn marker []\n"
+               "  (binding [*use-context-classloader* true]\n"
+               "    (ffirst ((requiring-resolve 'clojure.data.csv/read-csv) \"daemon-maven-added\"))))\n"))
+    (spit (io/file root "deps.edn")
+          (pr-str {:paths ["src"]
+                   :deps {'org.clojure/data.csv {:mvn/version "1.1.0"}}}))
+    (spit (io/file config-dir "spools.edn")
+          (pr-str {:spools {lib {:local/root "spools/maven-spike"}}}))
+    {:root (.getCanonicalPath root)
+     :lib lib
      :ns ns-sym
      :marker (symbol (str ns-sym "/marker"))}))
 
@@ -63,4 +86,48 @@
           (finally
             (runtime/stop! rt))))
       (finally
-        (delete-recursive config-dir)))))
+        (keep-add-libs-root! config-dir)))))
+
+(deftest approved-spool-sync-loads-maven-deps-before-activation
+  (let [config-dir (temp-dir "skein-runtime-maven-spool-config")
+        suffix (str "s" (.replace (str (java.util.UUID/randomUUID)) "-" ""))]
+    (try
+      (let [world (test-world (.getCanonicalPath config-dir))
+            rt (runtime/start! nil {:world world})
+            {:keys [lib ns marker]} (write-maven-spool! config-dir suffix)]
+        (try
+          (is (= ":skipped"
+                 (daemon-value rt `(do (require 'skein.api.current.alpha
+                                                'skein.api.runtime.alpha)
+                                       (:status (skein.api.runtime.alpha/use!
+                                                (skein.api.current.alpha/runtime)
+                                                :maven-spike
+                                                {:spools ['~lib]
+                                                 :ns '~ns
+                                                 :call '~marker}))))))
+          (is (= ":loaded"
+                 (daemon-value rt `(do (require 'skein.api.current.alpha
+                                                'skein.api.runtime.alpha)
+                                       (get-in (skein.api.runtime.alpha/sync!
+                                                (skein.api.current.alpha/runtime))
+                                               [:spools '~lib :status])))))
+          (is (= ":loaded"
+                 (daemon-value rt `(do (require 'skein.api.current.alpha
+                                                'skein.api.runtime.alpha)
+                                       (:status (skein.api.runtime.alpha/use!
+                                                (skein.api.current.alpha/runtime)
+                                                :maven-spike
+                                                {:spools ['~lib]
+                                                 :ns '~ns
+                                                 :call '~marker}))))))
+          (is (= "\"daemon-maven-added\""
+                 (daemon-value rt `(do (require 'skein.api.current.alpha
+                                                'skein.api.runtime.alpha)
+                                       (get-in (skein.api.runtime.alpha/use
+                                                (skein.api.current.alpha/runtime)
+                                                :maven-spike)
+                                               [:call :return])))))
+          (finally
+            (runtime/stop! rt))))
+      (finally
+        (keep-add-libs-root! config-dir)))))

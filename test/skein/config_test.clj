@@ -68,6 +68,12 @@
                           {:local/root (.getCanonicalPath (io/file "spools/chime"))}
                           'skein.spools/backlog
                           {:local/root (.getCanonicalPath (io/file "spools/backlog"))}
+                          ;; init.clj requires this spool; the omission used to be
+                          ;; masked by fail-quiet required use!, which now throws.
+                          ;; Its root lives inside the workspace (.skein/spools/macros),
+                          ;; unlike the repo-root spools above.
+                          'skein.macros/macros
+                          {:local/root (.getCanonicalPath (io/file ".skein/spools/macros"))}
                           'codethread/devflow
                           {:local/root (.getCanonicalPath (test-alpha/spool-checkout-root "skein/spools/devflow.clj"))}}}))
   ;; The shipped config leaves chime's notifier to each developer's personal

@@ -102,7 +102,7 @@ For non-interactive trusted forms:
 printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
 ```
 
-For spool workspace workflows, use `spools.edn` (approving `:local/root` paths or sha-pinned `:git/url`+`:git/sha` coordinates), explicit-runtime `skein.api.runtime.alpha/sync!`, layered `runtime/use!` after `(skein.api.current.alpha/runtime)`, and live weaver REPL/config loading. Shared spools may carry a `spool.edn` manifest (provides/needs) that sync reports on and `use!` gates on; see docs/writing-shared-spools.md. There are intentionally no plugin/package CLI commands and no transitive fetching.
+For spool workspace workflows, use `spools.edn` (approving `:local/root` paths or sha-pinned `:git/url`+`:git/sha` coordinates), explicit-runtime `skein.api.runtime.alpha/sync!`, layered `runtime/use!` after `(skein.api.current.alpha/runtime)`, and live weaver REPL/config loading. Shared spools document prerequisite approvals and activation order in README Dependency information / Activation snippets; see docs/writing-shared-spools.md. There are intentionally no plugin/package CLI commands and no transitive spool fetching.
 
 ## Repo coordination workspace (.skein)
 

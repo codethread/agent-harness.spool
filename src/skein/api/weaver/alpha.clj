@@ -58,14 +58,7 @@
   (:event-system runtime))
 
 (defn- with-spool-classloader [runtime f]
-  (let [thread (Thread/currentThread)
-        previous-loader (.getContextClassLoader thread)
-        loader (:spool-classloader runtime)]
-    (try
-      (.setContextClassLoader thread loader)
-      (f)
-      (finally
-        (.setContextClassLoader thread previous-loader)))))
+  (runtime/with-runtime-and-spool-classloader runtime f))
 
 (defn- config-dir [runtime]
   (get-in runtime [:metadata :config-dir]))
@@ -99,10 +92,6 @@
 (def ^:private git-spool-keys #{:git/url :git/sha :git/tag :deps/root})
 (def ^:private approved-spool-keys (into local-spool-keys git-spool-keys))
 (def ^:private git-sha-pattern #"[0-9a-f]{40}")
-(def ^:private manifest-keys #{:coordinate :provides :needs :docs})
-(def ^:private need-suggestion-keys #{:suggest})
-(def ^:private suggest-keys #{:git/url})
-
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
 
@@ -239,95 +228,6 @@
               {:status :failed
                :reason reason}
               data)])
-
-(defn- manifest-invalid [lib entry message data]
-  ;; Validator ex-data may carry :manifest (the invalid value) or :reason;
-  ;; :manifest must keep meaning "normalized manifest on success" and the
-  ;; outcome :reason must stay authoritative, so both are shielded here.
-  (let [data (cond-> (dissoc data :reason)
-               (contains? data :manifest)
-               (-> (assoc :invalid-manifest (:manifest data))
-                   (dissoc :manifest)))]
-    (sync-failed lib entry :manifest-invalid (merge {:message message} data))))
-
-(defn- coordinate-mismatch [lib entry actual]
-  (sync-failed lib entry :coordinate-mismatch {:expected lib :actual actual}))
-
-(defn- normalize-provides [provides]
-  (when-not (or (vector? provides) (set? provides))
-    (throw (ex-info "spool.edn :provides must be a vector or set" {:provides provides})))
-  (doseq [ns-sym provides]
-    (when-not (symbol? ns-sym)
-      (throw (ex-info "spool.edn :provides entries must be namespace symbols" {:ns ns-sym}))))
-  (vec (sort-by str provides)))
-
-(defn- normalize-need-suggestion [need]
-  (cond
-    (nil? need) nil
-    (map? need)
-    (do
-      (when-let [unknown (seq (remove need-suggestion-keys (keys need)))]
-        (throw (ex-info "spool.edn :needs entries contain unknown keys" {:keys (vec unknown) :need need})))
-      (let [suggest (:suggest need)]
-        (when-not (and (map? suggest) (= suggest-keys (set (keys suggest))) (non-blank-string? (:git/url suggest)))
-          (throw (ex-info "spool.edn :needs :suggest requires non-blank string :git/url" {:suggest suggest})))
-        {:suggest {:git/url (:git/url suggest)}}))
-    :else
-    (throw (ex-info "spool.edn :needs values must be nil or suggestion maps" {:need need}))))
-
-(defn- normalize-needs [needs]
-  (when-not (map? needs)
-    (throw (ex-info "spool.edn :needs must be a map" {:needs needs})))
-  (into (sorted-map)
-        (map (fn [[need-lib need]]
-               (when-not (symbol? need-lib)
-                 (throw (ex-info "spool.edn :needs keys must be coordinate symbols" {:lib need-lib})))
-               [need-lib (normalize-need-suggestion need)]))
-        needs))
-
-(defn- normalize-docs [docs]
-  (cond
-    (string? docs) docs
-    (map? docs) (into (sorted-map)
-                      (map (fn [[ns-sym doc]]
-                             (when-not (symbol? ns-sym)
-                               (throw (ex-info "spool.edn :docs keys must be namespace symbols" {:ns ns-sym})))
-                             (when-not (string? doc)
-                               (throw (ex-info "spool.edn :docs values must be strings" {:ns ns-sym :doc doc})))
-                             [ns-sym doc]))
-                      docs)
-    :else (throw (ex-info "spool.edn :docs must be a string or namespace doc map" {:docs docs}))))
-
-(defn- normalize-manifest! [lib manifest]
-  (when-not (map? manifest)
-    (throw (ex-info "spool.edn must contain a map" {:manifest manifest})))
-  (when-let [unknown (seq (remove manifest-keys (keys manifest)))]
-    (throw (ex-info "spool.edn contains unknown keys" {:keys (vec unknown)})))
-  (when (and (contains? manifest :coordinate) (not (symbol? (:coordinate manifest))))
-    (throw (ex-info "spool.edn :coordinate must be a symbol" {:coordinate (:coordinate manifest)})))
-  (when (and (contains? manifest :coordinate) (not= lib (:coordinate manifest)))
-    (throw (ex-info "spool.edn :coordinate does not match approved coordinate"
-                    {:reason :coordinate-mismatch
-                     :expected lib
-                     :actual (:coordinate manifest)})))
-  (cond-> {}
-    (contains? manifest :coordinate) (assoc :coordinate (:coordinate manifest))
-    (contains? manifest :provides) (assoc :provides (normalize-provides (:provides manifest)))
-    (contains? manifest :needs) (assoc :needs (normalize-needs (:needs manifest)))
-    (contains? manifest :docs) (assoc :docs (normalize-docs (:docs manifest)))))
-
-(defn- read-spool-manifest [lib entry root]
-  (let [manifest-file (io/file root "spool.edn")]
-    (when (.isFile manifest-file)
-      (try
-        {:manifest (normalize-manifest! lib (query/read-edn-file manifest-file))}
-        (catch clojure.lang.ExceptionInfo e
-          (if (= :coordinate-mismatch (:reason (ex-data e)))
-            {:failed (coordinate-mismatch lib entry (:actual (ex-data e)))}
-            {:failed (manifest-invalid lib entry (ex-message e) (ex-data e))}))
-        (catch Throwable t
-          {:failed (manifest-invalid lib entry (or (ex-message t) "spool.edn is malformed or unreadable")
-                                     {:class (str (class t))})})))))
 
 (defn- root-paths [root]
   (let [deps-file (io/file root "deps.edn")]
@@ -487,32 +387,79 @@
         (throw (ex-info "Local root classpath entry must be a directory" {:root root :path (.getPath path)})))
       (.addURL ^clojure.lang.DynamicClassLoader loader (.toURL (.toURI path))))))
 
-(defn- shared-source-local-spool? [entry]
-  (and (= :local (:kind entry))
-       (= :shared (get-in entry [:source :kind]))))
+(def ^:private allowed-spool-maven-coordinate-keys
+  #{:mvn/version :exclusions :classifier :extension})
 
-(defn- reject-unapproved-tools-deps! [entry]
+(def ^:private rejected-spool-deps-keys
+  #{:git/url :git/sha :local/root})
+
+(defn- mutable-maven-version? [version]
+  (or (str/ends-with? version "-SNAPSHOT")
+      (#{"RELEASE" "LATEST"} version)))
+
+(defn- read-spool-deps-edn [entry]
   (let [deps-file (io/file (:root entry) "deps.edn")]
     (when (.isFile deps-file)
-      (let [deps (query/read-edn-file deps-file)]
-        (when (seq (:deps deps))
-          (case (:kind entry)
-            :git
-            (throw (ex-info "Git spool deps.edn must not declare :deps; declare needed spools as spool.edn :needs instead"
-                            {:root (:root entry) :deps (vec (keys (:deps deps)))}))
+      (assoc (query/read-edn-file deps-file)
+             ::deps-file (.getPath deps-file)))))
 
-            :local
-            (when (shared-source-local-spool? entry)
-              (throw (ex-info (str "Shared spools.edn local spool deps.edn must not declare :deps; "
-                                   "shared file " (get-in entry [:source :file])
-                                   " cannot consent to transitive tools.deps dependencies. "
-                                   "Declare needed spools as spool.edn :needs, or put trusted local-only deps in gitignored spools.local.edn.")
-                              {:root (:root entry)
-                               :deps-file (.getPath deps-file)
-                               :source-file (get-in entry [:source :file])
-                               :deps (vec (keys (:deps deps)))})))
+(defn- validate-spool-maven-deps! [entry deps]
+  (when (contains? deps :mvn/repos)
+    (throw (ex-info "Spool deps.edn must not declare top-level :mvn/repos"
+                    {:root (:root entry)
+                     :deps-file (::deps-file deps)
+                     :key :mvn/repos})))
+  (when (contains? deps :mvn/local-repo)
+    (throw (ex-info "Spool deps.edn must not declare top-level :mvn/local-repo"
+                    {:root (:root entry)
+                     :deps-file (::deps-file deps)
+                     :key :mvn/local-repo})))
+  (when-not (or (nil? (:deps deps)) (map? (:deps deps)))
+    (throw (ex-info "Spool deps.edn :deps must be a map"
+                    {:root (:root entry)
+                     :deps-file (::deps-file deps)
+                     :deps (:deps deps)})))
+  (doseq [[lib coord] (:deps deps)]
+    (when-not (symbol? lib)
+      (throw (ex-info "Spool deps.edn :deps keys must be symbols"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib})))
+    (when-not (map? coord)
+      (throw (ex-info "Spool deps.edn :deps entries must be Maven coordinate maps"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib
+                       :coord coord})))
+    (when-let [source-keys (seq (filter #(contains? coord %) rejected-spool-deps-keys))]
+      (throw (ex-info "Spool deps.edn :deps entries must not declare source-bearing coordinates"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib
+                       :keys (vec source-keys)})))
+    (when-not (string? (:mvn/version coord))
+      (throw (ex-info "Spool deps.edn :deps entries must declare string :mvn/version"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib
+                       :coord coord})))
+    (when (mutable-maven-version? (:mvn/version coord))
+      (throw (ex-info "Spool deps.edn :deps entries must not use mutable Maven versions"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib
+                       :mvn/version (:mvn/version coord)})))
+    (when-let [unknown (seq (remove allowed-spool-maven-coordinate-keys (keys coord)))]
+      (throw (ex-info "Spool deps.edn :deps entries contain unsupported Maven coordinate keys"
+                      {:root (:root entry)
+                       :deps-file (::deps-file deps)
+                       :lib lib
+                       :keys (vec unknown)}))))
+  (:deps deps))
 
-            nil))))))
+(defn- spool-maven-deps! [entry]
+  (when-let [deps (read-spool-deps-edn entry)]
+    (not-empty (validate-spool-maven-deps! entry deps))))
 
 (defn- materialize-git-spool-outcome
   "Materialize a git entry, returning {:fetch ...} or {:failed <sync-failed>}.
@@ -548,66 +495,40 @@
       (sync-failed lib entry :unreadable-root (cond-> {} fetch (assoc :fetch fetch)))
 
       :else
-      (let [{:keys [manifest failed]} (read-spool-manifest lib entry (:root entry))]
-        (if failed
-          (cond-> failed fetch (clojure.core/update 1 assoc :fetch fetch))
-          (try
-            ;; Shared approvals must not smuggle transitive tools.deps
-            ;; resolution; dependencies are approved spool coordinates unless a
-            ;; developer opts into local-only deps from gitignored config.
-            (reject-unapproved-tools-deps! entry)
-            (let [added (with-spool-classloader
-                          runtime
-                          #(binding [clojure.core/*repl* true]
-                             (repl-deps/add-libs {lib {:local/root (:root entry)}})))]
-              (add-root-paths-to-spool-loader! runtime (:root entry))
-              [lib (cond-> (assoc (sync-result-base lib entry)
-                                  :status (if (seq added) :loaded :already-available))
-                     fetch (assoc :fetch fetch)
-                     manifest (assoc :manifest manifest))])
-            (catch Throwable t
-              (sync-failed lib entry :runtime-add-failed (cond-> {:message (ex-message t)
-                                                                  :class (str (class t))}
-                                                           fetch (assoc :fetch fetch))))))))))
+      (try
+        (let [maven-deps (spool-maven-deps! entry)
+              added-maven (when maven-deps
+                            (with-spool-classloader
+                              runtime
+                              #(binding [clojure.core/*repl* true]
+                                 (repl-deps/add-libs maven-deps))))
+              added (with-spool-classloader
+                      runtime
+                      #(binding [clojure.core/*repl* true]
+                         (repl-deps/add-libs {lib {:local/root (:root entry)}})))]
+          (add-root-paths-to-spool-loader! runtime (:root entry))
+          [lib (cond-> (assoc (sync-result-base lib entry)
+                              :status (if (or (seq added-maven) (seq added))
+                                        :loaded
+                                        :already-available))
+                 fetch (assoc :fetch fetch))])
+        (catch Throwable t
+          (sync-failed lib entry :runtime-add-failed (cond-> {:message (ex-message t)
+                                                              :class (str (class t))}
+                                                       (ex-data t) (assoc :data (ex-data t))
+                                                       fetch (assoc :fetch fetch))))))))
 
 (defn- successful-sync? [sync]
   (#{:loaded :already-available} (:status sync)))
-
-(defn- unmet-needs [approved-spools results sync]
-  (let [needs (get-in sync [:manifest :needs])]
-    (vec
-     (keep (fn [[need-lib need]]
-             (cond
-               (not (contains? approved-spools need-lib))
-               (cond-> {:lib need-lib
-                        :reason :not-approved}
-                 (:suggest need) (assoc :suggest (:suggest need)))
-
-               (not (successful-sync? (get results need-lib)))
-               (cond-> {:lib need-lib
-                        :reason :sync-failed}
-                 (:suggest need) (assoc :suggest (:suggest need)))))
-           needs))))
-
-(defn- add-unmet-needs [approved results]
-  (let [approved-spools (:spools approved)]
-    (into (sorted-map)
-          (map (fn [[lib sync]]
-                 [lib (if (successful-sync? sync)
-                        (let [unmet (unmet-needs approved-spools results sync)]
-                          (cond-> sync (seq unmet) (assoc :unmet-needs unmet)))
-                        sync)]))
-          results)))
 
 (defn sync-approved-spools
   "Load approved local spools into the runtime classloader and record sync status."
   [runtime]
   (reset! (approved-spool-sync-state runtime) {})
   (let [approved (approved-spools runtime)
-        initial-results (into (sorted-map)
-                              (map (fn [[lib entry]] (sync-approved-spool! runtime lib entry)))
-                              (:spools approved))
-        results (add-unmet-needs approved initial-results)]
+        results (into (sorted-map)
+                      (map (fn [[lib entry]] (sync-approved-spool! runtime lib entry)))
+                      (:spools approved))]
     (reset! (approved-spool-sync-state runtime) results)
     {:spools results}))
 
@@ -684,19 +605,9 @@
 
 (defn- skip-use [runtime key opts reason data]
   (let [result (record-use! runtime key (merge {:key key :opts opts :status :skipped :reason reason} data))]
-    (when (and (:required? opts) (#{:unmet-needs :provides-unloadable} reason))
+    (when (and (:required? opts) (#{:not-approved :not-synced :sync-failed} reason))
       (throw (ex-info "Required module use was skipped" result)))
     result))
-
-(defn- require-provided-ns [runtime ns-sym]
-  (try
-    (with-spool-classloader runtime #(require ns-sym))
-    nil
-    (catch Throwable t
-      {:ns ns-sym
-       :message (ex-message t)
-       :class (str (class t))
-       :data (ex-data t)})))
 
 (defn- use-spool-skip [runtime opts]
   (let [approved (approved-spools runtime)
@@ -713,14 +624,8 @@
                 (= :failed (:status sync))
                 [:sync-failed {:lib lib :sync sync}]
 
-                (seq (:unmet-needs sync))
-                [:unmet-needs {:lib lib :unmet-needs (:unmet-needs sync)}]
-
                 :else
-                (some (fn [ns-sym]
-                        (when-let [failure (require-provided-ns runtime ns-sym)]
-                          [:provides-unloadable {:lib lib :provides-unloadable failure}]))
-                      (get-in sync [:manifest :provides])))))
+                nil)))
           (:spools opts))))
 
 (defn- use-after-skip [runtime opts]

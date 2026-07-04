@@ -40,7 +40,7 @@ of a pinned commit before the weaver will fetch or activate them.
 
 | Spool | Source | Contract doc | Purpose |
 |---|---|---|---|
-| `skein.spools.devflow` | [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool) | [devflow.md](https://github.com/codethread/devflow.spool/blob/de735e74b4bae2f9e9f5e005033c969ad103749c/devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
+| `skein.spools.devflow` | [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool) | [devflow.md](https://github.com/codethread/devflow.spool/blob/6c0f8c7e20a7f6de4cf81c98f4d7a33388663592/devflow.md) | Reference devflow lifecycle built on the workflow engine: intake → proposal → spec/plan → tasks/implementation stages with HITL checkpoints. |
 
 This repo consumes devflow via a sha-pinned `:git/url`+`:git/sha` coordinate in
 `.skein/spools.edn`, activates it with `:required? true` in `.skein/init.clj`,
@@ -61,8 +61,8 @@ here, behind the workspace's explicit `spools.edn` consent. They also serve
 as the worked example of authoring your own spool
 ([docs/skein.md](../docs/skein.md#authoring-your-own-spool-code)). For
 publishing a spool for others by git coordinate, SHA-pinned approval,
-`spool.edn` manifests, unmet-need consent loops, and local development
-overrides, see [Writing shared spools](../docs/writing-shared-spools.md#publishing-a-shared-spool-with-git-distribution).
+README Dependency information / Activation snippets, Maven-only spool-root
+dependencies, and local development overrides, see [Writing shared spools](../docs/writing-shared-spools.md#publishing-a-shared-spool-with-git-distribution).
 
 | Spool | Contract doc | Purpose |
 |---|---|---|

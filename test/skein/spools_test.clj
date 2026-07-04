@@ -414,162 +414,98 @@
                             :status :already-available}}}
                (runtime-alpha/sync! rt)))))))
 
-(deftest sync-parses-optional-spool-manifest
+(deftest sync-ignores-spool-manifest-files
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            ns-sym (symbol (str "demo.manifest_" suffix))
-            lib (symbol (str "demo/manifest-" suffix))
-            root (write-local-lib! config-dir "manifest" ns-sym)
-            manifest {:coordinate lib
-                      :provides #{ns-sym}
-                      :needs {'demo/needed nil}
-                      :docs {ns-sym "docs"}}]
-        (write-spool-manifest! root manifest)
-        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/manifest"}}}))
+            ns-sym (symbol (str "demo.ignored_manifest_" suffix))
+            lib (symbol (str "demo/ignored-manifest-" suffix))
+            root (write-local-lib! config-dir "ignored-manifest" ns-sym)]
+        (write-spool-manifest! root {:coordinate 'demo/other
+                                     :provides ['demo.missing]
+                                     :needs {'demo/missing {:suggest {:git/url "file:///tmp/suggested"}}}
+                                     :docs []})
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/ignored-manifest"}}}))
         (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
           (is (= :loaded (:status result)))
-          (is (= {:coordinate lib
-                  :provides [ns-sym]
-                  :needs {'demo/needed nil}
-                  :docs {ns-sym "docs"}}
-                 (:manifest result)))
-          (is (= [{:lib 'demo/needed :reason :not-approved}]
-                 (:unmet-needs result))))))))
+          (is (not (contains? result :manifest)))
+          (is (not (contains? result :unmet-needs)))
+          (is (= :loaded (:status (runtime-alpha/use! rt :ignored/manifest {:ns ns-sym :spools [lib]})))))))))
 
-(deftest sync-omits-manifest-key-when-spool-manifest-is-absent
+(deftest use-is-driven-by-consumer-spools-after-load-and-call-options
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            ns-sym (symbol (str "demo.no_manifest_" suffix))
-            lib (symbol (str "demo/no-manifest-" suffix))]
-        (write-local-lib! config-dir "no-manifest" ns-sym)
-        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/no-manifest"}}}))
-        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+            base-ns (symbol (str "demo.base_" suffix))
+            child-ns (symbol (str "demo.child_" suffix))
+            base-lib (symbol (str "demo/base-" suffix))
+            child-lib (symbol (str "demo/child-" suffix))
+            called-file (io/file config-dir "called.edn")]
+        (write-local-lib! config-dir "base" base-ns)
+        (write-local-lib! config-dir "child" child-ns)
+        (write-spool-ns! (io/file config-dir "spools" "child")
+                         child-ns
+                         (str "(ns " child-ns ")
+"
+                              "(defn install! [] (spit " (pr-str (str called-file)) " (pr-str :called)) :installed)
+"))
+        (write-spools! config-dir (pr-str {:spools {base-lib {:local/root "spools/base"}
+                                                   child-lib {:local/root "spools/child"}}}))
+        (runtime-alpha/sync! rt)
+        (is (= :loaded (:status (runtime-alpha/use! rt :base {:ns base-ns :spools [base-lib]}))))
+        (let [result (runtime-alpha/use! rt :child {:ns child-ns
+                                                    :spools [base-lib child-lib]
+                                                    :after [:base]
+                                                    :call (symbol (str child-ns "/install!"))})]
           (is (= :loaded (:status result)))
-          (is (not (contains? result :manifest))))))))
+          (is (= :installed (get-in result [:call :return])))
+          (is (= :called (read-string (slurp called-file)))))))))
 
-(deftest sync-fails-malformed-spool-manifests-loudly-without-loading-root
-  (with-runtime
-    (fn [rt config-dir]
-      (doseq [[label manifest]
-              [["non-map" []]
-               ["unknown key" {:extra true}]
-               ["bad coordinate" {:coordinate "demo/lib"}]
-               ["bad provides shape" {:provides 'demo.core}]
-               ["bad provides entry" {:provides ["demo.core"]}]
-               ["bad needs shape" {:needs []}]
-               ["bad need coordinate" {:needs {"demo/lib" nil}}]
-               ["bad need value" {:needs {'demo/lib true}}]
-               ["unknown suggestion key" {:needs {'demo/lib {:suggest {:git/url "u"} :extra true}}}]
-               ["blank suggestion url" {:needs {'demo/lib {:suggest {:git/url " "}}}}]
-               ["bad docs shape" {:docs []}]
-               ["bad docs key" {:docs {"demo.core" "docs"}}]
-               ["bad docs value" {:docs {'demo.core 1}}]]]
-        (testing label
-          (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-                ns-sym (symbol (str "demo.bad_manifest_" suffix))
-                lib (symbol (str "demo/bad-manifest-" suffix))
-                root (write-local-lib! config-dir (str "bad-manifest-" suffix) ns-sym)]
-            (write-spool-manifest! root manifest)
-            (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/bad-manifest-" suffix)}}}))
-            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
-              (is (= :failed (:status result)))
-              (is (= :manifest-invalid (:reason result)))
-              (is (not (contains? result :manifest)))
-              (when (= label "non-map")
-                (is (= [] (:invalid-manifest result))))
-              (is (thrown? Exception (requiring-resolve (symbol (str ns-sym "/marker"))))))))))))
-
-(deftest sync-fails-coordinate-mismatched-spool-manifest
+(deftest use-required-spool-gates-throw-for-surviving-skip-reasons
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            ns-sym (symbol (str "demo.coordinate_mismatch_" suffix))
-            lib (symbol (str "demo/coordinate-mismatch-" suffix))
-            root (write-local-lib! config-dir "coordinate-mismatch" ns-sym)]
-        (write-spool-manifest! root {:coordinate 'demo/other})
-        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/coordinate-mismatch"}}}))
-        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
-          (is (= :failed (:status result)))
-          (is (= :coordinate-mismatch (:reason result)))
-          (is (= lib (:expected result)))
-          (is (= 'demo/other (:actual result))))))))
-
-(deftest sync-reports-satisfied-and-unmet-manifest-needs
-  (with-runtime
-    (fn [rt config-dir]
-      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            base-ns (symbol (str "demo.need_base_" suffix))
-            needing-ns (symbol (str "demo.need_consumer_" suffix))
-            failed-ns (symbol (str "demo.need_failed_" suffix))
-            base-lib (symbol (str "demo/need-base-" suffix))
-            needing-lib (symbol (str "demo/need-consumer-" suffix))
-            failed-lib (symbol (str "demo/need-failed-" suffix))
-            base-root (write-local-lib! config-dir (str "need-base-" suffix) base-ns)
-            needing-root (write-local-lib! config-dir (str "need-consumer-" suffix) needing-ns)
-            failed-root (write-local-lib! config-dir (str "need-failed-" suffix) failed-ns)]
-        (write-spool-manifest! base-root {:coordinate base-lib})
-        (write-spool-manifest! needing-root {:needs {base-lib nil
-                                                     'demo/unapproved {:suggest {:git/url "file:///tmp/suggested"}}
-                                                     failed-lib nil}})
-        (spit (io/file failed-root "deps.edn") "{:paths [}")
-        (write-spools! config-dir (pr-str {:spools {base-lib {:local/root (str "spools/need-base-" suffix)}
-                                                needing-lib {:local/root (str "spools/need-consumer-" suffix)}
-                                                failed-lib {:local/root (str "spools/need-failed-" suffix)}}}))
-        (let [results (:spools (runtime-alpha/sync! rt))]
-          (is (= :loaded (get-in results [base-lib :status])))
-          (is (= :loaded (get-in results [needing-lib :status])))
-          (is (= :failed (get-in results [failed-lib :status])))
-          (is (= #{{:lib 'demo/unapproved
-                    :reason :not-approved
-                    :suggest {:git/url "file:///tmp/suggested"}}
-                   {:lib failed-lib
-                    :reason :sync-failed}}
-                 (set (get-in results [needing-lib :unmet-needs])))))))))
-
-(deftest use-gates-on-manifest-unmet-needs-and-required-throws
-  (with-runtime
-    (fn [rt config-dir]
-      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            ns-sym (symbol (str "demo.unmet_gate_" suffix))
-            lib (symbol (str "demo/unmet-gate-" suffix))
-            root (write-local-lib! config-dir "unmet-gate" ns-sym)]
-        (write-spool-manifest! root {:needs {'demo/missing nil}})
-        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/unmet-gate"}}}))
+            ns-sym (symbol (str "demo.required_gate_" suffix))
+            approved-lib (symbol (str "demo/required-gate-" suffix))
+            failed-lib (symbol (str "demo/required-failed-" suffix))]
+        (write-local-lib! config-dir "required-gate" ns-sym)
+        (write-spools! config-dir (pr-str {:spools {approved-lib {:local/root "spools/required-gate"}
+                                                   failed-lib {:local/root "spools/missing"}}}))
+        (doseq [[label key opts expected]
+                [["not approved"
+                  :required/not-approved
+                  {:ns ns-sym :spools ['demo/not-approved] :required? true}
+                  {:reason :not-approved :lib 'demo/not-approved}]
+                 ["not synced"
+                  :required/not-synced
+                  {:ns ns-sym :spools [approved-lib] :required? true}
+                  {:reason :not-synced :lib approved-lib}]]]
+          (testing label
+            (try
+              (runtime-alpha/use! rt key opts)
+              (is false "expected required spool gate to throw")
+              (catch clojure.lang.ExceptionInfo e
+                (is (= "Required module use was skipped" (ex-message e)))
+                (is (= (merge {:key key
+                               :opts opts
+                               :status :skipped}
+                              expected)
+                       (select-keys (ex-data e) [:key :opts :status :reason :lib])))))))
         (runtime-alpha/sync! rt)
-        (let [result (runtime-alpha/use! rt :unmet/gate {:ns ns-sym :spools [lib]})]
-          (is (= :skipped (:status result)))
-          (is (= :unmet-needs (:reason result)))
-          (is (= [{:lib 'demo/missing :reason :not-approved}] (:unmet-needs result))))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Required module use was skipped"
-                              (runtime-alpha/use! rt :unmet/required {:ns ns-sym :spools [lib] :required? true})))))))
-
-(deftest use-verifies-manifest-provides-before-activation
-  (with-runtime
-    (fn [rt config-dir]
-      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            good-ns (symbol (str "demo.provides_good_" suffix))
-            bad-ns (symbol (str "demo.provides_missing_" suffix))
-            good-lib (symbol (str "demo/provides-good-" suffix))
-            bad-lib (symbol (str "demo/provides-bad-" suffix))
-            good-root (write-local-lib! config-dir "provides-good" good-ns)
-            bad-root (write-local-lib! config-dir "provides-bad" good-ns)]
-        (write-spool-manifest! good-root {:provides [good-ns]})
-        (write-spool-manifest! bad-root {:provides [bad-ns]})
-        (write-spools! config-dir (pr-str {:spools {good-lib {:local/root "spools/provides-good"}
-                                                bad-lib {:local/root "spools/provides-bad"}}}))
-        (runtime-alpha/sync! rt)
-        (is (= :loaded (:status (runtime-alpha/use! rt :provides/good {:ns good-ns :spools [good-lib]}))))
-        (let [result (runtime-alpha/use! rt :provides/bad {:ns good-ns :spools [bad-lib]})]
-          (is (= :skipped (:status result)))
-          (is (= :provides-unloadable (:reason result)))
-          (is (= bad-ns (get-in result [:provides-unloadable :ns])))
-          (is (string? (get-in result [:provides-unloadable :message]))))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Required module use was skipped"
-                              (runtime-alpha/use! rt :provides/required {:ns good-ns :spools [bad-lib] :required? true})))))))
+        (testing "sync failed"
+          (try
+            (runtime-alpha/use! rt :required/sync-failed {:ns ns-sym :spools [failed-lib] :required? true})
+            (is false "expected required spool gate to throw")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= "Required module use was skipped" (ex-message e)))
+              (is (= {:key :required/sync-failed
+                      :opts {:ns ns-sym :spools [failed-lib] :required? true}
+                      :status :skipped
+                      :reason :sync-failed
+                      :lib failed-lib}
+                     (select-keys (ex-data e) [:key :opts :status :reason :lib])))
+              (is (= :failed (get-in (ex-data e) [:sync :status])))
+              (is (= :missing-root (get-in (ex-data e) [:sync :reason]))))))))))
 
 ;; Dogfoods skein.test.alpha for author-visible weaver-world behavior
 ;; (LAT-PLAN-001.PH6). Uses an explicit :root because synced local roots must
@@ -773,7 +709,7 @@
         (is (#{:loaded :already-available}
              (get-in (runtime-alpha/sync! rt) [:spools lib :status])))))))
 
-(deftest sync-shared-local-spool-rejects-transitive-deps
+(deftest sync-approved-local-spool-loads-maven-deps-from-shared-config
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
@@ -782,17 +718,36 @@
             root (write-local-lib! config-dir (str "shared-local-deps-" suffix) ns-sym)]
         (spit (io/file root "deps.edn")
               (pr-str {:paths ["src"]
-                       :deps {'org.example/lib {:mvn/version "1.0.0"}}}))
+                       :deps {'org.clojure/data.json {:mvn/version "2.5.1"}}}))
         (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/shared-local-deps-" suffix)}}}))
-        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
-          (is (= :failed (:status result)))
-          (is (= :runtime-add-failed (:reason result)))
-          (is (re-find #"must not declare :deps" (:message result)))
-          (is (re-find #"spools\.edn" (:message result)))
-          (is (re-find #"cannot consent to transitive tools\.deps dependencies" (:message result)))
-          (is (re-find #"spools\.local\.edn" (:message result))))))))
+        (is (#{:loaded :already-available}
+             (get-in (runtime-alpha/sync! rt) [:spools lib :status])))))))
 
-(deftest sync-local-spools-local-root-still-allows-transitive-deps
+(deftest sync-reports-loaded-when-existing-spool-adds-new-maven-deps
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.added_maven_dep_" suffix))
+            lib (symbol (str "demo/added-maven-dep-" suffix))
+            root (write-local-lib! config-dir (str "added-maven-dep-" suffix) ns-sym)
+            calls (atom [])]
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/added-maven-dep-" suffix)}}}))
+        (with-redefs [clojure.repl.deps/add-libs (fn [libs]
+                                                   (swap! calls conj libs)
+                                                   (if (contains? libs 'org.clojure/data.csv)
+                                                     (set (keys libs))
+                                                     #{}))]
+          (is (= :already-available (get-in (runtime-alpha/sync! rt) [:spools lib :status])))
+          (spit (io/file root "deps.edn")
+                (pr-str {:paths ["src"]
+                         :deps {'org.clojure/data.csv {:mvn/version "1.1.0"}}}))
+          (is (= :loaded (get-in (runtime-alpha/sync! rt) [:spools lib :status])))
+          (is (= [{lib {:local/root (.getCanonicalPath root)}}
+                  {'org.clojure/data.csv {:mvn/version "1.1.0"}}
+                  {lib {:local/root (.getCanonicalPath root)}}]
+                 @calls)))))))
+
+(deftest sync-approved-local-overlay-rejects-source-bearing-deps
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
@@ -801,30 +756,72 @@
             root (write-local-lib! config-dir (str "local-deps-" suffix) ns-sym)]
         (spit (io/file root "deps.edn")
               (pr-str {:paths ["src"]
-                       :deps {'org.clojure/data.json {:mvn/version "2.5.1"}}}))
+                       :deps {'demo/source {:local/root "../other"}}}))
         (write-local-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/local-deps-" suffix)}}}))
-        (is (#{:loaded :already-available}
-             (get-in (runtime-alpha/sync! rt) [:spools lib :status])))))))
+        (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+          (is (= :failed (:status result)))
+          (is (= :runtime-add-failed (:reason result)))
+          (is (re-find #"source-bearing coordinates" (:message result)))
+          (is (= {:keys [:local/root] :lib 'demo/source}
+                 (select-keys (get-in result [:data]) [:keys :lib]))))))))
 
-(deftest sync-shared-local-spool-without-transitive-deps-still-loads
+(deftest sync-approved-spool-rejects-mutable-versions-and-repo-redirection
+  (with-runtime
+    (fn [rt config-dir]
+      (doseq [[label deps-edn pattern]
+              [["snapshot" {:paths ["src"] :deps {'org.example/lib {:mvn/version "1.0.0-SNAPSHOT"}}} #"mutable Maven versions"]
+               ["release" {:paths ["src"] :deps {'org.example/lib {:mvn/version "RELEASE"}}} #"mutable Maven versions"]
+               ["latest" {:paths ["src"] :deps {'org.example/lib {:mvn/version "LATEST"}}} #"mutable Maven versions"]
+               ["repos" {:paths ["src"] :mvn/repos {"central" {:url "file:/tmp/nope"}} :deps {}} #"top-level :mvn/repos"]
+               ["local repo" {:paths ["src"] :mvn/local-repo "/tmp/nope" :deps {}} #"top-level :mvn/local-repo"]]]
+        (testing label
+          (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
+                ns-sym (symbol (str "demo.bad_deps_" suffix))
+                lib (symbol (str "demo/bad-deps-" suffix))
+                root (write-local-lib! config-dir (str "bad-deps-" suffix) ns-sym)]
+            (spit (io/file root "deps.edn") (pr-str deps-edn))
+            (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/bad-deps-" suffix)}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+              (is (= :failed (:status result)))
+              (is (= :runtime-add-failed (:reason result)))
+              (is (re-find pattern (:message result))))))))))
+
+(deftest sync-approved-spool-allows-maven-refinement-keys-and-ignores-aliases
   (with-runtime
     (fn [rt config-dir]
       (let [suffix (.replace (str (java.util.UUID/randomUUID)) "-" "")
-            ns-sym (symbol (str "demo.shared_local_no_deps_" suffix))
-            lib (symbol (str "demo/shared-local-no-deps-" suffix))]
-        (write-local-lib! config-dir (str "shared-local-no-deps-" suffix) ns-sym)
-        (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/shared-local-no-deps-" suffix)}}}))
-        (is (#{:loaded :already-available}
-             (get-in (runtime-alpha/sync! rt) [:spools lib :status])))))))
+            ns-sym (symbol (str "demo.maven_refinement_" suffix))
+            lib (symbol (str "demo/maven-refinement-" suffix))
+            root (write-local-lib! config-dir (str "maven-refinement-" suffix) ns-sym)
+            calls (atom [])]
+        (spit (io/file root "deps.edn")
+              (pr-str {:paths ["src"]
+                       :deps {'org.clojure/data.json {:mvn/version "2.5.1"
+                                                      :exclusions ['org.clojure/clojure]
+                                                      :classifier "sources"
+                                                      :extension "jar"}}
+                       :aliases {:dev {:extra-deps {'demo/source {:local/root "../ignored"}}}}
+                       :ignored/top-level {:also :ignored}}))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root (str "spools/maven-refinement-" suffix)}}}))
+        (with-redefs [clojure.repl.deps/add-libs (fn [libs]
+                                                   (swap! calls conj libs)
+                                                   (set (keys libs)))]
+          (is (= :loaded (get-in (runtime-alpha/sync! rt) [:spools lib :status])))
+          (is (= [{'org.clojure/data.json {:mvn/version "2.5.1"
+                                           :exclusions ['org.clojure/clojure]
+                                           :classifier "sources"
+                                           :extension "jar"}}
+                  {lib {:local/root (.getCanonicalPath root)}}]
+                 @calls)))))))
 
-(deftest sync-git-spool-rejects-transitive-deps
+(deftest sync-git-spool-rejects-source-bearing-deps
   (with-runtime
     (fn [rt config-dir]
       (let [repo (io/file config-dir "repo")
             cache-dir (io/file config-dir "cache")
             ns-sym (symbol (str "demo.git_deps_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
             _ (init-git-repo! repo ns-sym)
-            _ (spit (io/file repo "deps.edn") (pr-str {:paths ["src"] :deps {'org.example/lib {:mvn/version "1.0.0"}}}))
+            _ (spit (io/file repo "deps.edn") (pr-str {:paths ["src"] :deps {'demo/source {:git/url "file:///tmp/repo" :git/sha (apply str (repeat 40 \a))}}}))
             _ (run-git! repo "add" ".")
             _ (run-git! repo "commit" "-m" "deps")
             sha (str/trim (run-git! repo "rev-parse" "HEAD"))
@@ -836,7 +833,7 @@
             (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
               (is (= :failed (:status result)))
               (is (= :runtime-add-failed (:reason result)))
-              (is (re-find #"must not declare :deps" (:message result)))
+              (is (re-find #"source-bearing coordinates" (:message result)))
               (is (= :fetched (:fetch result))))))))))
 
 (deftest delete-tree-removes-symlinks-without-following-them
@@ -859,25 +856,24 @@
       (finally
         (delete-recursive base)))))
 
-(deftest sync-git-manifest-failure-keeps-fetch-outcome
+(deftest sync-git-ignores-spool-manifest-and-keeps-fetch-outcome
   (with-runtime
     (fn [rt config-dir]
       (let [repo (io/file config-dir "repo")
             cache-dir (io/file config-dir "cache")
-            ns-sym (symbol (str "demo.git_bad_manifest_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            ns-sym (symbol (str "demo.git_ignored_manifest_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
             _ (init-git-repo! repo ns-sym)
             _ (write-spool-manifest! repo [])
             _ (run-git! repo "add" ".")
             _ (run-git! repo "commit" "-m" "manifest")
             sha (str/trim (run-git! repo "rev-parse" "HEAD"))
-            lib 'demo/git-bad-manifest]
+            lib 'demo/git-ignored-manifest]
         (with-cache-base
           cache-dir
           (fn []
             (write-spools! config-dir (pr-str {:spools {lib {:git/url (file-url repo) :git/sha sha}}}))
             (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
-              (is (= :failed (:status result)))
-              (is (= :manifest-invalid (:reason result)))
+              (is (= :loaded (:status result)))
               (is (= :fetched (:fetch result)))
               (is (not (contains? result :manifest))))))))))
 
@@ -1143,13 +1139,24 @@
         (write-local-lib! config-dir "gated" ns-sym)
         (write-spools! config-dir (pr-str {:spools {approved-spool {:local/root "spools/gated"}
                                                failed-lib {:local/root "spools/missing"}}}))
-        (is (= :not-approved (:reason (runtime-alpha/use! rt :not-approved {:ns ns-sym :spools ['demo/not-approved]}))))
-        (is (= :not-synced (:reason (runtime-alpha/use! rt :not-synced {:ns ns-sym :spools [approved-spool]}))))
+        (is (= {:status :skipped
+                :reason :not-approved
+                :lib 'demo/not-approved}
+               (select-keys (runtime-alpha/use! rt :not-approved {:ns ns-sym :spools ['demo/not-approved]})
+                            [:status :reason :lib])))
+        (is (= {:status :skipped
+                :reason :not-synced
+                :lib approved-spool}
+               (select-keys (runtime-alpha/use! rt :not-synced {:ns ns-sym :spools [approved-spool]})
+                            [:status :reason :lib])))
         (runtime-alpha/sync! rt)
         (let [result (runtime-alpha/use! rt :sync-failed {:ns ns-sym :spools [failed-lib]})]
-          (is (= :skipped (:status result)))
-          (is (= :sync-failed (:reason result)))
-          (is (= :failed (get-in result [:sync :status]))))))))
+          (is (= {:status :skipped
+                  :reason :sync-failed
+                  :lib failed-lib}
+                 (select-keys result [:status :reason :lib])))
+          (is (= :failed (get-in result [:sync :status])))
+          (is (= :missing-root (get-in result [:sync :reason]))))))))
 
 (deftest use-skips-on-missing-after
   (with-runtime

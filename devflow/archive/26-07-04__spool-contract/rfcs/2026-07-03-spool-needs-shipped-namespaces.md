@@ -1,7 +1,7 @@
 # Spool `:needs` targeting skein-shipped namespaces
 
 **Document ID:** `RFC-018`
-**Status:** Open
+**Status:** Rejected
 **Date:** 2026-07-03
 **Related:** [REPL API](../specs/repl-api.md) (SPEC-003.C24–C29, manifest grammar at line 99), [Weaver Runtime](../specs/daemon-runtime.md) (SPEC-004.C40/C50/C93/C94), [Registry-free git distribution for spools](../archive/26-07-03__spool-git-distribution/rfcs/2026-07-03-spool-git-distribution.md) (RFC-017), [Spool git distribution proposal](../archive/26-07-03__spool-git-distribution/proposal.md) (SGD-PROP-001.Q1), [Writing shared spools](../../docs/writing-shared-spools.md)
 
@@ -63,4 +63,4 @@ This was deferred as SGD-PROP-001.Q1 ("Whether `:needs` may later name skein's o
 
 ## RFC-018.P7 Outcome
 
-- **RFC-018.OUT1:** Open — awaiting a decision from the repository owner. On acceptance, implementation stages the SPEC-003/SPEC-004 accretions and updates `devflow.spool`'s manifest to declare its `skein.spools.workflow` need.
+- **RFC-018.OUT1:** Rejected — mooted by `spool-contract`. The durable spool contract no longer has a manifest needs grammar; shared-spool prerequisites are README dependency/activation guidance plus consumer-owned `spools.edn` approval and `use! :spools` activation guards.

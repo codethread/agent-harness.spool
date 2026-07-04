@@ -59,7 +59,7 @@ the wrong world or throws.
 A shared spool can be published as an ordinary git repository and consumed from a
 workspace `spools.edn` by explicit approval of a pinned commit. The approving
 workspace chooses the coordinate symbol; that symbol is the consent handle used
-by manifests, unmet-need reports, and local overrides.
+by `sync!`, `use!`, and local overrides.
 
 > **Worked example.** Skein's own devflow lifecycle is distributed exactly this
 > way: its source lives in [`codethread/devflow.spool`](https://github.com/codethread/devflow.spool),
@@ -69,7 +69,7 @@ by manifests, unmet-need reports, and local overrides.
 > developers override it with a gitignored `spools.local.edn` local root. See
 > [`spools/devflow.md`](../spools/devflow.md) for the consumer side.
 
-A consumer pins the exact content they consent to run:
+A consumer pins the exact source content they consent to run:
 
 ```clojure
 {:spools
@@ -87,20 +87,44 @@ A consumer pins the exact content they consent to run:
 - `:git/url` is passed to system `git` as-is, so users can choose HTTPS, SSH, or
   `file://` transports that match their own credentials and trust model.
 - `:deps/root` is available for monorepos. It is a relative path inside the
-  checkout, with no leading `/`, `~`, or `..` segment:
+  checkout, with no leading `/`, `~`, or `..` segment.
 
-  ```clojure
-  {:spools
-   {acme/priority
-    {:git/url "https://github.com/acme/tooling.git"
-     :git/sha "0123456789abcdef0123456789abcdef01234567"
-     :git/tag "priority-v0.1.0"
-     :deps/root "spools/priority"}}}
-  ```
+### README dependency information
 
-After editing `spools.edn`, users run `sync!` and then activate modules with
-`use!` from trusted config or the REPL. Git coordinates and local roots share the
-same activation path once synced.
+Do not put composition metadata in machine-readable spool files. A shared spool's
+metadata, prerequisites, suggested pins, and activation order belong in its
+README, where an agent or human can copy the complete approval and activation
+recipe and still make an explicit consent decision for every source root.
+
+Include a **Dependency information** section with a complete `spools.edn` snippet
+for this spool and every spool prerequisite. Use author-suggested URLs and pins
+inline; consumers may choose newer pins, local overrides, or no approval at all.
+No prerequisite is fetched transitively.
+
+```clojure
+;; spools.edn
+{:spools
+ {acme/graph
+  {:git/url "https://github.com/acme/skein-graph-spool.git"
+   :git/sha "89abcdef0123456789abcdef0123456789abcdef"
+   :git/tag "v0.2.0"}
+
+  acme/priority
+  {:git/url "https://github.com/acme/skein-priority-spool.git"
+   :git/sha "0123456789abcdef0123456789abcdef01234567"
+   :git/tag "v0.1.0"}}}
+```
+
+If a prerequisite is shipped on Skein's own classpath, document the namespace and
+why it is required, but do not invent a coordinate for it. Shipped namespaces are
+already trusted as part of the selected Skein checkout.
+
+### README activation snippet
+
+Include an **Activation** section with the complete trusted `init.clj` snippet.
+The consumer owns the runtime, calls `sync!`, and activates modules explicitly
+with `use!`. Use `:spools` guards for every approved spool whose sync state is a
+prerequisite and `:after` when one activation depends on another.
 
 ```clojure
 (require '[skein.api.current.alpha :as current]
@@ -108,62 +132,57 @@ same activation path once synced.
 
 (def rt (current/runtime))
 (runtime/sync! rt)
+
+(runtime/use! rt :acme/graph
+  {:ns 'acme.graph.alpha
+   :spools '[acme/graph]
+   :required? true})
+
 (runtime/use! rt :acme/priority
   {:ns 'acme.priority.alpha
-   :spools '[acme/priority]})
+   :spools '[acme/priority acme/graph]
+   :after [:acme/graph]
+   :required? true})
 ```
 
-### Authoring `spool.edn`
+`use!` is the blessed early prerequisite check. Under `:required? true`, missing,
+unsynced, or failed spool approvals throw for the surviving `:spools` skip
+reasons. Namespace load and `:call` failures also fail loudly through the normal
+activation path.
 
-A shared spool root may include `spool.edn`. It is optional, but it gives agents
-and humans machine-readable facts without expanding the CLI surface:
+### Maven dependencies in a spool root
+
+A spool root may declare ordinary JVM library dependencies in its top-level
+`deps.edn :deps`. Those dependencies are loaded into the live weaver during
+`sync!` with the same runtime dependency path used for spool roots. Runtime
+loading is weaver-wide: there is no per-spool dependency isolation and no unload
+semantics.
+
+The policy is intentionally narrow:
+
+- The rule applies to every approved spool root: git or local, shared
+  `spools.edn` or gitignored `spools.local.edn`.
+- Every `:deps` entry must be a Maven coordinate map containing `:mvn/version`.
+- Source-bearing coordinates are rejected in spool-root `deps.edn :deps`,
+  including `:git/url`, `:git/sha`, and `:local/root`. If a spool composes with
+  another source root, document that root as its own `spools.edn` entry.
+- Mutable Maven versions are rejected: no `-SNAPSHOT`, `RELEASE`, or `LATEST`.
+- Repo redirection is rejected: no top-level `:mvn/repos` or `:mvn/local-repo`
+  in the spool root.
+- Standard Maven refinement keys such as `:exclusions`, `:classifier`, and
+  `:extension` are allowed alongside `:mvn/version`.
+- Aliases and other non-rejected top-level keys are ignored by `sync!`; no alias
+  activation participates in the spool contract.
+
+Example:
 
 ```clojure
-{:coordinate acme/priority
- :provides [acme.priority.alpha]
- :needs {acme/graph {:suggest {:git/url "https://github.com/acme/skein-graph-spool.git"}}
-         acme/audit nil}
- :docs {acme.priority.alpha "Priority promotion helpers. Call public functions with runtime first."}}
+;; deps.edn inside the spool root
+{:paths ["src"]
+ :deps {camel-snake-kebab/camel-snake-kebab {:mvn/version "0.4.3"}}}
 ```
 
-The manifest grammar is deliberately small:
-
-- `:coordinate`, when present, must equal the approving coordinate. A mismatch
-  fails that spool's sync loudly.
-- `:provides` is a vector or set of namespace symbols. During `use!`, the weaver
-  verifies that each declared namespace can be required from the synced spool
-  classloader. A miss skips activation with `:provides-unloadable` (or throws for
-  `:required? true`).
-- `:needs` maps coordinate symbols to either `nil` or `{:suggest {:git/url
-  "..."}}`. A suggestion is a hint for an agent or human, not a resolver.
-- `:docs` is either one string or a map of namespace symbol to string.
-
-Unknown keys or malformed values make sync fail with `:manifest-invalid`; do not
-use the manifest as an unstructured metadata dump. Keep richer narrative docs in
-your README and use `spool.edn` only for data that helps composition.
-
-### Consent loop for needs
-
-Needs are intentionally not transitive package resolution. If `acme/priority`
-declares a need for `acme/graph`, the weaver never fetches `acme/graph` on its
-own. Instead:
-
-1. `runtime/sync!` records `:unmet-needs` on `acme/priority` when `acme/graph`
-   is not approved, or when it is approved but failed to sync.
-2. An agent or human reads the unmet need and any `:suggest` URL, proposes a
-   `spools.edn` addition with an explicit `:git/sha`, and asks the user to
-   approve it.
-3. The user approves by editing `spools.edn`.
-4. The user reruns `runtime/sync!`, then `runtime/use!`.
-
-Until the need is resolved, `runtime/use!` enforces it: activating a module
-whose spools carry unmet needs is skipped with `:reason :unmet-needs` (and
-throws under `:required? true`).
-
-That loop preserves the core rule: each coordinate is user-approved at a pinned
-sha before code is fetched or activated.
-
-### Local development overrides
+## Local development overrides
 
 Use the same coordinate in shared `spools.edn` and gitignored
 `spools.local.edn` to develop against a checkout while other users stay pinned
@@ -187,18 +206,9 @@ Developer-only `spools.local.edn`:
   {:local/root "~/dev/projects/skein-priority-spool"}}}
 ```
 
-The manifest is read from whichever effective root wins the overlay. In the
-example above, the developer's local checkout provides `spool.edn`; consumers
-without the override read the manifest from the cached git tree. `:deps/root` is
-git-only because a local root can already point directly at any subdirectory you
-want to use.
-
-Local roots approved from shared `spools.edn` follow the same dependency-consent
-rule as git roots: their `deps.edn` must not declare tools.deps `:deps`. Shared
-workspace config may approve source roots, but it cannot consent to pulling
-transitive Maven/git dependencies into another developer's weaver. Declare spool
-dependencies in `spool.edn :needs`, or put trusted checkout-only tools.deps
-dependencies behind a developer-owned, gitignored `spools.local.edn` override.
+The effective root is whichever entry wins the overlay. `:deps/root` is git-only
+because a local root can already point directly at any subdirectory you want to
+use. The Maven-only dependency policy still applies to local override roots.
 
 ## The pattern pair
 
@@ -231,7 +241,7 @@ dependencies behind a developer-owned, gitignored `spools.local.edn` override.
 Everything takes `runtime`. It runs correctly in a published daemon, an
 unpublished test runtime, or two runtimes side by side — no cross-talk.
 
-### A user's local config layers the ergonomics module on top
+### Layering ergonomics in your own config
 
 In your **own** workspace `init.clj`, capture the runtime once and hold it, then
 call both the blessed API and the shared spool through terse wrappers:
@@ -275,8 +285,9 @@ See [AGENTS.md](../AGENTS.md) and [SPEC-003](../devflow/specs/repl-api.md#spec-0
 The invariant "no `skein.*` (engine, blessed API, REPL, or shipped spool) source
 requires `skein.userland.alpha`" is guarded by a test
 (`skein.userland-test/no-skein-source-requires-the-userland-module`). That test
-covers repo-owned `skein.*` and shipped-spool sources. Local and third-party shared spools are held to the
-same rule by review and this guide. If abuse of the ergonomics layer by
-distributed spools ever shows up in practice, the sanctioned next step is a
-lint over approved spool roots at `skein.api.runtime.alpha/sync!` time that
-rejects a spool whose source requires `skein.userland.alpha`.
+covers repo-owned `skein.*` and shipped-spool sources. Local and third-party
+shared spools are held to the same rule by review and this guide. If abuse of
+the ergonomics layer by distributed spools ever shows up in practice, the
+sanctioned next step is a lint over approved spool roots at
+`skein.api.runtime.alpha/sync!` time that rejects a spool whose source requires
+`skein.userland.alpha`.
