@@ -75,7 +75,12 @@
     (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
     root))
 
-(defn- write-spool-manifest! [root manifest]
+(defn- write-spool-manifest!
+  "Write a legacy spool.edn file so regression tests can prove sync! ignores it.
+
+  Spool manifests are not part of the spool contract; documentation-only
+  metadata belongs in README prose per devflow/specs/repl-api.md SPEC-003.P5."
+  [root manifest]
   (spit (io/file root "spool.edn") (pr-str manifest)))
 
 (defn- write-spool-ns! [root ns-sym content]
@@ -414,6 +419,9 @@
                             :status :already-available}}}
                (runtime-alpha/sync! rt)))))))
 
+;; Regression guard: a present legacy spool.edn, even with retired manifest
+;; keys, must have no effect on sync results. The absent :manifest and
+;; :unmet-needs assertions below prevent manifest machinery from creeping back.
 (deftest sync-ignores-spool-manifest-files
   (with-runtime
     (fn [rt config-dir]
@@ -856,6 +864,9 @@
       (finally
         (delete-recursive base)))))
 
+;; Regression guard: a fetched git spool may contain a legacy spool.edn, but
+;; sync results are driven solely by the approved coordinate and fetch outcome.
+;; The absent :manifest assertion prevents manifest machinery from creeping back.
 (deftest sync-git-ignores-spool-manifest-and-keeps-fetch-outcome
   (with-runtime
     (fn [rt config-dir]
