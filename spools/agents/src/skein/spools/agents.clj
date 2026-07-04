@@ -365,7 +365,7 @@
          (when (not (str/blank? focus))
            (str "Focus: " focus "\n"))
          "Read the target with `" cmd " show " target-id "` and inspect the relevant repository state.\n"
-         "When finished, append findings with: " cmd " op agent note " target-id
+         "When finished, append findings with: " cmd " agent note " target-id
          " \"<findings>\" --by <your run-id>\n"
          "Findings are notes-only; do not write verdict attributes.")))
 
@@ -374,8 +374,8 @@
     (str contract "\n\n"
          "Synthesize independent review findings for target strand " target-id ".\n"
          "Review run ids: " (str/join ", " review-runs) "\n"
-         "Read target notes with `" cmd " op agent notes " target-id "`, append one synthesis note with `"
-         cmd " op agent note " target-id " \"<synthesis>\" --by <your run-id>`, then finish with the synthesis.")))
+         "Read target notes with `" cmd " agent notes " target-id "`, append one synthesis note with `"
+         cmd " agent note " target-id " \"<synthesis>\" --by <your run-id>`, then finish with the synthesis.")))
 
 (defn review!
   "Spawn independent read-only reviewers for a target strand."
@@ -421,13 +421,13 @@
 
 (defn- council-member-prompt [{:keys [council-id topic member member-count rounds]}]
   (let [cmd (shuttle/pinned-strand-command)
-        notes-cmd (str cmd " op agent notes " council-id)]
+        notes-cmd (str cmd " agent notes " council-id)]
     (str "You are council member " member " of " member-count
          " deliberating this topic over " rounds " rounds:\n"
          topic "\n\n"
          "Shared memory is the council strand " council-id ". Protocol for each round r (1.." rounds "):\n"
          "1. Do your own genuine exploration/thinking for round r (use your tools; investigate, do not just opine).\n"
-         "2. Post your position: " cmd " op agent note " council-id
+         "2. Post your position: " cmd " agent note " council-id
          " \"<your round-r analysis>\" --by <your run-id> --round r\n"
          "3. Wait for peers: poll `" notes-cmd " --round r` (sleep a few seconds between polls, up to ~2 minutes)"
          " until it lists " member-count " notes, then read them all with `" notes-cmd "`.\n"
@@ -439,7 +439,7 @@
   (let [cmd (shuttle/pinned-strand-command)]
     (str "You are the synthesizer for a " member-count "-member, " rounds "-round council on:\n"
          topic "\n\n"
-         "Read the full deliberation: " cmd " op agent notes " council-id "\n"
+         "Read the full deliberation: " cmd " agent notes " council-id "\n"
          "Weigh the arguments, note consensus and unresolved disagreements, and produce one decisive synthesis.\n"
          "Record it on the council strand: " cmd " update " council-id
          " --attr shuttle/result=\"<one-paragraph verdict>\"\n"
