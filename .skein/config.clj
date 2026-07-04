@@ -604,6 +604,12 @@
     (throw (ex-info (str flag " must be true or false")
                     {:flag flag :value value}))))
 
+(defn- config-attr
+  "Read strand attribute k, tolerating keyword- or string-keyed maps."
+  [strand k]
+  (let [attrs (:attributes strand)]
+    (or (get attrs k) (get attrs (subs (str k) 1)))))
+
 (defn- backlog-root-orphan?
   "Return true when an orphan row is an unclaimed backlog root.
 
@@ -652,12 +658,6 @@
     (workflow/await! run-id (cond-> {:stall-predicate :treadle}
                               (get flags "--timeout-secs")
                               (assoc :timeout-secs (parse-long-flag! "--timeout-secs" (get flags "--timeout-secs")))))))
-
-(defn- config-attr
-  "Read strand attribute k, tolerating keyword- or string-keyed maps."
-  [strand k]
-  (let [attrs (:attributes strand)]
-    (or (get attrs k) (get attrs (subs (str k) 1)))))
 
 (defn- compact-run
   "Return a compact shuttle/treadle state projection for a run strand."
