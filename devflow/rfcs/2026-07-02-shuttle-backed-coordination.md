@@ -58,8 +58,8 @@ Pain points to address:
   agent execution. A run starts when its blockers close; fan-out/fan-in is graph
   structure, not coordinator code.
 - **RFC-010.G4:** Let coordinators and future agents inspect delegation through
-  `strand show`, `strand ready --query work`, `strand op agent ps`,
-  `strand op agent await`, run attributes, and Shuttle notes.
+  `strand show`, `strand ready --query work`, `strand agent ps`,
+  `strand agent await`, run attributes, and Shuttle notes.
 - **RFC-010.G5:** Encode the delegated-agent contract in generated prompts and
   graph links: read assigned context, record progress, set result/status, never
   close coordinator-owned task strands unless explicitly delegated.
@@ -68,7 +68,7 @@ Pain points to address:
 - **RFC-010.G7:** Provide a path for workflow `:gate` or step metadata to spawn a
   Shuttle run and close/annotate the workflow step when the run succeeds.
 - **RFC-010.G8:** Keep the public CLI thin. New behavior should be trusted
-  repo-local ops/patterns or Shuttle's existing `strand op agent` surface, not a
+  repo-local ops/patterns or Shuttle's existing `strand agent` surface, not a
   broad new core command set.
 
 ## RFC-010.P3 Non-goals
@@ -94,7 +94,7 @@ Pain points to address:
 | ID | Summary | Pros | Cons |
 | -- | ------- | ---- | ---- |
 | RFC-010.O1 | Keep using harness-native subagents and only document better etiquette. | No implementation work; keeps coordination flexible. | Leaves delegation invisible, non-durable, non-queryable, and hard to resume; repeats the exact workflow-ergonomics pain. |
-| RFC-010.O2 | Use Shuttle manually via `strand op agent spawn` whenever a coordinator wants a subagent. | Immediate value; run state/result become durable; no additional abstraction required. | Still leaves prompt construction, parent links, depends-on wiring, and status conventions to each coordinator. |
+| RFC-010.O2 | Use Shuttle manually via `strand agent spawn` whenever a coordinator wants a subagent. | Immediate value; run state/result become durable; no additional abstraction required. | Still leaves prompt construction, parent links, depends-on wiring, and status conventions to each coordinator. |
 | RFC-010.O3 | Add repo-local patterns/ops that create task-linked Shuttle runs from ready work. | Encodes local delegation conventions; keeps core and spools small; makes most agent delegation graph-native while preserving manual opt-in. | Repo-specific surface must be maintained; prompt templates can drift from the root `AGENTS.md` coordination section; still needs coordinator verification/closure. |
 | RFC-010.O4 | Add a generic Shuttle/workflow bridge that fulfills workflow gates automatically based on step attributes. | Most seamless for lifecycle workflows; a workflow step can declare an agent gate and let the graph execute it. | Higher coupling risk; needs careful idempotency and failure semantics; premature if manual/pattern delegation has not settled. |
 | RFC-010.O5 | Build a full autonomous coordinator that watches all ready work, chooses harnesses, spawns agents, validates, closes tasks, and advances devflow. | Maximally automated. | Too much policy in one system; likely violates TEN-004/TEN-006; hard to debug and unsafe around HITL/final validation boundaries. |
@@ -175,23 +175,23 @@ Pain points to address:
 Manual delegation should work with today's Shuttle surface:
 
 ```sh
-strand op agent spawn \
+strand agent spawn \
   --harness pi \
   --title "Implement userland surface" \
   --parent <task-id> \
   --cwd /path/to/worktree \
   --prompt "<standard delegated-agent preamble + task body>"
 
-strand op agent ps --active
-strand op agent await <run-id> --timeout-secs 900
+strand agent ps --active
+strand agent await <run-id> --timeout-secs 900
 strand show <run-id> | jq
-strand op agent notes <run-id>
+strand agent notes <run-id>
 ```
 
 A repo-local helper should compress that to something like:
 
 ```sh
-strand op agent-delegate <task-id> --harness pi --cwd /path/to/worktree
+strand agent delegate <task-id> --harness pi --cwd /path/to/worktree
 ```
 
 or, if a pattern is preferable:
@@ -204,9 +204,9 @@ printf '%s' '{"task":"<task-id>","harness":"pi","cwd":"/path/to/worktree"}' \
 Fan-out/fan-in should be graph-native:
 
 ```sh
-r1=$(strand op agent-delegate <review-task> --harness pi --prompt-key workflow-review | jq -r .run.id)
-r2=$(strand op agent-delegate <review-task> --harness claude --prompt-key config-review | jq -r .run.id)
-strand op agent spawn --harness claude --depends-on "$r1" --depends-on "$r2" \
+r1=$(strand agent delegate <review-task> --harness pi --prompt-key workflow-review | jq -r .run.id)
+r2=$(strand agent delegate <review-task> --harness claude --prompt-key config-review | jq -r .run.id)
+strand agent spawn --harness claude --depends-on "$r1" --depends-on "$r2" \
   --parent <review-task> --prompt "Read child run results and synthesize findings."
 ```
 

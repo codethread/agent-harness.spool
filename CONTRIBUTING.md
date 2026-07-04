@@ -32,13 +32,13 @@ Use explicit workspaces for tests, smoke reproduction, examples, and agent work:
 
 ```sh
 workspace=$(mktemp -d)
-strand --workspace "$workspace" init
-strand --workspace "$workspace" weaver start
+mill init --workspace "$workspace"
+mill weaver start --workspace "$workspace"
 design=$(strand --workspace "$workspace" add "Sketch model" --state closed --attr priority=high)
 docs=$(strand --workspace "$workspace" add "Write docs" --attr owner=agent)
 strand --workspace "$workspace" update "$docs" --edge depends-on:$design
 strand --workspace "$workspace" ready
-strand --workspace "$workspace" weaver stop
+mill weaver stop --workspace "$workspace"
 ```
 
 `mill init` bootstraps missing `config.json`, `spools.edn`, `init.clj`, `spools/`, and `.gitignore` files/directories without overwriting existing user files. `config.json` contains only `{"configFormat":"alpha"}`.
@@ -46,7 +46,7 @@ strand --workspace "$workspace" weaver stop
 ## REPL and runtime config
 
 ```sh
-strand --workspace "$workspace" weaver repl
+mill weaver repl --workspace "$workspace"
 ```
 
 ```clojure
@@ -61,7 +61,7 @@ strand --workspace "$workspace" weaver repl
 Non-interactive trusted forms:
 
 ```sh
-printf '(skein.api.current.alpha/runtime)\n' | strand --workspace "$workspace" weaver repl --stdin
+printf '(skein.api.current.alpha/runtime)\n' | mill weaver repl --stdin --workspace "$workspace"
 ```
 
 Runtime spool startup config may use:

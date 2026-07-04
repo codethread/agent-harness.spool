@@ -89,7 +89,7 @@ workflow/devflow: a tiny attribute vocabulary (`roster/feature`,
 for a scope). An event-handler adapter stamps roster attributes onto
 workflow/devflow roots from their existing `family`/`feature` attributes, so
 strand-tracked flows register for free; file-based loops and ad hoc sessions
-make one `track!` call (or `strand op` equivalent registered by the spool).
+make one `track!` call (or `strand <op>` equivalent registered by the spool).
 Liveness is derived, not manually maintained: any graph mutation by the
 tracked driver counts as a heartbeat, and an explicit `heartbeat!` exists
 only for engines that never touch the graph between registration and finish

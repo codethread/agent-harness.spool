@@ -18,7 +18,7 @@ Most agent tools ship a fixed schema and someone else's workflow. Skein ships pr
 - Track work as a local strand graph — no hosted service, no server to babysit.
 - Let agents create, update, query, and inspect structured state through a safe JSON CLI.
 - Model your own concepts — status, priority, ownership, "done", board columns — as open JSON attributes, instead of waiting for a schema to grow.
-- Rebuild whatever you need, in trusted Clojure: a beads-style issue tracker, a kanban board, or your own Claude Code workflow — from named queries, weave patterns, views, event handlers, and custom `strand op` commands.
+- Rebuild whatever you need, in trusted Clojure: a beads-style issue tracker, a kanban board, or your own Claude Code workflow — from named queries, weave patterns, views, event handlers, and custom `strand <op>` commands.
 - Introspect and reshape the running system live: attach a REPL, inspect runtime state, redefine a function and watch the next call pick it up, or hot-reload your whole config — all without restarting or losing your strands.
 
 ## Quick start
@@ -75,8 +75,8 @@ workspace=$(mktemp -d)
 Pass `--workspace "$workspace"` on **every** command that should target it — the flag is not remembered between commands. With `mill` running:
 
 ```sh
-strand --workspace "$workspace" init
-strand --workspace "$workspace" weaver start
+mill init --workspace "$workspace"
+mill weaver start --workspace "$workspace"
 ```
 
 Then use it from another terminal:
@@ -105,7 +105,7 @@ Everything else — outcomes, categories, temporary markers, priorities — live
 
 The CLI stays thin on purpose; the power lives in the weaver. It's a real Clojure image — the full language, macros and all — so your customizations can be as expressive as you want, and you can introspect or redefine any of them from a live REPL without a restart.
 
-Richer behavior — named queries, weave patterns, weaver-memory views, event handlers, custom `strand op` commands, and trusted runtime spools — is loaded into your workspace, discovered through small read-only CLI groups such as `query list` / `query explain <name>` and `pattern list` / `pattern explain <name>`, then consumed by semantic commands such as `list --query <name>` and `weave --pattern <name>`.
+Richer behavior — named queries, weave patterns, weaver-memory views, event handlers, custom `strand <op>` commands, and trusted runtime spools — is loaded into your workspace, discovered through small read-only CLI groups such as `query list` / `query explain <name>` and `pattern list` / `pattern explain <name>`, then consumed by semantic commands such as `list --query <name>` and `weave --pattern <name>`.
 
 
 Two kinds of code can extend the weaver:
