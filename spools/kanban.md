@@ -71,6 +71,16 @@ For bulk authoring, the `kanban-batch` weave pattern creates pending feature car
 strand weave --pattern kanban-batch --input '{"items":[{"key":"design","title":"Design feature","body":"..."},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}'
 ```
 
+## Human view
+
+The CLI stays JSON-only (TEN-006); the human rendering lives on the REPL surface:
+
+```sh
+printf "(do (require 'skein.spools.kanban) (skein.spools.kanban/print-board!))\n" | mill weaver repl --stdin
+```
+
+`print-board!` prints a stacked-lane ASCII board (epics, refinement, pending, claimed with owner/branch and latest handover, needs-review); `board-str` is the pure renderer over the `board` result for reuse.
+
 ## Queries
 
 Install also registers:

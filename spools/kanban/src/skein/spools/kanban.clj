@@ -521,6 +521,78 @@
       ;; active cards outside the known lanes are drift; surface them loudly
       (seq unknown) (assoc :unknown-status unknown))))
 
+;; ---------------------------------------------------------------------------
+;; ASCII board: REPL human view (the CLI stays JSON-only per TEN-006)
+;; ---------------------------------------------------------------------------
+
+(def ^:private board-width 100)
+
+(defn- clip
+  "Return s truncated with an ellipsis to fit within n characters."
+  [n s]
+  (let [s (str s)]
+    (if (> (count s) n) (str (subs s 0 (- n 3)) "...") s)))
+
+(defn- card-line
+  "Return one ASCII board row for a compact card map."
+  [{:keys [id title owner branch epic]}]
+  (let [tags (cond-> []
+               branch (conj (str "@" branch))
+               owner (conj owner)
+               epic (conj (str "epic:" epic)))
+        prefix (str "  " id "  " (when (seq tags) (str "[" (str/join " " tags) "] ")))]
+    (str prefix (clip (- board-width (count prefix)) title))))
+
+(defn- lane-lines
+  "Return the ASCII section for one board lane."
+  [label entries row-fn]
+  (into [(str label " (" (count entries) ")")]
+        (if (seq entries)
+          (mapv row-fn entries)
+          ["  (none)"])))
+
+(defn- handover-line
+  "Return the indented latest-handover row for a claimed card, or nil."
+  [{:keys [latest-handover]}]
+  (when latest-handover
+    (str "         " (clip (- board-width 9)
+                           (str (:created_at latest-handover) "  "
+                                (first (str/split-lines (or (:body latest-handover) ""))))))))
+
+(defn- review-line
+  "Return one ASCII row for a needs-review entry."
+  [{:keys [card branch item]}]
+  (let [prefix (str "  " (:id item) "  [card " card (when branch (str " @" branch)) "] ")]
+    (str prefix (clip (- board-width (count prefix)) (:title item)))))
+
+(defn board-str
+  "Render a `board` result map as a stacked-lane ASCII board string."
+  [{:keys [epics refinement pending claimed needs-review closed unknown-status]}]
+  (let [rule (apply str (repeat board-width \=))]
+    (->> (concat
+          [(str "KANBAN BOARD  (closed: " (:count closed) ")") rule]
+          (lane-lines "EPICS" epics card-line)
+          [""]
+          (lane-lines "REFINEMENT" refinement card-line)
+          [""]
+          (lane-lines "PENDING" pending card-line)
+          [""]
+          (lane-lines "CLAIMED / WIP" claimed
+                      (fn [card]
+                        (if-let [handover (handover-line card)]
+                          (str (card-line card) "\n" handover)
+                          (card-line card))))
+          [""]
+          (lane-lines "NEEDS REVIEW" needs-review review-line)
+          (when (seq unknown-status)
+            (into [""] (lane-lines "UNKNOWN STATUS (drift!)" unknown-status card-line))))
+         (str/join "\n"))))
+
+(defn print-board!
+  "Print the live board as ASCII; the human view for `mill weaver repl`."
+  []
+  (println (board-str (board))))
+
 (defn about
   "Return the kanban convention and installed helper surface."
   []
@@ -549,7 +621,8 @@
               {:usage "strand kanban promote <id>"}
               {:usage "strand kanban claim <id> --owner <name> --branch <branch> [--worktree <path>]"}
               {:usage "strand kanban note <id> <text> [--author <name>] [--handover]"}
-              {:usage "strand kanban finish <id> [--outcome done|abandoned]"}]
+              {:usage "strand kanban finish <id> [--outcome done|abandoned]"}
+              {:usage "(skein.spools.kanban/print-board!) — ASCII board from mill weaver repl (CLI output stays JSON-only)"}]
    :patterns [{:name "kanban-batch"
                :input {:items [{:key "slug"
                                 :title "Feature title"

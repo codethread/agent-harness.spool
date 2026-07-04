@@ -211,6 +211,26 @@
           (let [c-id (get-in (op! rt "add" "Card C") [:card :id])]
             (is (= [] (:related (op! rt "card" c-id))))))))))
 
+(deftest kanban-board-str-renders-ascii-lanes
+  (with-runtime
+    (fn [rt config-dir]
+      (install-kanban! rt config-dir)
+      (let [long-title (apply str "Very long title " (repeat 40 "padding "))
+            _idea (op! rt "add" long-title "--status" "refinement")
+            working-id (get-in (op! rt "add" "Working card") [:card :id])]
+        (op! rt "claim" working-id "--owner" "agent-a" "--branch" "feature-x")
+        (op! rt "note" working-id "Done: half. Next: rest." "--handover")
+        (let [rendered ((requiring-resolve 'skein.spools.kanban/board-str) (op! rt "board"))
+              lines (clojure.string/split-lines rendered)]
+          (is (clojure.string/includes? rendered "REFINEMENT (1)"))
+          (is (clojure.string/includes? rendered "PENDING (0)"))
+          (is (clojure.string/includes? rendered "CLAIMED / WIP (1)"))
+          (is (clojure.string/includes? rendered "[@feature-x agent-a] Working card"))
+          (is (clojure.string/includes? rendered "Done: half. Next: rest."))
+          (is (clojure.string/includes? rendered "NEEDS REVIEW (0)"))
+          (testing "rows are clipped to the board width"
+            (is (every? #(<= (count %) 100) lines))))))))
+
 (deftest kanban-batch-weave-creates-cards-and-dependencies
   (with-runtime
     (fn [rt config-dir]

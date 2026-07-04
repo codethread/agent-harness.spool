@@ -86,6 +86,8 @@ The user↔agent work board is strand-backed, not a separate app: `spools/kanban
 - `strand branches [branch]` — what is happening inside a feature branch: the cards on it and their substrands.
 - New ideas enter with `strand kanban add "..."`; use `--status refinement` for not-yet-actionable ideas and `strand kanban promote <id>` when one is ready to work.
 
+`strand` output is JSON by design; for an ASCII board run `printf "(do (require 'skein.spools.kanban) (skein.spools.kanban/print-board!))\n" | mill weaver repl --stdin` (or call `(skein.spools.kanban/print-board!)` from an interactive `mill weaver repl`).
+
 Agents follow the fuller board contract in `AGENTS.md` (claim/notes/handover rules); this section is the human-side overview.
 
 ## Validation
