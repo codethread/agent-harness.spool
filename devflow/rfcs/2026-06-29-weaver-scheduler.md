@@ -96,8 +96,8 @@ The decision: should skein bless a weaver-owned scheduler so libraries share one
 
 ## RFC-009.P8a Follow-up tracking
 
-Future implementation slices and unresolved design decisions are tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
+Future implementation slices and unresolved design decisions are tracked on the kanban board (`strand kanban board`). This RFC remains the design rationale; the board is the canonical home for pending work items.
 
 ## RFC-009.P9 Outcome
 
-- **RFC-009.OUT1:** Open for review. Pending implementation work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).
+- **RFC-009.OUT1:** Open for review. Pending implementation work has been moved to the kanban board (`strand kanban board`).

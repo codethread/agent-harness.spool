@@ -1,7 +1,7 @@
 {:spools {skein.spools/shuttle {:local/root "../spools/shuttle"}
           skein.spools/agents {:local/root "../spools/agents"}
           skein.spools/chime {:local/root "../spools/chime"}
-          skein.spools/backlog {:local/root "../spools/backlog"}
+          skein.spools/kanban {:local/root "../spools/kanban"}
           skein.macros/macros {:local/root "spools/macros"}
           ;; Keep this devflow sha exactly synchronized with deps.edn :test
           ;; extra-deps until config_test no longer needs the spool on its JVM classpath.

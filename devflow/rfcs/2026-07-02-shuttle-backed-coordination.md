@@ -212,11 +212,11 @@ strand agent spawn --harness claude --depends-on "$r1" --depends-on "$r2" \
 
 ## RFC-010.P8 Follow-up tracking
 
-Most implementation questions were resolved by the archived Shuttle, treadle, `agent-delegate`, and `afk-gates` features. Remaining follow-up work is tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
+Most implementation questions were resolved by the archived Shuttle, treadle, `agent-delegate`, and `afk-gates` features. Remaining follow-up work is tracked on the kanban board (`strand kanban board`). This RFC remains the design rationale; the board is the canonical home for pending work items.
 
 ## RFC-010.P9 Outcome
 
-- **RFC-010.OUT1:** Accepted in part. Pending follow-up work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).
+- **RFC-010.OUT1:** Accepted in part. Pending follow-up work has been moved to the kanban board (`strand kanban board`).
 - **RFC-010.OUT2 (2026-07-02):** Accepted in part and dogfooded. Shuttle is
   activated in the canonical repo workspace (C1), and the REC8 workflow gate
   bridge shipped as the `skein.spools.treadle` spool

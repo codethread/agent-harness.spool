@@ -52,10 +52,10 @@
    :spools ['skein.spools/chime]
    :call 'skein.spools.chime/install!
    :required? true})
-(runtime-alpha/use! runtime :skein/spools-backlog
-  {:ns 'skein.spools.backlog
-   :spools ['skein.spools/backlog]
-   :call 'skein.spools.backlog/install!
+(runtime-alpha/use! runtime :skein/spools-kanban
+  {:ns 'skein.spools.kanban
+   :spools ['skein.spools/kanban]
+   :call 'skein.spools.kanban/install!
    :required? true})
 (runtime-alpha/use! runtime :config
   {:file "config.clj"

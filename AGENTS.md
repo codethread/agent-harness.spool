@@ -27,6 +27,7 @@ Userland reference spools are indexed in [`spools/`](./spools/README.md), with c
 - [Agents Spool](./spools/agents/README.md) (approved local-root spool; `strand agent` surface over shuttle)
 - [Treadle Gate Bridge](./spools/shuttle/treadle.md) (approved local-root spool)
 - [Chime Notifications](./spools/chime/README.md) (approved local-root spool)
+- [Kanban Board](./spools/kanban.md) (approved local-root spool; user↔agent work board — feature/epic cards, notes, handovers)
 
 Namespace tiers are intentional: `skein.api.*.alpha` is the blessed spool-facing API with accretion-based compatibility within each subnamespace, `skein.core.*` is internal and may change freely, `skein.spools.*` is the authorable/reference spool layer, `skein.repl` is the human interactive surface, and `skein.userland.alpha` is a userland-only terse ergonomics layer — a strict downstream consumer tier that no `skein.*` namespace may ever require.
 
@@ -107,15 +108,15 @@ For spool workspace workflows, use `spools.edn` (approving `:local/root` paths o
 
 ## Repo coordination workspace (.skein)
 
-The canonical repo `.skein` workspace is the **shared coordination world**: backlog, devflow lifecycle runs, delegation, and cross-agent work tracking live there, and using it for coordination state is expected. The disposable `--workspace` rule above still governs everything else — dev experiments, config smoke tests, and test weavers never run against the canonical world.
+The canonical repo `.skein` workspace is the **shared coordination world**: the kanban board, devflow lifecycle runs, delegation, and cross-agent work tracking live there, and using it for coordination state is expected. The disposable `--workspace` rule above still governs everything else — dev experiments, config smoke tests, and test weavers never run against the canonical world.
 
 Always read `docs/skein.md` from the repository root before changing the `.skein` config itself.
 
-This repo's `.skein` world is thin glue over the reference spools. `.skein/init.clj` activates `skein.spools.batteries` (the shipped `strand <op>` command surface), `skein.spools.ephemeral`, and `skein.spools.workflow` from the weaver classpath, `skein.spools.devflow` from the approved `codethread/devflow` git coordinate (an RFC-017 git-distributed spool: `.skein/spools.edn` pins the `:git/sha`, a developer's gitignored `spools.local.edn` overrides it with a local root), plus `skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from the approved `spools/shuttle` / `spools/agents` local roots, `skein.spools.chime` from the approved `spools/chime` local root, and `skein.spools.backlog` from the approved `spools/backlog` local root. Together, the installed spools and `.skein/config.clj` register:
+This repo's `.skein` world is thin glue over the reference spools. `.skein/init.clj` activates `skein.spools.batteries` (the shipped `strand <op>` command surface), `skein.spools.ephemeral`, and `skein.spools.workflow` from the weaver classpath, `skein.spools.devflow` from the approved `codethread/devflow` git coordinate (an RFC-017 git-distributed spool: `.skein/spools.edn` pins the `:git/sha`, a developer's gitignored `spools.local.edn` overrides it with a local root), plus `skein.spools.shuttle`, `skein.spools.agents`, and `skein.spools.treadle` from the approved `spools/shuttle` / `spools/agents` local roots, `skein.spools.chime` from the approved `spools/chime` local root, and `skein.spools.kanban` from the approved `spools/kanban` local root. Together, the installed spools and `.skein/config.clj` register:
 
-- ops: `agent`, `backlog`, `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`, `devflow-complete`, `devflow-advance`, `devflow-describe`, `devflow-history`, `devflow-archive`, `devflow-status`, `workflow-runs`, `current-dags`, `flow-await`, `flow-status`, `devflow-conventions`
-- queries: `work`, `backlog-items`, `backlog-unstarted`, `feature-active`, `feature-work`, `feature-owner-work`, `feature-run`, `workflow-runs`, `devflow-runs`, `agent-failures`
-- patterns: `agent-plan`, `delegate-pipeline`
+- ops: `agent`, `kanban`, `branches`, `devflow-start`, `devflow-next`, `devflow-choices`, `devflow-choose`, `devflow-complete`, `devflow-advance`, `devflow-describe`, `devflow-history`, `devflow-archive`, `devflow-status`, `workflow-runs`, `current-dags`, `flow-await`, `flow-status`, `devflow-conventions`
+- queries: `work`, `kanban-cards`, `kanban-unstarted`, `feature-active`, `feature-work`, `feature-owner-work`, `feature-run`, `workflow-runs`, `devflow-runs`, `agent-failures`
+- patterns: `agent-plan`, `delegate-pipeline`, `kanban-batch`
 - shuttle harness aliases: `pi-main` (delegation default), claude tiers matched to roles — `explore` (haiku: fan-out search/read-only recon), `grunt` (sonnet: tests and mechanical work), `build` (opus: feature building, reviews, councils) — and GPT seats for cross-vendor validation — `review-gpt` (gpt-5.4 high reasoning via pi: standing reviewer seat) and `hard-gpt` (gpt-5.5 medium via codex: occasional difficult tasks wanting a second frontier model). Routing policy: `build` is favoured for prose/docs-heavy work but never signs off its own output — sign-off review of opus-authored work always includes a GPT seat. `strand agent harnesses` lists all. Use the spool-owned surface: run `strand agent about` for the live manual, delegate existing task strands with `strand agent delegate <task-id>`, fan out with `strand agent delegate --ready <plan-id>`, recover with `strand agent retry <task-or-run-id>`, and inspect with `strand agent status [root-id]`. Review completed work with `strand agent review <target-id> --members 2 --harness pi-main,build`; findings are appended as notes on the target strand. Raw `strand agent spawn` remains the escape hatch for custom shuttle runs. Workflow `:subagent` gates are fulfilled automatically by the treadle (`spools/shuttle/treadle.md`).
 - chime attention rules: `hitl-checkpoint-ready`, `agent-failure`, and `treadle-error`. Notification is already set up for everything a human needs to action; each developer only binds how they are told, in gitignored `.skein/init.local.clj`, e.g. `(require '[skein.spools.chime :as chime]) (chime/set-notifier! {:argv ["cc-notify"]})` — swap the argv for `osascript` or anything with the `cmd <title>` + body-on-stdin shape. Unbound chime records loud notifier-missing failures in `(chime/failures)`.
 
@@ -159,23 +160,28 @@ strand list --query feature-run --param feature=<feature>
 
 `work` is the default repo-local ready query for agents: it keeps normal tasks, workflow steps, and checkpoints visible, but hides bookkeeping strands whose `workflow/role` is `molecule`, `procedure`, or `digest`.
 
-### Backlog convention
+### Kanban board convention
 
-`BACKLOG.md` is the repo's Git-visible feature queue. New feature requests that should survive the current conversation go through the backlog helper first:
+The kanban board (`spools/kanban.md`) is the user↔agent work surface, held entirely in strands. Anything the user asks for is a `feature` card — occasionally grouped under an `epic` (`--type epic`, linked with `--epic <id>`) — and **every agent working directly with the user works under a claimed card**. The board complements devflow, agent plans, and delegation; those all hang beneath cards. Run `strand kanban about` for the live manual.
 
 ```sh
-strand backlog add "Build the thing; see devflow/rfcs/..."
+strand kanban add "Build the thing; see devflow/rfcs/..." [--source devflow/rfcs/...]
+strand kanban add "Half-formed idea" --status refinement
 ```
 
-The helper creates a backlog item strand and appends a Markdown checkbox row:
+`kanban/status` lanes: `refinement` (never actionable until a human runs `strand kanban promote <id>`), `pending` (the queue, oldest first), `claimed` (in flight), and a closed outcome (`done`, `abandoned`, ...). `strand kanban board` is the user's high-level overview; `strand list --query kanban-cards` and `--query kanban-unstarted` are the flat views.
 
-```md
-- [ ] `<strand-id>` Build the thing; see devflow/rfcs/...
-```
+For bulk authoring, use `strand weave --pattern kanban-batch --input '<json>'` with `{"items":[{"key":"design","title":"Design feature","body":"..."},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}`. The pattern creates all feature cards and `depends-on` edges atomically.
 
-For bulk authoring, use `strand weave --pattern backlog-batch` with JSON on stdin: `{"items":[{"key":"design","title":"Design feature","body":"..."},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}`. The pattern creates all backlog item strands and `depends-on` edges atomically, then appends the same `BACKLOG.md` rows as `backlog add`.
+Agents asked to "pick up the next card" should run `strand kanban next`, claim the returned id with `strand kanban claim <id> --owner <name> --branch <branch> [--worktree <path>]` (owner and branch are mandatory — the claim is what makes branch work discoverable), then create feature plans, devflow runs, or task DAGs under that card using `parent-of`. The card is the parent/audit root; child strands are the executable work. Finish with `strand kanban finish <id>` after merge, archive, or explicit abandonment.
 
-Agents asked to "pick up the next backlog item" should run `strand backlog next`, claim the returned id with `strand backlog claim <id> --owner <name> --branch <branch> --worktree <path>`, then create feature plans, devflow runs, or task DAGs under that backlog strand using `parent-of`. The backlog strand is the parent/audit root; child strands are the executable work. Finish with `strand backlog finish <id>` after merge, archive, or explicit abandonment, and run `strand backlog sync` when checking for drift between `BACKLOG.md` and the strand graph.
+**Notes and handovers.** Record significant decisions as you work with `strand kanban note <card-id> "..." --author <name>`, and always leave a handover before stopping or at interruption risk: `strand kanban note <card-id> --handover --author <name> "Done: ... Next: ... Validation: ... Gotchas: ..."`. Crash recovery is self-discovering: `strand kanban board` shows claimed cards with their latest handover; `strand kanban card <id>` returns the card, notes, active work, and ready frontier.
+
+### Branch work visibility
+
+Every piece of work happening on a branch has exactly one **active work root strand** stamped with `branch` (plus `owner`, and `worktree` when one exists), with all execution strands hanging beneath it via `parent-of`. `kanban claim` stamps card roots; for non-card work (ad hoc `agent-plan` roots, coordination strands), stamp the root yourself: `strand update <root-id> --attr branch=<branch> --attr owner=<name>`. Children do not need their own `branch` attr — they are reachable from the root.
+
+`strand branches` answers "what is going on inside each feature branch": it groups active branch-stamped roots by branch and joins each root to its active descendants and ready frontier. `strand branches <branch>` scopes to one branch and fails loudly if nothing is stamped with it. This is the interim convention from RFC-014 (`REC1`); the durable roster spool (`RFC-014.O3`) is a separate card on the board.
 
 ### Custom workflows
 

@@ -66,8 +66,8 @@
                           {:local/root (.getCanonicalPath (io/file "spools/agents"))}
                           'skein.spools/chime
                           {:local/root (.getCanonicalPath (io/file "spools/chime"))}
-                          'skein.spools/backlog
-                          {:local/root (.getCanonicalPath (io/file "spools/backlog"))}
+                          'skein.spools/kanban
+                          {:local/root (.getCanonicalPath (io/file "spools/kanban"))}
                           ;; init.clj requires this spool; the omission used to be
                           ;; masked by fail-quiet required use!, which now throws.
                           ;; Its root lives inside the workspace (.skein/spools/macros),
@@ -107,10 +107,10 @@
 (defn- assert-config-registrations
   "Assert the repo-local query/op/pattern registrations are present."
   [rt]
-  (doseq [query-name ["backlog-items" "backlog-unstarted" "feature-active" "feature-work"
+  (doseq [query-name ["kanban-cards" "kanban-unstarted" "feature-active" "feature-work"
                       "feature-owner-work" "feature-run" "workflow-runs" "devflow-runs" "work"]]
     (is (contains? (api/queries rt) query-name)))
-  (doseq [op-name ["backlog" "current-dags" "devflow-start" "devflow-next" "devflow-choices"
+  (doseq [op-name ["kanban" "branches" "current-dags" "devflow-start" "devflow-next" "devflow-choices"
                    "devflow-choose" "devflow-complete" "devflow-advance"
                    "devflow-describe" "devflow-history" "devflow-archive"
                    "devflow-status" "workflow-runs" "devflow-conventions"
@@ -125,8 +125,8 @@
   (is (= (var-get (requiring-resolve 'skein.spools.agents/review-contract))
          ((requiring-resolve 'skein.spools.shuttle/default-review-contract-text))))
   ;; the repo owns chime's attention rules; the chime engine ships none
-  (is (= [:agent-failure :backlog-blocked :backlog-completed :backlog-started
-          :hitl-checkpoint-ready :treadle-error]
+  (is (= [:agent-failure :hitl-checkpoint-ready :kanban-blocked :kanban-completed
+          :kanban-started :treadle-error]
          (mapv :name ((requiring-resolve 'skein.spools.chime/rules))))))
 
 (deftest current-dags-op-builds-self-contained-plan-task-projection
@@ -172,6 +172,39 @@
               (is (every? #(and (contains? dag-ids (:from_strand_id %))
                                 (contains? dag-ids (:to_strand_id %)))
                           (concat (:parent_of_edges dag) (:depends_on_edges dag)))))))))))
+
+(deftest branches-op-groups-branch-stamped-work-roots
+  (with-config-runtime
+    (fn [rt]
+      (let [root (api/add rt {:title "Card: feature-x"
+                              :state "active"
+                              :attributes {:kanban/card "true" :kanban/status "claimed"
+                                           :owner "agent-a" :branch "feature-x"
+                                           :worktree "/tmp/feature-x"}})
+            task (api/add rt {:title "Implement feature-x"
+                              :state "active"
+                              :attributes {:kind "task"}})
+            review (api/add rt {:title "Review feature-x"
+                                :state "active"
+                                :attributes {:kind "review"}})]
+        (api/update rt (:id root) {:edges [{:type "parent-of" :to (:id task)}
+                                           {:type "parent-of" :to (:id review)}]})
+        (api/update rt (:id review) {:edges [{:type "depends-on" :to (:id task)}]})
+        ;; a branch-stamped child (task assigned owner+branch) must not
+        ;; surface as a second work root for the branch
+        (api/update rt (:id task) {:attributes {:kind "task" :branch "feature-x" :owner "agent-b"}})
+        (let [result (op! "branches" [])
+              branch (first (:branches result))
+              view (first (:roots branch))]
+          (is (= ["feature-x"] (mapv :branch (:branches result))))
+          (is (= [(:id root)] (mapv #(get-in % [:root :id]) (:roots branch))))
+          (is (= #{(:id task) (:id review)}
+                 (set (map :id (:active_descendants view)))))
+          ;; review depends on the task, so the frontier is root + task
+          (is (= #{(:id root) (:id task)} (set (map :id (:ready view))))))
+        (is (= 1 (count (:branches (op! "branches" ["feature-x"])))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no active work root"
+                              (op! "branches" ["missing-branch"])))))))
 
 (deftest delegate-pipeline-weave-creates-chain-loop-gates
   (with-config-runtime

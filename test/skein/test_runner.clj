@@ -43,7 +43,7 @@
    ;; Shuttle-first within this JVM; runtime-deps intentionally poisons the basis, so it is last.
    "B" ['skein.shuttle-test 'skein.chime-sync-test 'skein.runtime-deps-test]
    ;; Medium add-libs suites share one JVM to amortize boot without exceeding shard A.
-   "C" ['skein.config-test 'skein.backlog-test]})
+   "C" ['skein.config-test 'skein.kanban-test]})
 
 (def shard-timeout-minutes 5)
 (def shard-summary-prefix "::skein-shard-summary ")

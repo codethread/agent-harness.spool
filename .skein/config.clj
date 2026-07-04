@@ -518,10 +518,11 @@
             {:namespace "skein.spools.ephemeral"
              :doc "spools/ephemeral.md"
              :purpose "Temporary parent-owned strands burned via a userland attribute."}
-            {:namespace "skein.spools.backlog"
-             :doc "spools/backlog.md"
-             :purpose "BACKLOG.md feature queue backed by backlog item strands."}]
-   :ops [{:name "backlog" :usage "strand backlog <about|add|next|claim|finish|sync> ..."}
+            {:namespace "skein.spools.kanban"
+             :doc "spools/kanban.md"
+             :purpose "User-facing kanban board: feature/epic cards with refinement/pending/claimed lanes, notes, and handovers."}]
+   :ops [{:name "kanban" :usage "strand kanban <about|add|board|card|next|promote|claim|note|finish> ..."}
+         {:name "branches" :usage "strand branches [branch]"}
          {:name "devflow-start" :usage "strand devflow-start <feature> [required|already-in-worktree-ok]"}
          {:name "devflow-next" :usage "strand devflow-next <feature>"}
          {:name "devflow-choices" :usage "strand devflow-choices <feature> [step=<id>]"}
@@ -542,10 +543,10 @@
                :purpose "Create a feature strand plus task/review children for agent work; now shipped by skein.spools.agents, not this config."}
               {:name "delegate-pipeline"
                :purpose "Sequential chain-loop workflow of subagent gates with optional acceptance checkpoint."}]
-   :queries [{:name "backlog-items"
-              :usage "strand list --query backlog-items"}
-             {:name "backlog-unstarted"
-              :usage "strand ready --query backlog-unstarted"}
+   :queries [{:name "kanban-cards"
+              :usage "strand list --query kanban-cards"}
+             {:name "kanban-unstarted"
+              :usage "strand ready --query kanban-unstarted"}
              {:name "feature-active"
               :usage "strand list --query feature-active --param feature=<feature>"}
              {:name "feature-work"
@@ -610,20 +611,21 @@
   (let [attrs (:attributes strand)]
     (or (get attrs k) (get attrs (subs (str k) 1)))))
 
-(defn- backlog-root-orphan?
-  "Return true when an orphan row is an unclaimed backlog root.
+(defn- kanban-card-orphan?
+  "Return true when an orphan row is an unclaimed kanban card.
 
-  Pending backlog items intentionally start life as root records in BACKLOG.md;
-  they are queue entries, not graph hygiene problems. Claimed backlog roots keep
-  surfacing so missing task/devflow children stay visible."
+  Refinement and pending cards (and unclaimed epics) intentionally sit as
+  root strands on the board; they are queue entries, not graph hygiene
+  problems. Claimed cards keep surfacing so missing task/devflow children
+  stay visible."
   [row]
-  (and (= "true" (config-attr row :backlog/item))
-       (= "pending" (config-attr row :backlog/status))))
+  (and (= "true" (config-attr row :kanban/card))
+       (contains? #{"pending" "refinement"} (config-attr row :kanban/status))))
 
 (defn- suppress-expected-carder-orphans
   "Return report with expected repo-local orphan rows removed."
   [report]
-  (let [rows (remove backlog-root-orphan? (get-in report [:orphans :rows]))]
+  (let [rows (remove kanban-card-orphan? (get-in report [:orphans :rows]))]
     (assoc report :orphans {:count (count rows) :rows (vec rows)})))
 
 (defn carder-report-op
@@ -632,7 +634,7 @@
   Usage: `strand carder-report [--days <n>] [--include-plumbing true|false]`.
   This is a read-only wrapper around `skein.spools.carder/report` for checking
   stale active strands, orphaned strands, and work blocked by failed agent runs.
-  Repo-local expected backlog queue roots are suppressed from the orphan list."
+  Repo-local expected kanban board roots are suppressed from the orphan list."
   [ctx]
   (let [{:keys [flags]} (parse-op-argv "carder-report" (:op/argv ctx)
                                        {"--days" :single
@@ -756,6 +758,61 @@
      :dev/mermaid (flow-status-mermaid gates ready-ids)}))
 
 ;; ---------------------------------------------------------------------------
+;; branches: branch-visibility projection over work-root strands
+;; ---------------------------------------------------------------------------
+
+(defn- branch-root-view
+  "Return one branch work root with its active descendants and ready frontier."
+  [rt active-ids ready-ids root]
+  (let [{:keys [strands]} (api/subgraph rt [(:id root)] {:type "parent-of"})
+        descendants (->> strands
+                         (filter #(and (contains? active-ids (:id %))
+                                       (not= (:id root) (:id %))))
+                         (sort-by :id)
+                         (mapv summarize-strand))]
+    {:root (summarize-strand root)
+     :active_descendants descendants
+     :ready (filterv #(contains? ready-ids (:id %))
+                     (into [(summarize-strand root)] descendants))}))
+
+(defn branches-op
+  "Group active branch-stamped work roots into a per-branch progress view.
+
+  Usage: `strand branches [branch]`. The repo convention stamps `branch`
+  (plus `owner`/`worktree`) on exactly one active work root per branch —
+  `kanban claim` does this for cards — and hangs all execution
+  strands beneath that root with parent-of edges. This op answers \"what is
+  going on inside each feature branch\" by joining those roots to their
+  active descendants and the ready frontier (`work` query, so workflow
+  plumbing and shuttle run records stay hidden)."
+  [ctx]
+  (let [usage "strand branches [branch]"
+        [branch] (require-argv-range! "branches" (:op/argv ctx) 0 1 usage)
+        rt (current/runtime)
+        active-by-id (active-strands-by-id rt)
+        active-ids (set (keys active-by-id))
+        parent-edges (->> (:edges (api/subgraph rt (sort active-ids) {:type "parent-of"}))
+                          (internal-active-edges active-ids))
+        child-ids (set (map :to_strand_id parent-edges))
+        roots (->> (vals active-by-id)
+                   (filter #(config-attr % :branch))
+                   (remove #(contains? child-ids (:id %)))
+                   (filter #(or (nil? branch) (= branch (config-attr % :branch)))))
+        ready-ids (set (map :id (api/ready rt work-query {})))
+        branches (->> roots
+                      (group-by #(config-attr % :branch))
+                      (sort-by key)
+                      (mapv (fn [[branch-name branch-roots]]
+                              {:branch branch-name
+                               :roots (mapv (partial branch-root-view rt active-ids ready-ids)
+                                            (sort-by :id branch-roots))})))]
+    (when (and branch (empty? branches))
+      (throw (ex-info "no active work root is stamped with this branch"
+                      {:branch branch :usage usage})))
+    {:operation "branches"
+     :branches branches}))
+
+;; ---------------------------------------------------------------------------
 ;; chime attention rules: what this repo's devflow considers worth a human's
 ;; attention. The chime engine is vocabulary-agnostic; these rules own the
 ;; workflow/shuttle/treadle knowledge. Developers bind how they are notified
@@ -790,23 +847,23 @@
     {:title (str "Treadle error: " (:title strand))
      :body (str "Strand " (:id strand) " has treadle/error:\n\n" error)}))
 
-(defn backlog-started-rule
-  "Notify when a backlog item is claimed and work starts."
+(defn kanban-started-rule
+  "Notify when a kanban card is claimed and work starts."
   [{:keys [strand]}]
   (when (and (= "active" (:state strand))
-             (= "true" (config-attr strand :backlog/item))
-             (= "claimed" (config-attr strand :backlog/status)))
-    {:title (str "Backlog started: " (:title strand))
-     :body (str "Backlog item " (:id strand) " has been claimed and work has started.")}))
+             (= "true" (config-attr strand :kanban/card))
+             (= "claimed" (config-attr strand :kanban/status)))
+    {:title (str "Kanban started: " (:title strand))
+     :body (str "Kanban card " (:id strand) " has been claimed and work has started.")}))
 
-(defn backlog-completed-rule
-  "Notify when a backlog item reaches the explicit done outcome."
+(defn kanban-completed-rule
+  "Notify when a kanban card reaches the explicit done outcome."
   [{:keys [strand]}]
   (when (and (= "closed" (:state strand))
-             (= "true" (config-attr strand :backlog/item))
-             (= "done" (config-attr strand :backlog/status)))
-    {:title (str "Backlog done: " (:title strand))
-     :body (str "Backlog item " (:id strand) " completed fully.")}))
+             (= "true" (config-attr strand :kanban/card))
+             (= "done" (config-attr strand :kanban/status)))
+    {:title (str "Kanban done: " (:title strand))
+     :body (str "Kanban card " (:id strand) " completed fully.")}))
 
 (defn- failed-blocker?
   "Return true when strand is an active failed/exhausted blocker."
@@ -815,7 +872,7 @@
        (contains? #{"failed" "exhausted"} (config-attr strand :shuttle/phase))))
 
 (defn- active-descendants
-  "Return active strands below backlog root over parent-of, including the root."
+  "Return active strands below a kanban card over parent-of, including the card."
   [rt root-id]
   (->> (:strands (api/subgraph rt [root-id] {:type "parent-of"}))
        (filter #(= "active" (:state %)))
@@ -836,16 +893,16 @@
          (sort-by :id)
          vec)))
 
-(defn backlog-blocked-rule
-  "Notify when active backlog work is blocked by failed/exhausted delegated work."
+(defn kanban-blocked-rule
+  "Notify when active card work is blocked by failed/exhausted delegated work."
   [{:keys [strand]}]
   (when (and (= "active" (:state strand))
-             (= "true" (config-attr strand :backlog/item)))
+             (= "true" (config-attr strand :kanban/card)))
     (let [rt (current/runtime)
           blockers (blocking-failures rt (:id strand))]
       (when (seq blockers)
-        {:title (str "Backlog blocked: " (:title strand))
-         :body (str "Backlog item " (:id strand)
+        {:title (str "Kanban blocked: " (:title strand))
+         :body (str "Kanban card " (:id strand)
                     " is blocked by failed/exhausted work:\n"
                     (str/join "\n" (map #(str "- " (:id %) " " (:title %)
                                                " (" (config-attr % :shuttle/phase) ")")
@@ -857,9 +914,9 @@
   [(chime/defrule! :hitl-checkpoint-ready 'config/hitl-checkpoint-ready-rule)
    (chime/defrule! :agent-failure 'config/agent-failure-rule)
    (chime/defrule! :treadle-error 'config/treadle-error-rule)
-   (chime/defrule! :backlog-started 'config/backlog-started-rule)
-   (chime/defrule! :backlog-completed 'config/backlog-completed-rule)
-   (chime/defrule! :backlog-blocked 'config/backlog-blocked-rule)])
+   (chime/defrule! :kanban-started 'config/kanban-started-rule)
+   (chime/defrule! :kanban-completed 'config/kanban-completed-rule)
+   (chime/defrule! :kanban-blocked 'config/kanban-blocked-rule)])
 
 ;; ---------------------------------------------------------------------------
 ;; install!
@@ -953,6 +1010,11 @@
           'current-dags
           "Show active parent-of work DAGs with active depends-on edges"
           'config/current-dags-op)
+         (api/register-op!
+          runtime
+          'branches
+          "Show active branch-stamped work roots grouped by branch"
+          'config/branches-op)
          (api/register-op!
           runtime
           'carder-report

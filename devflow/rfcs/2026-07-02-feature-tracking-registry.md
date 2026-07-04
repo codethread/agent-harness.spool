@@ -138,8 +138,8 @@ only for engines that never touch the graph between registration and finish
 
 ## RFC-014.P7 Follow-up tracking
 
-Future implementation slices and unresolved design decisions are tracked in [`../../BACKLOG.md`](../../BACKLOG.md). This RFC remains the design rationale; the backlog is the canonical home for pending work items.
+Future implementation slices and unresolved design decisions are tracked on the kanban board (`strand kanban board`). This RFC remains the design rationale; the board is the canonical home for pending work items.
 
 ## RFC-014.P8 Outcome
 
-Pending decision. Pending work has been moved to [`../../BACKLOG.md`](../../BACKLOG.md).
+Pending decision on O3. The O1 interim convention shipped 2026-07-04: work roots are stamped with `branch`/`owner`/`worktree` (mandatory at `kanban claim`) and the repo-local `strand branches` op projects per-branch progress (see AGENTS.md "Branch work visibility"). Remaining O3 roster work stays on the kanban board (`strand kanban board`).

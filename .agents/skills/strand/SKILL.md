@@ -31,6 +31,13 @@ wktree path --branch <feature-slug>
 If `wktree add --json` returns a `post_create_script_path`, run that script with
 `bash` before treating the worktree as ready.
 
+Once the branch exists, make the work discoverable: exactly one active root
+strand carries `branch` (plus `owner`, and `worktree` when one exists) and all
+execution strands hang beneath it via `parent-of`. `strand kanban claim` does
+the stamping for kanban cards; stamp ad hoc roots with
+`strand update <root-id> --attr branch=<branch> --attr owner=<name>`. Check
+in-flight branch work with `strand branches [branch]`.
+
 ## Discover patterns first
 
 Before creating a multi-step plan, inspect available weaver patterns and prefer a
