@@ -14,7 +14,12 @@
          ;; while the weaver consumes the spools.edn coordinate.
          :extra-deps {io.github.codethread/devflow.spool
                       {:git/url "https://github.com/codethread/devflow.spool.git"
-                       :git/sha "3bcc78bbe25ac70825f55af0563781de8d332645"}}
+                       :git/sha "3bcc78bbe25ac70825f55af0563781de8d332645"}
+                      ;; Test-only ergonomics: readable nested-map/JSON assertions
+                      ;; (match?) and spec-driven property tests (defspec). Kept
+                      ;; off the main src/weaver classpath.
+                      nubank/matcher-combinators {:mvn/version "3.9.1"}
+                      org.clojure/test.check {:mvn/version "1.1.1"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "skein.test-runner"]}
   :repl {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}

@@ -5,6 +5,8 @@
   underlying weaver API the old socket dispatch delegates to."
   (:require [clojure.spec.alpha :as s]
             [clojure.test :refer [deftest is testing]]
+            [matcher-combinators.matchers :as m]
+            [matcher-combinators.test :refer [match?]]
             [skein.api.weaver.alpha :as api]
             [skein.spools.batteries :as batteries]
             [skein.spools.test-support :refer [with-runtime]]))
@@ -56,13 +58,15 @@
   (with-batteries
     (fn [rt]
       (let [added (api/op! rt 'add ["Design model" "--attr" "priority=high"])]
-        (is (string? (:id added)))
-        (is (= "Design model" (:title added)))
-        (is (= "active" (:state added)))
-        (is (= {:priority "high"} (:attributes added)))
-        (testing "normalized shape omits old lifecycle fields (C9)"
-          (is (not (contains? added :active)))
-          (is (not (contains? added :inactive_at))))
+        ;; One shape assertion: exact scalar fields, an exact attributes map, and
+        ;; m/absent proving the normalized shape omits old lifecycle fields (C9).
+        (is (match? {:id string?
+                     :title "Design model"
+                     :state "active"
+                     :attributes (m/equals {:priority "high"})
+                     :active m/absent
+                     :inactive_at m/absent}
+                    added))
         (testing "shape matches a direct weaver-API add"
           (let [direct (api/add rt {:title "Design model" :attributes {:priority "high"} :state "active"})]
             (is (= (set (keys added)) (set (keys direct))))))))))
@@ -87,10 +91,10 @@
       (let [target (api/add rt {:title "Target" :attributes {}})
             added (api/op! rt 'add ["Source" "--edge" (str "depends-on:" (:id target))])
             edges (:edges (api/subgraph rt [(:id added)] {:type "depends-on"}))]
-        (is (some #(and (= (:id added) (:from_strand_id %))
-                        (= (:id target) (:to_strand_id %))
-                        (= "depends-on" (:edge_type %)))
-                  edges))))))
+        (is (match? (m/embeds [{:from_strand_id (:id added)
+                                :to_strand_id (:id target)
+                                :edge_type "depends-on"}])
+                    edges))))))
 
 (deftest add-loud-failures
   (with-batteries
@@ -180,8 +184,8 @@
                                :edges [{:type "parent-of" :to (:id root)}]})
             result (api/op! rt 'subgraph [(:id child) "--relation" "parent-of"])]
         (is (= #{"root_ids" "strands" "edges"} (set (keys result))))
-        (is (contains? (set (map :id (get result "strands"))) (:id root)))
-        (is (contains? (set (map :id (get result "strands"))) (:id child)))))))
+        (is (match? {"strands" (m/embeds [{:id (:id root)} {:id (:id child)}])}
+                    result))))))
 
 (defn- with-weave-pattern
   "Run f with a create-only test pattern registered under `task`."

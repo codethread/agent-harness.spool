@@ -1,6 +1,8 @@
 (ns skein.spools.loom-test
   "Tests for the read-only work-graph projection spool."
   (:require [clojure.test :refer [deftest is testing]]
+            [matcher-combinators.matchers :as m]
+            [matcher-combinators.test :refer [match?]]
             [skein.repl :as repl]
             [skein.spools.loom :as loom]
             [skein.spools.test-support :refer [with-runtime]]))
@@ -17,10 +19,10 @@
         (let [{:keys [roots dags]} (loom/work-dags rt)
               dag (first (filter #(= (:id root) (get-in % [:root :id])) dags))]
           (is (contains? (set roots) (:id root)))
-          (is (= #{(:id root) (:id a) (:id b)} (set (map :id (:strands dag)))))
           (is (= 2 (count (:parent_of_edges dag))))
-          (is (= [[(:id a) (:id b)]]
-                 (mapv (juxt :from_strand_id :to_strand_id) (:depends_on_edges dag)))))))))
+          (is (match? {:strands (m/in-any-order [{:id (:id root)} {:id (:id a)} {:id (:id b)}])
+                       :depends_on_edges [{:from_strand_id (:id a) :to_strand_id (:id b)}]}
+                      dag)))))))
 
 (deftest branch-views-group-stamped-roots-and-join-ready-frontier
   (with-runtime
