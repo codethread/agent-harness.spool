@@ -56,10 +56,11 @@ in one JVM scan independently and never block each other.
 | `treadle/error` | gate step | Durable spawn-side failure detail; the gate is skipped until a coordinator clears it. |
 | `treadle/gate` | run strand | Id of the gate step this run fulfills. |
 | `treadle/run-id` | run strand | Workflow `run-id` owning the gate. |
+| `treadle/superseded-by` | run strand | Id of the fresh run that replaced this dead one when the gate was cleared and respawned; excludes the run's stale `delegates` edge from `stalled-gates`. |
 | `treadle/delivered` | run strand | `"true"`, `"gate-closed"`, or `"error: …"`; presence means delivery is terminal for this run. |
 | `treadle/delivery-blocked` | run strand | Written once when a finished run's gate is active but not currently ready (e.g. a dependency added after spawn). Non-terminal: the run stays undelivered and delivery retries when the gate becomes ready again. |
 
-Treadle links each gate to its delegated run with a `delegates` annotation edge plus the `treadle/run`, `treadle/gate`, and `treadle/run-id` attributes. It must not use `parent-of` for this provenance because that structural relation would place the run inside the workflow subgraph and surface it as workflow `next-steps` work.
+Treadle links each gate to its delegated run with a `delegates` annotation edge plus the `treadle/run`, `treadle/gate`, and `treadle/run-id` attributes. It must not use `parent-of` for this provenance because that structural relation would place the run inside the workflow subgraph and surface it as workflow `next-steps` work. (A generic `agent retry` of a delegated run *does* create such a `parent-of` edge back to the gate — which is exactly why it is not the gate-recovery verb; see [Failure and recovery](#failure-and-recovery).)
 
 ## Worked example
 
@@ -87,7 +88,11 @@ Treadle links each gate to its delegated run with a `delegates` annotation edge 
 
 ## Failure and recovery
 
-A failed shuttle run stays active and the workflow gate remains ready and stamped with `treadle/run`. A coordinator can reset the run for shuttle recovery or clear the gate's `treadle/run` attribute to request a fresh delegation. Gates stamped with `treadle/error` are skipped until the error attribute is cleared.
+Only a genuinely successful run delivers a gate: delivery selects closed runs in shuttle phase `done`, which shuttle records solely for a non-blank result. A run that exits 0 with a **blank** result is recorded `failed` by shuttle (see the README blank-result paragraph), so it never completes the gate — a silently dead worker must not satisfy a subagent gate. Instead the failed run stays active and the gate remains ready and stamped with `treadle/run`, discoverable via the stall predicate and `stalled-gates` query below and (as a delegated run) via `agent-failures`.
+
+A coordinator recovers such a gate by clearing its `treadle/run` attribute (optionally re-writing `shuttle/prompt`): the next scan finds no live run for the gate and spawns a fresh delegation — a run stamped `treadle/gate` and linked by a `delegates` edge, which the treadle then delivers. Stamping the fresh run repoints the dead run's provenance with `treadle/superseded-by`, so the gate's stale `delegates` edge stops surfacing it in `stalled-gates` once a healthy replacement is in flight. Clearing the stamp, not retrying, is what triggers that fresh delegation.
+
+`agent retry <run-id>` is **not** the gate-recovery verb. It supersedes the dead run (phase → `superseded`) and spawns a fresh run parented to the run's served target; for a treadle run that target resolves to the gate itself (`run-summary`'s `:for` is the run's `treadle/gate`). So retry *does* re-link a run to the gate — but only structurally, via a `parent-of` edge, the very relation treadle avoids for delegations (see [Treadle attributes](#treadle-attributes)): it cross-wires the fresh run into the workflow subgraph as spurious `next-steps` work. It does **not** create the delegation treadle recognises — the fresh run carries no `treadle/gate`, gets no `delegates` edge, and the gate's `treadle/run` stamp is never rewritten. Treadle keys delivery and idempotency off `treadle/gate` / `treadle/run`, so it never adopts or delivers the retry run: the gate stays stalled on the now-`superseded` stamped run until `treadle/run` is cleared. Gates stamped with `treadle/error` are skipped until the error attribute is cleared.
 
 If a gate is closed or routed away while its shuttle run is in flight, the completed run is stamped `treadle/delivered "gate-closed"` and the result remains on the run strand for audit. If the gate is still active but no longer ready when the run finishes, the run is stamped `treadle/delivery-blocked` and delivery retries once the gate is ready again.
 
@@ -95,9 +100,9 @@ Crash-window caveat: spawn idempotency re-adopts only live prior runs. A run tha
 
 ## Coordination attention
 
-`treadle/install!` registers workflow stall predicate `:treadle`. It reports a ready subagent gate as stalled when the gate has `treadle/error` or its stamped `treadle/run` is in shuttle phase `failed`/`exhausted`; no wall-clock hang policy is applied.
+`treadle/install!` registers workflow stall predicate `:treadle`. It reports a ready subagent gate as stalled when the gate has `treadle/error` or its stamped `treadle/run` is in shuttle phase `failed`/`exhausted`/`superseded`; no wall-clock hang policy is applied. `superseded` is included so a gate whose run was retired by `agent retry` stays discoverable rather than silently pending until a coordinator clears the stamp.
 
-The spool also registers `stalled-gates` and `blocked-deliveries` named queries for coordinator inspection.
+The spool also registers `stalled-gates` and `blocked-deliveries` named queries for coordinator inspection. `stalled-gates` is the SQL-side mirror of the stall predicate: it returns active subagent gates that either carry `treadle/error` or have a `delegates`-linked run in a terminal phase (`failed`/`exhausted`/`superseded`). A named query cannot join a gate's `treadle/run` id back to the run row, so it matches through the `delegates` edge instead. To keep that edge-scoped view in lockstep with the current-stamp `:treadle` predicate, stamping a fresh run marks the run it replaces `treadle/superseded-by`, and the query excludes superseded runs. So after a clear-and-respawn the gate stops surfacing as soon as a healthy replacement is in flight — exactly when `gate-stalled?` (which reads the single current `treadle/run`) also returns nil. Its membership rule is therefore "the current delegated run is dead", the same condition the predicate applies. `blocked-deliveries` returns finished runs parked on `treadle/delivery-blocked`.
 
 ## See also
 

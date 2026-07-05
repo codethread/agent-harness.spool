@@ -819,16 +819,32 @@
               (catch Exception e
                 {:result (str/trim stdout)
                  :parse-error (str (ex-message e))}))]
-        (update-run! id (cond-> {"shuttle/phase" "done"
-                                 "shuttle/exit-code" exit
-                                 "shuttle/result" (or result "")
-                                 "shuttle/finished-at" (now)}
-                          session-id (assoc "shuttle/session-id" session-id)
-                          parse-error (assoc "shuttle/parse-error" parse-error))
-                     {:state "closed"}))
+        (if (str/blank? result)
+          ;; exit 0 but no result text: the harness died silently (a transport
+          ;; drop mid-turn writes nothing yet still exits 0). A run's result is
+          ;; the worker's report, so an empty one is not success — record it
+          ;; failed (loud, retryable via agent-failures/retry) rather than
+          ;; closing a hollow `done` that dodges every recovery path (TEN-003).
+          ;; session-id is preserved for forensics; the failure is deliberately
+          ;; not resume-classed, so a plain retry respawns fresh.
+          (let [stderr (str/trim (read-file-safe err-file))]
+            (mark-failed! id
+                          (str "harness exited 0 with an empty result"
+                               (when parse-error (str " (parse error: " parse-error ")"))
+                               (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
+                          (cond-> {"shuttle/exit-code" exit}
+                            session-id (assoc "shuttle/session-id" session-id))))
+          (update-run! id (cond-> {"shuttle/phase" "done"
+                                   "shuttle/exit-code" exit
+                                   "shuttle/result" result
+                                   "shuttle/finished-at" (now)}
+                            session-id (assoc "shuttle/session-id" session-id)
+                            parse-error (assoc "shuttle/parse-error" parse-error))
+                       {:state "closed"})))
         (let [stderr (str/trim (read-file-safe err-file))
               detail (if (str/blank? stderr) (str/trim stdout) stderr)]
-          (mark-failed! id (str "harness exited " exit ": " (tail detail 2000))))))))
+          (mark-failed! id (str "harness exited " exit ": " (tail detail 2000))
+                        {"shuttle/exit-code" exit}))))))
 
 (defn- process-start-instant
   "Return the OS start instant string for a live process, or nil when unknown."

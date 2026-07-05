@@ -120,6 +120,28 @@
         (is (str/includes? (get-in failed [:attributes :shuttle/error]) "exited 3"))
         (is (str/includes? (get-in failed [:attributes :shuttle/error]) "boom"))))))
 
+(deftest empty-result-exit-0-fails-loudly-and-is-retryable
+  (with-shuttle
+    (fn [rt]
+      (testing "a harness that exits 0 but writes nothing is not recorded done"
+        ;; the incident: a transport death drops the harness mid-turn, which
+        ;; writes no result yet still exits 0. Recording that as done with an
+        ;; empty shuttle/result dodges agent-failures and both recovery paths.
+        (let [run (shuttle/spawn-run! {:harness :sh :prompt "exit 0"})
+              failed (await-phase rt (:id run) #{"failed"} 10000)]
+          (is (= "active" (:state failed)) "stays active so it is loud and retryable")
+          (is (= "failed" (get-in failed [:attributes :shuttle/phase])))
+          (is (= 0 (get-in failed [:attributes :shuttle/exit-code])))
+          (is (str/includes? (get-in failed [:attributes :shuttle/error]) "empty result"))
+          (testing "the failed phase is exactly what agent retry supersedes"
+            (is (contains? #{"failed" "exhausted"}
+                           (get-in failed [:attributes :shuttle/phase]))))))
+      (testing "a blank (whitespace-only) result fails the same way"
+        (let [run (shuttle/spawn-run! {:harness :sh :prompt "printf '   \\n'"})
+              failed (await-phase rt (:id run) #{"failed"} 10000)]
+          (is (= "failed" (get-in failed [:attributes :shuttle/phase])))
+          (is (str/includes? (get-in failed [:attributes :shuttle/error]) "empty result")))))))
+
 (deftest dependent-run-waits-for-blocker-and-fans-in
   (with-shuttle
     (fn [rt]

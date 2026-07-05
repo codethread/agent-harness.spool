@@ -124,7 +124,9 @@ Capture runs at two points: best-effort before teardown (never a completion bloc
 | `(capture! id)` | Capture an interactive run's transcript now (harness `:capture` > backend scrollback), persist it as `shuttle/log`, and return `{:id :path :text}`. |
 | `(reconcile!)` | On install, recover active running runs left by a previous weaver lifetime. |
 
-Successful runs set `shuttle/phase "done"`, record `shuttle/result`, and close the run strand. Failed runs remain `active` with `shuttle/phase "failed"` and `shuttle/error`, so dependents stay blocked loudly. Exhausted crash-recovery runs remain active with `shuttle/phase "exhausted"`.
+Successful runs set `shuttle/phase "done"`, record a non-blank `shuttle/result`, and close the run strand. A headless run that exits 0 but produces a blank result is **not** success: the result is the worker's report, and a silent harness/transport death mid-turn writes nothing yet still exits 0, so such a run is recorded `failed` (loud and retryable) rather than a hollow `done` that would dodge `agent-failures` and both recovery paths. Failed runs remain `active` with `shuttle/phase "failed"` and `shuttle/error`, so dependents stay blocked loudly. Exhausted crash-recovery runs remain active with `shuttle/phase "exhausted"`.
+
+Every headless outcome that observes the process exit records that code on `shuttle/exit-code` — the `done` close, the blank-result-exit-0 failure, and the non-zero-exit failure all stamp it. Failures with no process exit code to report (interactive session death, launch exceptions, a killed run) deliberately omit the attribute; its presence means "a headless process reported this code", not "the run failed".
 
 Readiness is the only scheduling primitive: a pending run with no active `depends-on` blockers can spawn; a pending run with active blockers waits until graph mutations make it ready.
 
@@ -178,8 +180,9 @@ Interactive runs get their own preamble variant carrying the completion contract
 | `shuttle/phase` | `pending`, `running`, `done`, `failed`, `exhausted`, or `superseded`. |
 | `shuttle/attempt` | Crash-recovery launch attempt count. |
 | `shuttle/max-attempts` | Optional maximum attempts before exhaustion; defaults to `3`. |
-| `shuttle/result` | Final captured agent result on success. |
-| `shuttle/error` | Failure detail when phase is `failed` or `exhausted`. |
+| `shuttle/result` | Final captured agent result on success; always non-blank (a blank result is failed, not done). |
+| `shuttle/error` | Failure detail when phase is `failed` or `exhausted`. A headless exit 0 with an empty result reads `harness exited 0 with an empty result`. |
+| `shuttle/exit-code` | Process exit code of a headless run, recorded on every outcome that observed one: `done`, blank-result-exit-0 failure, and non-zero-exit failure. Absent when no process reported a code (interactive death, launch exception, kill). |
 | `shuttle/session-id` | Harness session id when parsed from harness output. |
 | `shuttle/resumes` | Predecessor run id whose harness session this run continues (also carried as a `resumes` annotation edge). |
 | `shuttle/error-class` | `resume` on a failure that resolving/continuing a session caused, so recovery can branch to a fresh spawn instead of retrying against a lost session. |
