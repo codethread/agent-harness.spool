@@ -14,6 +14,7 @@ Canonical shipped contracts live in root specs:
 - [CLI Surface](./devflow/specs/cli.md)
 - [REPL API](./devflow/specs/repl-api.md)
 - [Weaver Runtime](./devflow/specs/daemon-runtime.md)
+- [Alpha Surface](./devflow/specs/alpha-surface.md) (the contract index: in-contract tiers vs explicitly internal surface)
 
 Userland reference spools are indexed in [`spools/`](./spools/README.md), with classpath-shipped sources under `spools/src`, externally git-distributed spools consumed by coordinate, and contract docs beside them:
 
