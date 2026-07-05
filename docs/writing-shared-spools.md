@@ -54,6 +54,14 @@ the wrong world or throws.
    forever, and holds a process-local runtime binding that is meaningless — and
    actively wrong — inside a reusable spool.
 
+## The discovery surface your spool ships
+
+Skein's discovery convention has three tiers — generated `help`, authored `about`, run-first `prime` — described in [`docs/skein.md`](./skein.md) ("Discovery tiers"). For a spool op this means:
+
+1. **Declare your verbs as `:subcommands` arg-spec data; never hand-roll dispatch or usage errors.** Declaring subcommands buys the whole `help` tier for free: `strand help <op>` renders your verbs, `strand <op> help|-h|--help` aliases to it, and missing/unknown-verb failures become structured parser errors carrying the available names. `help`, `-h`, `--help`, and the arg name `subcommand` are reserved and rejected at registration. Bare `<op>` stays a loud non-zero error — never exit-0 help.
+2. **Ship `about` when your op has semantics beyond its argument shapes.** Return one structured JSON document (purpose, conventions, attribute contracts, usage examples) from an `about` subcommand. Do not duplicate arg shapes in it — that is `help`'s job and it never drifts.
+3. **Ship `prime` when your spool carries working discipline.** If an agent must load conventions before acting (board lanes, handover contracts, workflow rules), expose a `prime` subcommand that prints them, generated from the same definitions the spool installs so the discipline can never drift from the installed surface.
+
 ## Publishing a shared spool with git distribution
 
 A shared spool can be published as an ordinary git repository and consumed from a

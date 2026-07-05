@@ -26,6 +26,16 @@ mill weaver status
 mill weaver stop
 ```
 
+## Discovery: help, about, prime
+
+Skein has one convention for "how do I find out?", in three escalating tiers (canonical write-up: [`docs/skein.md`](./docs/skein.md) "Discovery tiers"; authoring rules: [`docs/writing-shared-spools.md`](./docs/writing-shared-spools.md)):
+
+- **`help`** — generated from arg-spec data, never hand-written: `strand help`, `strand help <op>`, and `strand <op> help|-h|--help` for subcommand ops. Declare `:subcommands` and usage rendering, help aliases, and structured unknown-verb errors all come for free.
+- **`about`** — the authored per-op JSON manual for semantics beyond argument shapes: `strand kanban about`, `strand agent about`.
+- **`prime`** — run-first agent orientation: `mill skein prime`, `mill strand prime`, `strand kanban prime`. Run these before working an area.
+
+When contributing ops or spools: never hand-roll subcommand dispatch or usage strings, ship `about` for ops with semantics, and ship `prime` where there is working discipline.
+
 ## Disposable workspaces for development
 
 Use explicit workspaces for tests, smoke reproduction, examples, and agent work:

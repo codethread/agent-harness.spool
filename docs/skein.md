@@ -163,6 +163,24 @@ Use the CLI for:
 
 Do not expect the CLI to be a package manager, query authoring surface, plugin host, or Clojure evaluator. Those belong to the weaver config and REPL.
 
+## Discovery tiers: help, about, prime
+
+Skein has one deliberate convention for "how do I find out?", with three tiers. They compose as an escalation path — `prime` orients you, `about` explains an op you are about to lean on, `help` answers exact invocation questions — and each tier has a different source of truth:
+
+| Tier | Source | Question it answers | Examples |
+| --- | --- | --- | --- |
+| `help` | **Generated** from registered arg-spec data | "What can I type?" — verbs, flags, positionals, types | `strand help`, `strand help <op>`, `strand <op> help\|-h\|--help` |
+| `about` | **Authored** per-op JSON manual | "What does this op mean?" — semantics, contracts, attribute conventions | `strand kanban about`, `strand agent about` |
+| `prime` | **Authored** prose orientation | "How do we work here?" — run **before** starting work | `mill skein prime`, `mill strand prime`, `strand kanban prime` |
+
+**`help` is never hand-written.** `strand help` lists every registered op; `strand help <op>` renders one op's detail from its arg-spec, including declared subcommands. Ops that declare `:subcommands` also answer `strand <op> help`, `strand <op> -h`, and `strand <op> --help` (sole token, no payloads) with the same detail at exit 0, and their missing/unknown-subcommand failures are structured parser errors carrying the available names — no spool ever writes its own usage strings or dispatch errors. Contracts: SPEC-002.C39, SPEC-003.C64/C65, SPEC-004.C63c–e.
+
+**`about` is the op's manual.** A spool op whose meaning goes beyond its argument shapes ships an `about` subcommand returning a structured JSON document: purpose, conventions, attribute contracts, and usage examples. Think man page, machine-readable. Purely structural ops (batteries `add`/`list`/...) do not need one — their arg-spec already says everything.
+
+**`prime` is run-first context priming for agents.** A `prime` command prints the working discipline for an area — the conventions an agent must load *before* acting, with pointers to deeper docs. `mill skein prime` (source/docs orientation) and `mill strand prime` (the strand workflow) ship embedded in the `mill` binary and need no running weaver; spool-level primes like `strand kanban prime` are spool-generated so they can never drift from the installed surface. Repo-world `mill init` seeds a marker-guarded section into `AGENTS.md`/`CLAUDE.md` pointing fresh agents at the prime commands (see "Agent guidance files").
+
+Spool authors: the authoring rules for this surface live in [`docs/writing-shared-spools.md`](./writing-shared-spools.md).
+
 ## Strand model
 
 A strand has:

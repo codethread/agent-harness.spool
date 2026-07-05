@@ -4,6 +4,8 @@ Always read `./devflow/TENETS.md` and `./devflow/PHILOSOPHY.md` before all work.
 
 Run `mill strand prime` before planning or tracking multi-step work with `strand`, and `mill skein prime` for orientation on the Skein source, docs, and how to extend the `.skein/` config. These CLI commands are the harness-agnostic replacement for the former strand/skein skills.
 
+Discovery convention (canonical doc: `docs/skein.md` "Discovery tiers"): **`prime`** is run-first orientation (`mill skein|strand prime`, `strand kanban prime`), **`about`** is an op's authored JSON manual (`strand kanban|agent about`), and **`help`** is generated from arg-spec data (`strand help [<op>]`, `strand <op> help|-h|--help` for subcommand ops) — never hand-write usage strings or subcommand dispatch; declare `:subcommands` instead (authoring rules: `docs/writing-shared-spools.md`).
+
 Skein is daemon-core-first behind a small Go router: `mill` is the local entrypoint/supervisor, the long-lived weaver owns storage and runtime state, and the `strand` CLI stays a thin JSON control surface. Runtime customization belongs in trusted config and REPL workflows.
 
 Canonical shipped contracts live in root specs:
