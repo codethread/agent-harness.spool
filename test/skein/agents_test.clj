@@ -55,13 +55,21 @@
   (with-agents
     (fn [rt]
       (is (some #(= "agent" (:name %)) (api/ops rt)))
-      (is (map? (agents/agent-op {:op/argv ["about"]}))))))
+      (is (map? (agents/agent-op {:op/argv ["about"]})))
+      (let [detail (api/resolve-op rt 'agent)]
+        (is (not (contains? detail :raw-envelope)))
+        (is (= ["about" "await" "backends" "council" "delegate" "harnesses" "kill" "logs" "note" "notes" "ps" "retry" "review" "rosters" "spawn" "status"]
+               (sort (keys (get-in detail [:arg-spec :subcommands])))))
+        (let [review-flags (get-in detail [:arg-spec :subcommands "review" :flags])]
+          (is (contains? review-flags :commit-range))
+          (is (contains? review-flags :changed-files)))))))
 
 (deftest agent-op-dispatches-and-fails-loudly
   (with-agents
     (fn [_]
-      (testing "about is the default and carries the manual"
-        (is (= (agents/agent-op {:op/argv []}) (agents/agent-op {:op/argv ["about"]})))
+      (testing "about is explicit and carries the manual"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing subcommand"
+                              (agents/agent-op {:op/argv []})))
         (let [about (agents/agent-op {:op/argv ["about"]})]
           (is (contains? about :verbs))
           (is (contains? (:verbs about) :delegate))
@@ -88,11 +96,11 @@
           (is (vector? (agents/agent-op {:op/argv ["ps" "--active"]})))
           (is (= [] (agents/agent-op {:op/argv ["ps" "--active" "--for" "no-such-strand"]})))))
       (testing "invalid input fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown agent subcommand"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown subcommand"
                               (agents/agent-op {:op/argv ["dance"]})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown flag"
                               (agents/agent-op {:op/argv ["spawn" "--nope" "x"]})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires --harness"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing required flag --harness"
                               (agents/agent-op {:op/argv ["spawn" "--prompt" "x"]})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"integer"
                               (agents/agent-op {:op/argv ["await" "id" "--timeout-secs" "soon"]})))))))
@@ -321,7 +329,7 @@
                                   (agents/agent-op {:op/argv (into ["review" (:id target) "--roster" "repo"] flag-pair)})))))
         (testing "rosters verb lists and rejects arguments"
           (is (= [:repo] (mapv :name (agents/agent-op {:op/argv ["rosters"]}))))
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"takes no arguments"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unexpected extra arguments"
                                 (agents/agent-op {:op/argv ["rosters" "extra"]}))))))))
 
 (deftest blackboard-fragments-emit-both-forms
@@ -778,7 +786,7 @@
         (is (empty? (shuttle/runs {:for (:id missing-harness)})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
                               (agents/agent-op {:op/argv ["await" "run-a" "--under" (:id plan)]})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"spawn requires --prompt"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing required flag --prompt"
                               (agents/agent-op {:op/argv ["spawn" "--harness" "sh"]})))
         (let [done (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo done"]})]
           (agents/agent-op {:op/argv ["await" (:id done) "--timeout-secs" "10"]})

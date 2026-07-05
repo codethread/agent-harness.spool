@@ -86,7 +86,7 @@ Loading shuttle without agents gives you the run engine but **no** `strand agent
 
 ## 3. Op surface
 
-Every operational verb returns JSON; all verbs are flat under `strand agent <verb>`. `strand agent about` returns a structured JSON manual (concepts, verb summaries, the coordinator loop, the worker contract); the reference below is the expanded form.
+Every operational verb returns JSON; all verbs are flat under `strand agent <verb>`. `strand help agent` is generated from the declared arg-spec and is the command-shape reference. `strand agent about` returns the authored structured JSON manual (concepts, verb semantics, the coordinator loop, the worker contract). Bare `strand agent` fails loudly with the available subcommands so discovery stays aligned with the help/about convention.
 
 ### Concepts (read first)
 

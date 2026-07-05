@@ -1554,14 +1554,18 @@
                                   :stream? true
                                   :hook-class :read}
                                  'skein.weaver-test/test-op))))
-      (testing "opaque non-subcommand arg-spec metadata remains unvalidated"
-        (is (= {:opts [:limit]}
-               (:arg-spec (api/register-op! rt 'opaque
-                                            {:arg-spec {:opts [:limit]}}
-                                            'skein.weaver-test/test-op)))))
+      (testing "flat arg-specs are validated at registration"
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                      #"arg-spec is invalid"
+                                      (api/register-op! rt 'bad-flat
+                                                        {:arg-spec {:op "bad-flat"
+                                                                    :flags {"limit" {:type :int}}}}
+                                                        'skein.weaver-test/test-op)))]
+          (is (= "bad-flat" (:operation (ex-data e))))
+          (is (= :invalid-flag (:reason (ex-data e))))))
       (testing "subcommand arg-specs are validated at registration"
         (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                      #"arg-spec subcommands are invalid"
+                                      #"arg-spec is invalid"
                                       (api/register-op! rt 'bad-subcommands
                                                         {:arg-spec {:op "bad-subcommands"
                                                                     :flags {:verbose {:type :boolean}}
@@ -1572,7 +1576,7 @@
           (is (= :flags (:field (ex-data e))))))
       (testing "registration preserves structured nested arg-spec validation context"
         (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                      #"arg-spec subcommands are invalid"
+                                      #"arg-spec is invalid"
                                       (api/register-op! rt 'bad-nested-subcommand
                                                         {:arg-spec {:op "bad-nested-subcommand"
                                                                     :subcommands {"run" 42}}}
@@ -1584,7 +1588,7 @@
           (is (= 42 (:value (ex-data e))))))
       (testing "reserved help token subcommand names fail loudly"
         (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                      #"arg-spec subcommands are invalid"
+                                      #"arg-spec is invalid"
                                       (api/register-op! rt 'bad-help-subcommand
                                                         {:arg-spec {:op "bad-help-subcommand"
                                                                     :subcommands {"help" {:doc "Reserved"}}}}
@@ -1595,7 +1599,7 @@
       (testing "replace-op! also validates subcommand arg-specs before replacing"
         (api/register-op! rt 'replaceable 'skein.weaver-test/test-op)
         (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                      #"arg-spec subcommands are invalid"
+                                      #"arg-spec is invalid"
                                       (api/replace-op! rt 'replaceable
                                                        {:arg-spec {:op "replaceable"
                                                                    :subcommands {"run" {:subcommands {"again" {}}}}}}

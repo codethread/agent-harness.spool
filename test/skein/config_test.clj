@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.core.db-test :as db-test]
+            [skein.api.current.alpha :as current]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.api.weaver.alpha :as api]
             [skein.core.weaver.config :as daemon-config]
@@ -100,9 +101,9 @@
           (delete-directory! config-dir))))))
 
 (defn- op!
-  "Invoke a repo-local config op fn by name with a CLI-shaped argv."
+  "Invoke a repo-local registered op by name with a CLI-shaped argv."
   [op-name argv]
-  ((requiring-resolve (symbol "config" (str op-name "-op"))) {:op/argv argv}))
+  (api/op! (current/runtime) (symbol op-name) argv))
 
 (defn- assert-config-registrations
   "Assert the repo-local query/op/pattern registrations are present."

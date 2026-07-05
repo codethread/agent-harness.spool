@@ -30,9 +30,10 @@
 
   A flag-spec is a map with:
 
-    :type      :string | :int | :boolean | :map   ; default :string
-                 - :string/:int consume the following token as a typed value
+    :type      :string | :int | :boolean | :boolean-token | :map   ; default :string
+                 - :string/:int/:boolean-token consume the following token as a typed value
                  - :boolean is a presence form (`--flag` -> true, no value)
+                 - :boolean-token consumes `true` or `false` as a boolean value
                  - :map accumulates `--flag key=value` tokens into a {k v} map
     :repeat?   truthy -> repeatable, values collect into a vector (:string/:int)
     :required? truthy -> must appear
@@ -58,7 +59,7 @@
 
 (def ^:private supported-arg-types
   "Argument types understood by this parser."
-  #{:string :int :boolean :map})
+  #{:string :int :boolean :boolean-token :map})
 
 (def reserved-subcommand-names
   "Subcommand names reserved for dispatch-level help aliases.
@@ -76,7 +77,13 @@
                 (fail! :type-violation
                        (str "Argument " arg " expects an integer, got " (pr-str token))
                        {:op op :arg arg :type :int :token token})))
-    ;; :string (and the default) pass the token through unchanged.
+    :boolean-token (case token
+                     "true" true
+                     "false" false
+                     (fail! :type-violation
+                            (str "Argument " arg " expects true or false, got " (pr-str token))
+                            {:op op :arg arg :type :boolean-token :token token}))
+    ;; :string (and the default) passes the token through unchanged.
     token))
 
 (defn- check-required-flags
@@ -126,63 +133,72 @@
         acc))))
 
 (defn- validate-declared-type!
-  "Validate a nested flag or positional declared :type when one is present."
+  "Validate a flag or positional declared :type when one is present."
   [op subcommand field arg spec]
   (let [type (:type spec :string)]
     (when-not (contains? supported-arg-types type)
       (fail! :invalid-arg-type
              (str "Unknown argument type " (pr-str type))
-             {:op op
-              :subcommand subcommand
-              :field field
-              :arg arg
-              :type type
-              :value spec
-              :supported-types (vec (sort-by name supported-arg-types))}))))
+             (cond-> {:op op
+                      :field field
+                      :arg arg
+                      :type type
+                      :value spec
+                      :supported-types (vec (sort-by name supported-arg-types))}
+               subcommand (assoc :subcommand subcommand))))))
 
-(defn- validate-nested-flags!
-  "Validate a nested subcommand :flags container and entries."
+(defn- validate-flags!
+  "Validate a :flags container and entries."
   [op subcommand flags]
-  (when (some? flags)
-    (when-not (map? flags)
-      (fail! :invalid-subcommand-flags
-             "Nested :flags must be a map of keyword to flag-spec map"
-             {:op op :subcommand subcommand :field :flags :value flags}))
-    (doseq [[flag spec] flags]
-      (when-not (keyword? flag)
-        (fail! :invalid-subcommand-flag
-               "Nested flag names must be keywords"
-               {:op op :subcommand subcommand :field :flags :arg flag :value spec}))
-      (when-not (map? spec)
-        (fail! :invalid-subcommand-flag
-               "Nested flag specs must be maps"
-               {:op op :subcommand subcommand :field :flags :arg flag :value spec}))
-      (validate-declared-type! op subcommand :flags flag spec))))
+  (let [container-reason (if subcommand :invalid-subcommand-flags :invalid-flags)
+        entry-reason (if subcommand :invalid-subcommand-flag :invalid-flag)]
+    (when (some? flags)
+      (when-not (map? flags)
+        (fail! container-reason
+               ":flags must be a map of keyword to flag-spec map"
+               (cond-> {:op op :field :flags :value flags}
+                 subcommand (assoc :subcommand subcommand))))
+      (doseq [[flag spec] flags]
+        (when-not (keyword? flag)
+          (fail! entry-reason
+                 "Flag names must be keywords"
+                 (cond-> {:op op :field :flags :arg flag :value spec}
+                   subcommand (assoc :subcommand subcommand))))
+        (when-not (map? spec)
+          (fail! entry-reason
+                 "Flag specs must be maps"
+                 (cond-> {:op op :field :flags :arg flag :value spec}
+                   subcommand (assoc :subcommand subcommand))))
+        (validate-declared-type! op subcommand :flags flag spec)))))
 
-(defn- validate-nested-positionals!
-  "Validate a nested subcommand :positionals container and entries."
+(defn- validate-positionals!
+  "Validate a :positionals container and entries."
   [op subcommand positionals]
-  (when (some? positionals)
-    (when-not (sequential? positionals)
-      (fail! :invalid-subcommand-positionals
-             "Nested :positionals must be a sequential collection of positional-spec maps"
-             {:op op :subcommand subcommand :field :positionals :value positionals}))
-    (doseq [[idx spec] (map-indexed vector positionals)]
-      (when-not (map? spec)
-        (fail! :invalid-subcommand-positional
-               "Nested positional specs must be maps"
-               {:op op :subcommand subcommand :field :positionals :index idx :value spec}))
-      (when-not (keyword? (:name spec))
-        (fail! :invalid-subcommand-positional
-               "Nested positional specs must declare keyword :name"
-               {:op op :subcommand subcommand :field :positionals :index idx :value spec}))
-      (validate-declared-type! op subcommand :positionals (:name spec) spec))))
+  (let [container-reason (if subcommand :invalid-subcommand-positionals :invalid-positionals)
+        entry-reason (if subcommand :invalid-subcommand-positional :invalid-positional)]
+    (when (some? positionals)
+      (when-not (sequential? positionals)
+        (fail! container-reason
+               ":positionals must be a sequential collection of positional-spec maps"
+               (cond-> {:op op :field :positionals :value positionals}
+                 subcommand (assoc :subcommand subcommand))))
+      (doseq [[idx spec] (map-indexed vector positionals)]
+        (when-not (map? spec)
+          (fail! entry-reason
+                 "Positional specs must be maps"
+                 (cond-> {:op op :field :positionals :index idx :value spec}
+                   subcommand (assoc :subcommand subcommand))))
+        (when-not (keyword? (:name spec))
+          (fail! entry-reason
+                 "Positional specs must declare keyword :name"
+                 (cond-> {:op op :field :positionals :index idx :value spec}
+                   subcommand (assoc :subcommand subcommand))))
+        (validate-declared-type! op subcommand :positionals (:name spec) spec)))))
 
 (defn validate-subcommands!
   "Validate the structural rules for an arg-spec declaring `:subcommands`.
 
-  Arg-specs without `:subcommands` are returned unchanged and are not otherwise
-  validated. Subcommand specs are intentionally one level deep: top-level
+  Subcommand specs are intentionally one level deep: top-level
   flags/positionals may not be mixed with `:subcommands`, nested subcommands are
   rejected, and `subcommand` is a reserved nested arg name because parse results
   use `:subcommand` for the matched verb. Throws structured `ex-info` on any
@@ -220,8 +236,8 @@
           (fail! :invalid-subcommands
                  "Nested :subcommands are not supported"
                  {:op op :subcommand subcommand :field :subcommands :value (:subcommands nested)}))
-        (validate-nested-flags! op subcommand (:flags nested))
-        (validate-nested-positionals! op subcommand (:positionals nested))
+        (validate-flags! op subcommand (:flags nested))
+        (validate-positionals! op subcommand (:positionals nested))
         (when (some #(= "subcommand" (name %)) (keys (:flags nested)))
           (fail! :reserved-subcommand
                  "Nested flag name :subcommand is reserved"
@@ -231,6 +247,25 @@
                  "Nested positional name :subcommand is reserved"
                  {:op op :subcommand subcommand :arg :subcommand :kind :positional})))))
   arg-spec)
+
+(defn validate!
+  "Validate any parser arg-spec shape, returning it unchanged on success.
+
+  Flat arg-specs validate their top-level flags and positionals. Subcommand
+  arg-specs additionally enforce the one-level subcommand contract and reserved
+  `:subcommand` result key. Throws structured `ex-info` on malformed specs so
+  op registration fails before help or invocation can drift from the contract."
+  [arg-spec]
+  (when-not (map? arg-spec)
+    (fail! :invalid-arg-spec
+           "Arg-spec must be a map"
+           {:value arg-spec}))
+  (if (contains? arg-spec :subcommands)
+    (validate-subcommands! arg-spec)
+    (let [op (:op arg-spec)]
+      (validate-flags! op nil (:flags arg-spec))
+      (validate-positionals! op nil (:positionals arg-spec))
+      arg-spec)))
 
 (defn- parse-argv
   "First pass: fold argv into a raw arg map (payload refs and :parse untouched)."
@@ -404,9 +439,10 @@
   :json/:jsonl payloads."
   ([arg-spec argv] (parse arg-spec argv {}))
   ([arg-spec argv payloads]
-   (if (contains? arg-spec :subcommands)
-     (parse-subcommand (validate-subcommands! arg-spec) (vec argv) payloads)
-     (parse-flat arg-spec argv payloads))))
+   (let [arg-spec (validate! arg-spec)]
+     (if (contains? arg-spec :subcommands)
+       (parse-subcommand arg-spec (vec argv) payloads)
+       (parse-flat arg-spec argv payloads)))))
 
 (defn- render-flag [flag-kw spec]
   {:name (name flag-kw)
@@ -442,8 +478,8 @@
   "Render `arg-spec` as JSON-safe help data (args, types, docs, required flags,
   subcommands, and payload-parse declarations) for the `help <op>` projection."
   [arg-spec]
-  (if (contains? arg-spec :subcommands)
-    (let [arg-spec (validate-subcommands! arg-spec)]
+  (let [arg-spec (validate! arg-spec)]
+    (if (contains? arg-spec :subcommands)
       (assoc (explain-flat (dissoc arg-spec :subcommands))
-             :subcommands (mapv render-subcommand (sort-by key (:subcommands arg-spec)))))
-    (explain-flat arg-spec)))
+             :subcommands (mapv render-subcommand (sort-by key (:subcommands arg-spec))))
+      (explain-flat arg-spec))))

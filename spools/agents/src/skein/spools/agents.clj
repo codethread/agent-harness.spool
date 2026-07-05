@@ -3,6 +3,7 @@
   (:require [clojure.java.shell :as shell]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [skein.api.cli.alpha :as cli]
             [skein.api.current.alpha :as current]
             [skein.api.patterns.alpha :as patterns]
             [skein.api.runtime.alpha :as runtime]
@@ -1450,34 +1451,127 @@
        :awaiting_verification (mapv :id (filter #(= "implemented" (attr % :status)) tasks))
        :blocked (mapv (fn [t] {:task (:id t) :blockers (blockers t)}) (filter #(seq (blockers %)) tasks))})))
 
+(def ^:private agent-arg-spec
+  "Declared command surface for the `agent` op."
+  {:op "agent"
+   :doc "Spawn and coordinate coding-agent runs. Run `strand agent about` for the manual."
+   :subcommands
+   {"about" {:doc "Return the agent coordination manual."}
+    "spawn" {:doc "Spawn a raw shuttle run."
+             :flags {:harness {:required? true :doc "Harness or alias name."}
+                     :prompt {:required? true :doc "Prompt text for the run."}
+                     :title {:doc "Run strand title."}
+                     :depends-on {:repeat? true :doc "Blocking strand id; repeatable."}
+                     :for {:doc "Served strand id."}
+                     :spawned-by {:doc "Caller run id for provenance."}
+                     :cwd {:doc "Working directory."}
+                     :max-attempts {:type :int :doc "Maximum shuttle attempts."}
+                     :interactive {:type :boolean :doc "Launch as an interactive multiplexer session."}
+                     :backend {:doc "Interactive backend name."}
+                     :reap {:doc "Interactive session reap policy: auto or manual."}}}
+    "ps" {:doc "List shuttle run summaries."
+          :flags {:active {:type :boolean :doc "Only active run strands."}
+                  :for {:doc "Only runs serving this strand id."}}}
+    "await" {:doc "Wait for run ids, or non-terminal runs under a root, to finish."
+             :flags {:timeout-secs {:type :int :doc "Maximum seconds to wait."}
+                     :under {:doc "Root strand whose descendant runs should be awaited."}}
+             :positionals [{:name :ids :variadic? true :doc "Run ids to await."}]}
+    "logs" {:doc "Return captured logs for a run."
+            :flags {:tail {:type :int :doc "Tail this many lines."}}
+            :positionals [{:name :run-id :required? true :doc "Run id."}]}
+    "kill" {:doc "Kill a running run process or interactive session."
+            :positionals [{:name :run-id :required? true :doc "Run id."}]}
+    "harnesses" {:doc "List configured harnesses and aliases."}
+    "backends" {:doc "List configured interactive backends."}
+    "delegate" {:doc "Delegate one task or every ready task below a plan."
+                :flags {:ready {:doc "Plan/root id for fan-out delegation."}
+                        :harness {:doc "Harness override for single-task delegation."}
+                        :cwd {:doc "Working directory override."}
+                        :prompt {:doc "Extra prompt text."}
+                        :spawned-by {:doc "Caller run id for provenance."}
+                        :interactive {:type :boolean :doc "Delegate as an interactive session."}
+                        :backend {:doc "Interactive backend override."}
+                        :reap {:doc "Interactive session reap policy: auto or manual."}}
+                :positionals [{:name :task-id :doc "Task id for single-task delegation."}]}
+    "retry" {:doc "Supersede and retry a failed/exhausted task or run."
+             :flags {:fresh {:type :boolean :doc "Start cold instead of resuming a previous session."}
+                     :harness {:doc "Harness override."}
+                     :cwd {:doc "Working directory override."}
+                     :prompt {:doc "Extra prompt text."}}
+             :positionals [{:name :id :required? true :doc "Task or run id."}]}
+    "status" {:doc "Return the coordinator dashboard."
+              :positionals [{:name :root-id :doc "Optional plan or task root id."}]}
+    "note" {:doc "Append an immutable note to a strand."
+            :flags {:by {:doc "Author run id."}
+                    :round {:type :int :doc "Council round."}}
+            :positionals [{:name :strand-id :required? true :doc "Target strand id."}
+                          {:name :text :required? true :doc "Note text."}]}
+    "notes" {:doc "Read a strand's notes."
+             :flags {:round {:type :int :doc "Council round filter."}}
+             :positionals [{:name :strand-id :required? true :doc "Target strand id."}]}
+    "review" {:doc "Spawn independent reviewers for a target strand."
+              :flags {:members {:type :int :doc "Number of ad hoc reviewers."}
+                      :harness {:doc "Comma-separated harness list."}
+                      :synthesize {:type :boolean :doc "Also spawn synthesis run."}
+                      :contract {:doc "Ad hoc reviewer contract."}
+                      :cwd {:doc "Reviewer working directory."}
+                      :spawned-by {:doc "Caller run id for provenance."}
+                      :roster {:doc "Named declarative reviewer roster."}
+                      :commit-range {:doc "Git commit range under review."}
+                      :changed-files {:doc "Comma-separated changed files under review."}}
+              :positionals [{:name :target-id :required? true :doc "Target strand id."}]}
+    "rosters" {:doc "List configured reviewer rosters."}
+    "council" {:doc "Convene a fresh-blackboard deliberation panel."
+               :flags {:topic {:required? true :doc "Council topic."}
+                       :members {:type :int :doc "Number of seats."}
+                       :rounds {:type :int :doc "Number of rounds."}
+                       :harness {:doc "Seat harness."}
+                       :synthesizer {:doc "Synthesizer harness."}
+                       :cwd {:doc "Working directory."}
+                       :spawned-by {:doc "Caller run id for provenance."}}}}})
+
+(defn- flag-token [[k v]]
+  (when (and (not= k :subcommand) (some? v))
+    (let [flag (str "--" (name k))]
+      (cond
+        (true? v) [flag]
+        (vector? v) (mapcat #(vector flag (str %)) v)
+        :else [flag (str v)]))))
+
+(defn- parsed->legacy-argv
+  "Rebuild the pre-argspec argv shape for legacy verb handlers."
+  [args positional-keys]
+  (vec (concat (mapcat flag-token (remove (comp (set positional-keys) key) args))
+               (mapcat (fn [k]
+                         (let [v (get args k)]
+                           (cond
+                             (nil? v) []
+                             (vector? v) v
+                             :else [v])))
+                       positional-keys))))
+
 (defn agent-op
-  "Dispatch `strand agent` verbs."
-  [{:keys [op/argv]}]
-  (let [[sub & args] argv]
-    (case sub
-      nil about-doc
+  "Dispatch parsed `strand agent` subcommands."
+  [{:op/keys [args argv]}]
+  (let [args (or args (cli/parse agent-arg-spec argv))]
+    (case (:subcommand args)
       "about" about-doc
-      "spawn" (op-spawn args)
-      "ps" (let [{:keys [positional flags]}
-                  (parse-argv args {"--active" :bool "--for" :single})]
-              (when (seq positional)
-                (fail! "ps takes only flags" {:got positional}))
-              (shuttle/runs (cond-> {:active (boolean (get flags "--active"))}
-                              (get flags "--for") (assoc :for (get flags "--for")))))
-      "await" (op-await args)
-      "logs" (op-logs args)
-      "kill" (do (when-not (= 1 (count args)) (fail! "kill requires <run-id>" {:got args})) (shuttle/kill! (first args)))
+      "spawn" (op-spawn (parsed->legacy-argv args []))
+      "ps" (shuttle/runs (cond-> {:active (boolean (:active args))}
+                           (:for args) (assoc :for (:for args))))
+      "await" (op-await (parsed->legacy-argv args [:ids]))
+      "logs" (op-logs (parsed->legacy-argv args [:run-id]))
+      "kill" (shuttle/kill! (:run-id args))
       "harnesses" (shuttle/harnesses)
       "backends" (shuttle/backends)
-      "note" (op-note args)
-      "notes" (op-notes args)
-      "council" (op-council args)
-      "review" (op-review args)
-      "rosters" (op-rosters args)
-      "delegate" (op-delegate args)
-      "retry" (op-retry args)
-      "status" (op-status args)
-      (fail! "Unknown agent subcommand" {:subcommand sub :available ["about" "spawn" "ps" "await" "logs" "kill" "harnesses" "backends" "note" "notes" "council" "review" "rosters" "delegate" "retry" "status"]}))))
+      "note" (op-note (parsed->legacy-argv args [:strand-id :text]))
+      "notes" (op-notes (parsed->legacy-argv args [:strand-id]))
+      "council" (op-council (parsed->legacy-argv args []))
+      "review" (op-review (parsed->legacy-argv args [:target-id]))
+      "rosters" (op-rosters [])
+      "delegate" (op-delegate (parsed->legacy-argv args [:task-id]))
+      "retry" (op-retry (parsed->legacy-argv args [:id]))
+      "status" (op-status (parsed->legacy-argv args [:root-id])))))
 
 ;; agent-plan pattern
 (s/def ::non-blank-string non-blank?)
@@ -1545,7 +1639,8 @@
     {:installed true
      :namespace 'skein.spools.agents
      :op (api/register-op! runtime 'agent
-                           {:doc "Spawn and coordinate coding-agent runs; `strand agent about` is the manual"
+                           {:doc (:doc agent-arg-spec)
+                            :arg-spec agent-arg-spec
                             ;; await blocks for arbitrarily long coordination waits
                             :deadline-class :unbounded}
                            'skein.spools.agents/agent-op)

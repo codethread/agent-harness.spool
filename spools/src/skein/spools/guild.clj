@@ -45,11 +45,10 @@
     (fail! "Guild op spec is not registered" {:spec spec-name}))
   spec-name)
 
-(defn- parse-input [argv]
-  (case (count argv)
-    0 {}
-    1 (json/read-str (first argv) :key-fn keyword)
-    (fail! "Guild ops accept zero args or one JSON input arg" {:argv argv})))
+(defn- parse-input [input]
+  (if (some? input)
+    (json/read-str input :key-fn keyword)
+    {}))
 
 (defn- spec-summary [spec-name]
   (when spec-name
@@ -74,23 +73,37 @@
     (catch clojure.lang.ExceptionInfo _
       false)))
 
+(defn- op-arg-spec
+  "Return a parser arg-spec for a guild op."
+  ([name doc]
+   (op-arg-spec name doc true))
+  ([name doc input?]
+   (cond-> {:op (clojure.core/name name)
+            :doc doc}
+     input? (assoc :positionals [{:name :input
+                                  :type :string
+                                  :doc "Optional JSON object input."}]))))
+
 (defn- register-or-replace-op!
   "Upsert a guild op in the weaver registry.
 
   The guild owns its op lifecycle through its own state atoms and (re)declares
   ops as it installs, deprecates, and reloads; the registry's loud-collision
   default is the wrong policy here, so re-declaration is an explicit replace."
-  [rt name doc handler-sym]
-  (if (op-registered? rt name)
-    (weaver/replace-op! rt name doc handler-sym)
-    (weaver/register-op! rt name doc handler-sym)))
+  ([rt name doc handler-sym]
+   (register-or-replace-op! rt name doc handler-sym (op-arg-spec name doc)))
+  ([rt name doc handler-sym arg-spec]
+   (let [metadata {:doc doc :arg-spec arg-spec}]
+     (if (op-registered? rt name)
+       (weaver/replace-op! rt name metadata handler-sym)
+       (weaver/register-op! rt name metadata handler-sym)))))
 
 (defn dispatch-op
   "Dispatch a guild-declared operation after parsing and validating input."
-  [{:op/keys [name argv] :as ctx}]
+  [{:op/keys [name args] :as ctx}]
   (let [{:keys [handler spec]} (or (get @(guild-ops (:op/runtime ctx)) name)
                                   (fail! "Guild op is not registered" {:op name}))
-        input (validate-input! name spec (parse-input argv))]
+        input (validate-input! name spec (parse-input (:input args)))]
     ((requiring-resolve handler) (assoc ctx :guild/input input))))
 
 (defn deprecated-op
@@ -187,4 +200,10 @@
    (reset! (guild-ops (current/runtime)) {})
    (reset! (deprecated-ops (current/runtime)) {})
    (reset! (fallback-guild-name (current/runtime)) guild-name)
-   (register-or-replace-op! (current/runtime) 'guild.describe "Describe this weaver's guild operation API" 'skein.spools.guild/describe-op)))
+   (register-or-replace-op! (current/runtime)
+                             'guild.describe
+                             "Describe this weaver's guild operation API"
+                             'skein.spools.guild/describe-op
+                             (op-arg-spec 'guild.describe
+                                          "Describe this weaver's guild operation API"
+                                          false))))

@@ -314,7 +314,7 @@
       (is (= :flags (:field bad-flag)))
       (is (= :n (:arg bad-flag)))
       (is (= :strnig (:type bad-flag)))
-      (is (= [:boolean :int :map :string] (:supported-types bad-flag)))
+      (is (= [:boolean :boolean-token :int :map :string] (:supported-types bad-flag)))
       (is (= :invalid-arg-type (:reason bad-pos)))
       (is (= :positionals (:field bad-pos)))
       (is (= :id (:arg bad-pos)))

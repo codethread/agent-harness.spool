@@ -246,10 +246,10 @@
 (defn current-dags-op
   "Return active parent-of work DAGs and their active depends-on edges.
 
-  Usage: `strand current-dags`. This is an operation rather than only a named
-  query because the CLI query surface returns flat strand rows; this handler
-  projects roots, hierarchy edges, dependency edges, and compact strand rows
-  into one JSON-compatible structure for agents and humans."
+  This is an operation rather than only a named query because the CLI query
+  surface returns flat strand rows; this handler projects roots, hierarchy
+  edges, dependency edges, and compact strand rows into one JSON-compatible
+  structure for agents and humans."
   [_ctx]
   (let [rt (current/runtime)
         active-by-id (active-strands-by-id rt)
@@ -494,12 +494,9 @@
      :ready (devflow/next-steps feature)}))
 
 (defn workflow-runs-op
-  "Return active workflow molecule roots, optionally filtered by family.
-
-  Usage: `strand workflow-runs [family]`."
+  "Return active workflow molecule roots, optionally filtered by family."
   [ctx]
-  (let [usage "strand workflow-runs [family]"
-        [family] (require-argv-range! "workflow-runs" (:op/argv ctx) 0 1 usage)]
+  (let [{:keys [family]} (:op/args ctx)]
     {:operation "workflow-runs"
      :family family
      :runs (mapv summarize-strand
@@ -562,49 +559,6 @@
              {:name "work"
               :usage "strand ready --query work"}]})
 
-;; ---------------------------------------------------------------------------
-;; op argv helpers shared by the ops below
-;; ---------------------------------------------------------------------------
-
-(defn- parse-op-argv
-  "Parse op argv into positional args and single-value flags."
-  [op argv flag-spec]
-  (loop [remaining argv
-         positional []
-         flags {}]
-    (if-let [arg (first remaining)]
-      (if (str/starts-with? arg "--")
-        (let [kind (or (get flag-spec arg)
-                       (throw (ex-info (str op " unknown flag")
-                                       {:flag arg :allowed (sort (keys flag-spec))})))
-              value (or (second remaining)
-                        (throw (ex-info (str op " flag requires a value")
-                                        {:flag arg})))]
-          (when-not (= :single kind)
-            (throw (ex-info (str op " unsupported flag kind")
-                            {:flag arg :kind kind})))
-          (recur (drop 2 remaining) positional (assoc flags arg value)))
-        (recur (rest remaining) (conj positional arg) flags))
-      {:positional positional :flags flags})))
-
-(defn- parse-long-flag!
-  "Parse a long-valued flag, failing loudly on malformed input."
-  [flag value]
-  (try
-    (Long/parseLong value)
-    (catch NumberFormatException _
-      (throw (ex-info (str flag " must be an integer")
-                      {:flag flag :value value})))))
-
-(defn- parse-boolean-flag!
-  "Parse a boolean-valued flag, failing loudly on malformed input."
-  [flag value]
-  (case value
-    "true" true
-    "false" false
-    (throw (ex-info (str flag " must be true or false")
-                    {:flag flag :value value}))))
-
 (defn- config-attr
   "Read strand attribute k, tolerating keyword- or string-keyed maps."
   [strand k]
@@ -631,35 +585,24 @@
 (defn carder-report-op
   "Return the carder graph hygiene report for active work.
 
-  Usage: `strand carder-report [--days <n>] [--include-plumbing true|false]`.
   This is a read-only wrapper around `skein.spools.carder/report` for checking
   stale active strands, orphaned strands, and work blocked by failed agent runs.
   Repo-local expected kanban board roots are suppressed from the orphan list."
   [ctx]
-  (let [{:keys [flags]} (parse-op-argv "carder-report" (:op/argv ctx)
-                                       {"--days" :single
-                                        "--include-plumbing" :single})]
+  (let [{:keys [days include-plumbing]} (:op/args ctx)]
     (suppress-expected-carder-orphans
      (carder/report (cond-> {}
-                      (get flags "--days")
-                      (assoc :days (parse-long-flag! "--days" (get flags "--days")))
-                      (get flags "--include-plumbing")
-                      (assoc :include-plumbing? (parse-boolean-flag! "--include-plumbing"
-                                                                     (get flags "--include-plumbing"))))))))
+                      days (assoc :days days)
+                      (some? include-plumbing) (assoc :include-plumbing? include-plumbing))))))
 
 (defn flow-await-op
   "Block until a workflow run is done or needs coordinator attention.
 
-  Usage: `strand flow-await <workflow-run-id> [--timeout-secs <n>]`. Uses the
-  treadle stall predicate registered at spool install time."
+  Uses the treadle stall predicate registered at spool install time."
   [ctx]
-  (let [usage "strand flow-await <workflow-run-id> [--timeout-secs <n>]"
-        {:keys [positional flags]} (parse-op-argv "flow-await" (:op/argv ctx)
-                                                  {"--timeout-secs" :single})
-        [run-id] (require-argv-range! "flow-await" positional 1 1 usage)]
-    (workflow/await! run-id (cond-> {:stall-predicate :treadle}
-                              (get flags "--timeout-secs")
-                              (assoc :timeout-secs (parse-long-flag! "--timeout-secs" (get flags "--timeout-secs")))))))
+  (let [{:keys [workflow-run-id timeout-secs]} (:op/args ctx)]
+    (workflow/await! workflow-run-id (cond-> {:stall-predicate :treadle}
+                                       timeout-secs (assoc :timeout-secs timeout-secs)))))
 
 (defn- compact-run
   "Return a compact shuttle/treadle state projection for a run strand."
@@ -722,11 +665,10 @@
 (defn flow-status-op
   "Return workflow flow status by joining history, frontier, gates, runs, and stalls.
 
-  Usage: `strand flow-status <workflow-run-id>`. The JSON payload is read-only
-  and suitable for renderers; no workflow, shuttle, or treadle state is mutated."
+  The JSON payload is read-only and suitable for renderers; no workflow,
+  shuttle, or treadle state is mutated."
   [ctx]
-  (let [usage "strand flow-status <workflow-run-id>"
-        [run-id] (require-argv-range! "flow-status" (:op/argv ctx) 1 1 usage)
+  (let [{run-id :workflow-run-id} (:op/args ctx)
         rt (current/runtime)
         history (workflow/run-history run-id)
         frontier (workflow/next-steps run-id)
@@ -778,16 +720,14 @@
 (defn branches-op
   "Group active branch-stamped work roots into a per-branch progress view.
 
-  Usage: `strand branches [branch]`. The repo convention stamps `branch`
-  (plus `owner`/`worktree`) on exactly one active work root per branch —
-  `kanban claim` does this for cards — and hangs all execution
-  strands beneath that root with parent-of edges. This op answers \"what is
-  going on inside each feature branch\" by joining those roots to their
-  active descendants and the ready frontier (`work` query, so workflow
-  plumbing and shuttle run records stay hidden)."
+  The repo convention stamps `branch` (plus `owner`/`worktree`) on exactly one
+  active work root per branch — `kanban claim` does this for cards — and hangs
+  all execution strands beneath that root with parent-of edges. This op answers
+  \"what is going on inside each feature branch\" by joining those roots to their
+  active descendants and the ready frontier (`work` query, so workflow plumbing
+  and shuttle run records stay hidden)."
   [ctx]
-  (let [usage "strand branches [branch]"
-        [branch] (require-argv-range! "branches" (:op/argv ctx) 0 1 usage)
+  (let [{:keys [branch]} (:op/args ctx)
         rt (current/runtime)
         active-by-id (active-strands-by-id rt)
         active-ids (set (keys active-by-id))
@@ -808,7 +748,7 @@
                                             (sort-by :id branch-roots))})))]
     (when (and branch (empty? branches))
       (throw (ex-info "no active work root is stamped with this branch"
-                      {:branch branch :usage usage})))
+                      {:branch branch})))
     {:operation "branches"
      :branches branches}))
 
@@ -919,6 +859,64 @@
    (chime/defrule! :kanban-blocked 'config/kanban-blocked-rule)])
 
 ;; ---------------------------------------------------------------------------
+;; repo-local op arg-specs
+;; ---------------------------------------------------------------------------
+
+(def ^:private current-dags-arg-spec
+  {:op "current-dags"
+   :doc "Show active parent-of work DAGs with active depends-on edges."})
+
+(def ^:private branches-arg-spec
+  {:op "branches"
+   :doc "Show active branch-stamped work roots grouped by branch."
+   :positionals [{:name :branch
+                  :type :string
+                  :doc "Optional branch name to scope the projection."}]})
+
+(def ^:private carder-report-arg-spec
+  {:op "carder-report"
+   :doc "Show the read-only carder graph hygiene report."
+   :flags {:days {:type :int
+                  :doc "Maximum active age, in days, before a strand is stale."}
+           :include-plumbing {:type :boolean-token
+                              :doc "Whether to include workflow/shuttle plumbing: true or false."}}})
+
+(def ^:private workflow-runs-arg-spec
+  {:op "workflow-runs"
+   :doc "Show active workflow molecule roots, optionally filtered by family."
+   :positionals [{:name :family
+                  :type :string
+                  :doc "Optional workflow family, e.g. devflow."}]})
+
+(def ^:private devflow-conventions-arg-spec
+  {:op "devflow-conventions"
+   :doc "Show repo-local spools, ops, patterns, and queries."})
+
+(def ^:private flow-await-arg-spec
+  {:op "flow-await"
+   :doc "Block until a workflow run needs coordinator attention."
+   :flags {:timeout-secs {:type :int
+                          :doc "Optional timeout in seconds."}}
+   :positionals [{:name :workflow-run-id
+                  :type :string
+                  :required? true
+                  :doc "Workflow run id."}]})
+
+(def ^:private flow-status-arg-spec
+  {:op "flow-status"
+   :doc "Show workflow flow status for renderer consumption."
+   :positionals [{:name :workflow-run-id
+                  :type :string
+                  :required? true
+                  :doc "Workflow run id."}]})
+
+(defn- op-metadata
+  "Return parser-backed op metadata for repo-local wrapper ops."
+  [arg-spec]
+  {:doc (:doc arg-spec)
+   :arg-spec arg-spec})
+
+;; ---------------------------------------------------------------------------
 ;; install!
 ;; ---------------------------------------------------------------------------
 
@@ -1014,17 +1012,17 @@
    :ops [(api/register-op!
           runtime
           'current-dags
-          "Show active parent-of work DAGs with active depends-on edges"
+          (op-metadata current-dags-arg-spec)
           'config/current-dags-op)
          (api/register-op!
           runtime
           'branches
-          "Show active branch-stamped work roots grouped by branch"
+          (op-metadata branches-arg-spec)
           'config/branches-op)
          (api/register-op!
           runtime
           'carder-report
-          "Show read-only carder graph hygiene report"
+          (op-metadata carder-report-arg-spec)
           'config/carder-report-op)
          (api/register-op!
           runtime
@@ -1079,21 +1077,20 @@
          (api/register-op!
           runtime
           'workflow-runs
-          "Show active workflow molecule roots, optionally by family"
+          (op-metadata workflow-runs-arg-spec)
           'config/workflow-runs-op)
          (api/register-op!
           runtime
           'devflow-conventions
-          "Show repo-local spools, ops, patterns, and queries"
+          (op-metadata devflow-conventions-arg-spec)
           'config/devflow-conventions-op)
          (api/register-op!
           runtime
           'flow-await
-          {:doc "Block until a workflow run needs coordinator attention"
-           :deadline-class :unbounded}
+          (assoc (op-metadata flow-await-arg-spec) :deadline-class :unbounded)
           'config/flow-await-op)
          (api/register-op!
           runtime
           'flow-status
-          "Show workflow flow status for renderer consumption"
+          (op-metadata flow-status-arg-spec)
           'config/flow-status-op)]}))
