@@ -1474,6 +1474,17 @@
         (is (= :done (:reason explicit)))
         (is (= ambient explicit))))))
 
+(deftest await!-fails-loudly-for-malformed-timeout-secs-or-poll-ms
+  (with-runtime
+    (fn [rt _]
+      (doseq [bad [-1 1.5 "1"]]
+        (testing (str "timeout-secs " (pr-str bad))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #":timeout-secs must be a non-negative integer"
+                                (workflow/await! rt "await-malformed-opts" {:timeout-secs bad}))))
+        (testing (str "poll-ms " (pr-str bad))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #":poll-ms must be a non-negative integer"
+                                (workflow/await! rt "await-malformed-opts" {:poll-ms bad}))))))))
+
 (deftest register-executor-rejects-invalid-waiters
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Executor waiter must be.*other than :self"
                         (workflow/register-executor! :self (constantly nil))))

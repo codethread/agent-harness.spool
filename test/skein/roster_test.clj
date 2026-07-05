@@ -360,7 +360,9 @@
                             (roster/await-quiet! rt {:owner "agent-a"})))
       (doseq [bad [-1 1.5 "1000"]]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #":timeout-ms must be a non-negative integer"
-                              (roster/await-quiet! rt {:timeout-ms bad})))))))
+                              (roster/await-quiet! rt {:timeout-ms bad})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":poll-ms must be a non-negative integer"
+                              (roster/await-quiet! rt {:poll-ms bad})))))))
 
 (deftest roster-await-quiet-op-round-trips-through-the-cli
   (with-runtime

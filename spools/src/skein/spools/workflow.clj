@@ -40,6 +40,8 @@
 ;; keyword naming a resolved param, or a fn of the resolved params map.
 (s/def ::each #(or (sequential? %) (keyword? %) (fn? %)))
 (s/def ::depends-on (s/coll-of ::id-ref :kind vector?))
+(s/def ::timeout-secs (s/and integer? (complement neg?)))
+(s/def ::poll-ms (s/and integer? (complement neg?)))
 (s/def ::self-waiter #{:self})
 (s/def ::external-waiter #(and (or (keyword? %) (symbol? %) (non-blank-string? %))
                                (not= :self %)))
@@ -1274,13 +1276,25 @@
       stalled {:reason :stalled :ready ready :done false :detail stalled}
       :else {:reason :waiting :ready ready :done false})))
 
+(defn- timeout-secs-opt
+  [opts]
+  (require-valid! ::timeout-secs (get opts :timeout-secs 1800)
+                  "await! :timeout-secs must be a non-negative integer"))
+
+(defn- poll-ms-opt
+  [opts]
+  (require-valid! ::poll-ms (get opts :poll-ms 250)
+                  "await! :poll-ms must be a non-negative integer"))
+
 (defn await!
   "Block until workflow run-id is done, at a checkpoint, at a ready `:self`
   step, at a gate whose waiter has no registered executor, at an
   executor-owned gate whose stall predicate reports detail, or timed out.
 
   opts: `:timeout-secs` (default 1800) and `:poll-ms` (default 250, matching
-  the shuttle await surface).
+  the shuttle await surface). Fails loudly for a non-negative-integer
+  violation on either, agreeing with `skein.spools.roster/await-quiet!`'s
+  `:timeout-ms`/`:poll-ms` validation.
 
   The three-arg `(runtime run-id opts)` arity threads the target runtime
   explicitly, agreeing with `skein.spools.roster/await-quiet!`; the shorter
@@ -1290,13 +1304,15 @@
    (await! run-id {}))
   ([run-id opts]
    (await! (current/runtime) run-id opts))
-  ([runtime run-id {:keys [timeout-secs poll-ms] :or {timeout-secs 1800 poll-ms 250}}]
-   (poll-until-deadline!
-    {:deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))
-     :poll-ms poll-ms
-     :check #(attention runtime run-id)
-     :pred->result (fn [state] (when (not= :waiting (:reason state)) state))
-     :on-timeout (fn [state] (assoc state :reason :timeout))})))
+  ([runtime run-id opts]
+   (let [timeout-secs (timeout-secs-opt opts)
+         poll-ms (poll-ms-opt opts)]
+     (poll-until-deadline!
+      {:deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))
+       :poll-ms poll-ms
+       :check #(attention runtime run-id)
+       :pred->result (fn [state] (when (not= :waiting (:reason state)) state))
+       :on-timeout (fn [state] (assoc state :reason :timeout))}))))
 
 (defn- run-result
   "Return the run-mutation result shape: the run's ready step views plus its

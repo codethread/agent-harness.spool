@@ -55,6 +55,10 @@
   [k]
   (if (keyword? k) (subs (str k) 1) (str k)))
 
+(s/def ::deadline int?)
+(s/def ::poll-ms (s/and integer? (complement neg?)))
+(s/def ::poll-fn ifn?)
+
 (defn poll-until-deadline!
   "The shared spool-tier long-poll skeleton behind `skein.spools.workflow/await!`
   and `skein.spools.roster/await-quiet!`: call `check` (a zero-arg fn) once,
@@ -68,8 +72,17 @@
   `pred->result` still nil, `on-timeout` receives the last `check` value and
   its return value becomes the result. `deadline` and `poll-ms` are both
   required — this helper does not supply timeout/cadence defaults; those stay
-  owned by each caller so existing behavior is unchanged."
+  owned by each caller so existing behavior is unchanged. Fails loudly
+  (TEN-003) when `deadline` is not a long, `poll-ms` is not a non-negative
+  integer, or `check`/`pred->result`/`on-timeout` is not a function, rather
+  than surfacing a bare NPE/`IllegalArgumentException` once the loop actually
+  runs."
   [{:keys [deadline poll-ms check pred->result on-timeout]}]
+  (require-valid! ::deadline deadline "poll-until-deadline! :deadline must be a long")
+  (require-valid! ::poll-ms poll-ms "poll-until-deadline! :poll-ms must be a non-negative integer")
+  (require-valid! ::poll-fn check "poll-until-deadline! :check must be a function")
+  (require-valid! ::poll-fn pred->result "poll-until-deadline! :pred->result must be a function")
+  (require-valid! ::poll-fn on-timeout "poll-until-deadline! :on-timeout must be a function")
   (loop []
     (let [value (check)]
       (or (pred->result value)

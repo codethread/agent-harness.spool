@@ -259,9 +259,11 @@ explicitly, agreeing with `roster/await-quiet!`; the shorter arities resolve the
 ambient `current/runtime` as the ergonomic default.
 
 It returns `{:reason :done|:checkpoint|:step|:gate|:stalled|:timeout :ready
-[...] :done boolean :detail ...}`. `opts` takes only `:timeout-secs` (default
-1800) — there is no predicate to name, because `await!` resolves attention
-purely from the ready frontier and the executor registry:
+[...] :done boolean :detail ...}`. `opts` takes `:timeout-secs` (default 1800)
+and `:poll-ms` (default 250, matching the shuttle await surface) — there is no
+predicate to name, because `await!` resolves attention purely from the ready
+frontier and the executor registry. A negative or non-integer `:timeout-secs`/
+`:poll-ms` fails loudly instead of reaching `Thread/sleep`:
 
 - `:done` — the run is finished.
 - `:checkpoint` — a checkpoint is ready (any kind wakes the caller).
