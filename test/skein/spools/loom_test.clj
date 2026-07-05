@@ -51,6 +51,18 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires a :ready-query"
                             (loom/branch-views rt {:branch-attr :branch}))))))
 
+(deftest branch-views-validates-opts-loudly
+  (with-runtime
+    (fn [rt _]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"opts must be a map"
+                            (loom/branch-views rt [:ready-query [:= :state "active"]])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"received unknown keys"
+                            (loom/branch-views rt {:ready-query [:= :state "active"] :readyquery "typo"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":branch-attr must be a keyword"
+                            (loom/branch-views rt {:ready-query [:= :state "active"] :branch-attr "branch"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":branch must be a string"
+                            (loom/branch-views rt {:ready-query [:= :state "active"] :branch :feat-x}))))))
+
 (deftest gate-chain-mermaid-marks-ready-stalled-and-closed
   (let [gates [{:id "g0" :title "Alpha" :state "active" :stalled? true}
                {:id "g1" :title "Beta" :state "active"}

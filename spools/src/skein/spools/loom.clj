@@ -15,16 +15,17 @@
   mutates no strands, edges, runtime config, or registered operations. Callers
   supply the active runtime explicitly."
   (:require [clojure.set :as set]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.weaver.alpha :as api]
             [skein.spools.workflow :as workflow]
-            [skein.spools.util :refer [attr-get fail!]]))
+            [skein.spools.util :refer [attr-get fail! reject-unknown-keys! require-valid!]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Graph primitives
 ;; ---------------------------------------------------------------------------
 
-(defn active-by-id
+(defn- active-by-id
   "Return active strands keyed by id."
   [rt]
   (into {}
@@ -36,7 +37,7 @@
   [strand]
   (select-keys strand [:id :title :state :attributes]))
 
-(defn internal-active-edges
+(defn- internal-active-edges
   "Return edges whose endpoints are both active strands, sorted and deduped-safe.
 
   Subgraph expansion walks outward to external strands, so edges are filtered
@@ -59,7 +60,7 @@
          sort
          vec)))
 
-(defn descendants-by-root
+(defn- descendants-by-root
   "Return the active parent-of subgraph below one root id.
 
   The result is `{:root-id :strand-ids :parent-of}`, where `:strand-ids`
@@ -114,7 +115,7 @@
 ;; branch views: per-root progress joined to a ready frontier
 ;; ---------------------------------------------------------------------------
 
-(defn root-view
+(defn- root-view
   "Return one work root with its active descendants and ready frontier.
 
   Descendants are the active parent-of subgraph below `root` excluding the root
@@ -132,6 +133,10 @@
      :ready (filterv #(contains? ready-ids (:id %))
                      (into [(summarize root)] descendants))}))
 
+(s/def ::branch-attr keyword?)
+(s/def ::branch string?)
+(def ^:private branch-views-opts-keys #{:branch-attr :ready-query :branch})
+
 (defn branch-views
   "Group active branch-stamped work roots into per-branch progress views.
 
@@ -140,31 +145,42 @@
   descendants and the ready frontier of `:ready-query`. Options:
 
   - `:branch-attr` — attribute key naming the branch (default `:branch`).
-  - `:ready-query` — required named-or-inline query whose ready frontier feeds
-    each root view. Fails loudly when absent.
+  - `:ready-query` — required inline query expression (vector or map, as
+    accepted by `skein.api.weaver.alpha/ready`) whose ready frontier feeds each
+    root view. Fails loudly when absent; a named query symbol/keyword is not
+    resolved.
   - `:branch` — optional branch name to scope the projection to one branch.
 
-  Returns a vector of `{:branch :roots}` sorted by branch name."
-  [rt {:keys [branch-attr ready-query branch] :or {branch-attr :branch}}]
-  (when (nil? ready-query)
-    (fail! "loom/branch-views requires a :ready-query" {:opts {:branch-attr branch-attr :branch branch}}))
-  (let [active (active-by-id rt)
-        active-ids (set (keys active))
-        parent-edges (->> (:edges (api/subgraph rt (sort active-ids) {:type "parent-of"}))
-                          (internal-active-edges active-ids))
-        child-ids (set (map :to_strand_id parent-edges))
-        roots (->> (vals active)
-                   (filter #(attr-get % branch-attr))
-                   (remove #(contains? child-ids (:id %)))
-                   (filter #(or (nil? branch) (= branch (attr-get % branch-attr)))))
-        ready-ids (set (map :id (api/ready rt ready-query {})))]
-    (->> roots
-         (group-by #(attr-get % branch-attr))
-         (sort-by key)
-         (mapv (fn [[branch-name branch-roots]]
-                 {:branch branch-name
-                  :roots (mapv (partial root-view rt active-ids ready-ids)
-                               (sort-by :id branch-roots))})))))
+  Fails loudly on unknown opt keys, a non-keyword `:branch-attr`, or a
+  non-string `:branch`. Returns a vector of `{:branch :roots}` sorted by
+  branch name."
+  [rt opts]
+  (when-not (map? opts)
+    (fail! "loom/branch-views opts must be a map" {:opts opts}))
+  (reject-unknown-keys! "loom/branch-views" branch-views-opts-keys opts)
+  (let [{:keys [branch-attr ready-query branch] :or {branch-attr :branch}} opts]
+    (when (nil? ready-query)
+      (fail! "loom/branch-views requires a :ready-query" {:opts {:branch-attr branch-attr :branch branch}}))
+    (require-valid! ::branch-attr branch-attr "loom/branch-views :branch-attr must be a keyword")
+    (when (some? branch)
+      (require-valid! ::branch branch "loom/branch-views :branch must be a string"))
+    (let [active (active-by-id rt)
+          active-ids (set (keys active))
+          parent-edges (->> (:edges (api/subgraph rt (sort active-ids) {:type "parent-of"}))
+                            (internal-active-edges active-ids))
+          child-ids (set (map :to_strand_id parent-edges))
+          roots (->> (vals active)
+                     (filter #(attr-get % branch-attr))
+                     (remove #(contains? child-ids (:id %)))
+                     (filter #(or (nil? branch) (= branch (attr-get % branch-attr)))))
+          ready-ids (set (map :id (api/ready rt ready-query {})))]
+      (->> roots
+           (group-by #(attr-get % branch-attr))
+           (sort-by key)
+           (mapv (fn [[branch-name branch-roots]]
+                   {:branch branch-name
+                    :roots (mapv (partial root-view rt active-ids ready-ids)
+                                 (sort-by :id branch-roots))}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; flow-status: workflow history/frontier/gate/run/stall join with Mermaid

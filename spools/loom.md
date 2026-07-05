@@ -36,13 +36,13 @@ test runtime. Callers pass the runtime explicitly.
 ;; active parent-of work DAGs with active depends-on edges
 (loom/work-dags rt)
 
-;; per-branch progress views; the caller names the branch attribute and the
-;; query whose ready frontier joins each root
+;; per-branch progress views; the caller names the branch attribute and
+;; supplies an inline query expression whose ready frontier joins each root
 (loom/branch-views rt {:branch-attr :branch
-                       :ready-query 'work})
+                       :ready-query [:= :state "active"]})
 
 ;; scope to one branch
-(loom/branch-views rt {:ready-query 'work :branch "feat-x"})
+(loom/branch-views rt {:ready-query [:= :state "active"] :branch "feat-x"})
 
 ;; workflow flow status join with a Mermaid gate chain
 (loom/flow-status rt "my-feature")
@@ -55,25 +55,32 @@ test runtime. Callers pass the runtime explicitly.
 
 | Fn | Behavior |
 |---|---|
-| `(active-by-id rt)` | Active strands keyed by id. |
 | `(summarize strand)` | Compact strand shape `{:id :title :state :attributes}`. |
-| `(internal-active-edges active-ids edges)` | Edges whose endpoints are both in `active-ids`, sorted for stable output. |
-| `(descendants-by-root rt active-ids root-id)` | `{:root-id :strand-ids :parent-of}` for the active parent-of subgraph below `root-id` (root included). |
 | `(work-dags rt)` | `{:roots :dags}` — every active parent-of root with its hierarchy edges, internal depends-on edges, and compact strand rows. |
-| `(root-view rt active-ids ready-ids root)` | `{:root :active_descendants :ready}` for one root: its active parent-of descendants and the subset of root+descendants present in `ready-ids`. |
 | `(branch-views rt opts)` | Vector of `{:branch :roots}` grouped by branch attribute, sorted by branch name. |
 | `(flow-status rt run-id)` | Read-only workflow flow-status join (see below). |
 | `(gate-chain-mermaid gates ready-ids)` | Dev-only Mermaid `flowchart LR` marking each gate `ready`/`stalled`/`closed`/its state. |
 | `(install!)` | Installation metadata: function symbols and `:read-only true` for trusted registration by name. Registers no ops. |
+
+`active-by-id`, `internal-active-edges`, `descendants-by-root`, and
+`root-view` are private graph-composition helpers used internally by
+`work-dags`/`branch-views`; they carry no external-consumer contract and are
+not part of this surface table.
 
 `branch-views` options:
 
 - `:branch-attr` — attribute key naming the branch (default `:branch`). A branch
   root is an active strand carrying this attribute that is not itself a parent-of
   child of another active strand.
-- `:ready-query` — **required** named-or-inline query whose ready frontier feeds
-  each root view. Absent `:ready-query` fails loudly with `ex-info`.
+- `:ready-query` — **required** inline query expression (vector or map, as
+  accepted by `skein.api.weaver.alpha/ready`) whose ready frontier feeds each
+  root view. A named query symbol/keyword is not resolved. Absent `:ready-query`
+  fails loudly with `ex-info`.
 - `:branch` — optional branch name; scopes the projection to one branch.
+
+`branch-views` validates its `opts` map loudly: a non-map `opts`, an unknown
+key, a non-keyword `:branch-attr`, or a non-string `:branch` all fail with a
+contextual `ex-info`.
 
 `flow-status` returns a JSON-compatible map with:
 
