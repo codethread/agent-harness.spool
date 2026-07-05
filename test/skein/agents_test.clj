@@ -6,10 +6,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.weaver.alpha :as api]
-            [skein.shuttle-test :refer [await-phase]]
             [skein.spools.agents :as agents]
             [skein.spools.shuttle :as shuttle]
-            [skein.spools.test-support :as test-support]))
+            [skein.spools.test-support :as test-support :refer [await-phase]]))
 
 (defn- with-agents
   "Run f with a fresh weaver runtime that has shuttle and agents installed.
@@ -978,13 +977,10 @@
   "Poll until the run's backend handle pid lands (it is written strictly
   after phase running) or timeout; return the strand."
   [rt id]
-  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms))]
-    (loop []
-      (let [s (api/show rt id)]
-        (cond
-          (get-in s [:attributes (keyword "shuttle" "handle.pid")]) s
-          (> (System/currentTimeMillis) deadline) (throw (ex-info "timeout waiting handle" {:id id :strand s}))
-          :else (do (Thread/sleep 50) (recur)))))))
+  (test-support/poll-until
+   #(let [s (api/show rt id)]
+      (when (get-in s [:attributes (keyword "shuttle" "handle.pid")]) s))
+   {:on-timeout #(throw (ex-info "timeout waiting handle" {:id id :strand (api/show rt id)}))}))
 
 (deftest backends-verb-lists-registered-backends
   (with-agents

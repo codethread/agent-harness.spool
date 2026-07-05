@@ -32,13 +32,9 @@
     (.getCanonicalPath script)))
 
 (defn- eventually [pred]
-  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms 5000))]
-    (loop []
-      (if-let [value (pred)]
-        value
-        (if (> (System/currentTimeMillis) deadline)
-          (throw (ex-info "Timed out waiting for condition" {}))
-          (do (Thread/sleep 50) (recur)))))))
+  (test-support/poll-until pred
+                           {:timeout-ms (test-support/await-budget-ms 5000)
+                            :on-timeout #(throw (ex-info "Timed out waiting for condition" {}))}))
 
 (defn- file-contains? [file text]
   (and (.exists file) (str/includes? (slurp file) text)))

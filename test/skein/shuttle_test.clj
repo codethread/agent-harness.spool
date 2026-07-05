@@ -13,7 +13,7 @@
             [skein.spools.shuttle :as shuttle]
             [skein.api.weaver.alpha :as api]
             [skein.core.weaver.runtime :as runtime]
-            [skein.spools.test-support :as test-support]))
+            [skein.spools.test-support :as test-support :refer [await-phase]]))
 
 (defn- with-shuttle
   "Run f with a fresh weaver runtime that has the shuttle installed.
@@ -28,19 +28,6 @@
    (fn [rt _config-dir]
      (shuttle/install!)
      (f rt))))
-
-(defn await-phase
-  "Poll until the strand's shuttle/phase is in `phases` or timeout; return it.
-
-  Public so `agents-test` can reuse this wrapper instead of a copy."
-  ([rt id phases] (await-phase rt id phases (test-support/await-budget-ms)))
-  ([rt id phases timeout-ms]
-   (test-support/poll-until
-    #(let [strand (api/show rt id)]
-       (when (contains? phases (get-in strand [:attributes :shuttle/phase])) strand))
-    {:timeout-ms timeout-ms
-     :on-timeout #(throw (ex-info "Timed out waiting for run phase"
-                                  {:id id :want phases :strand (api/show rt id)}))})))
 
 (defn- await-attr-matching
   "Poll until attribute `k` satisfies `pred` or timeout; return the strand."

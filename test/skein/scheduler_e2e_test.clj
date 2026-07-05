@@ -48,7 +48,9 @@
                                :handler `add-strand-handler
                                :payload {:title "Scheduled strand"}})
       (is (await-fire) "the near-future wake fires through the real weaver")
-      (test-support/poll-until #(empty? (scheduler/pending rt)))
+      (test-support/poll-until #(empty? (scheduler/pending rt))
+                               {:on-timeout #(throw (ex-info "Timed out waiting for scheduler pending to drain"
+                                                             {:pending (scheduler/pending rt)}))})
       (is (= ["Scheduled strand"] (scheduler-strand-titles rt))
           "the handler mutated the strand graph on the shared lane")
       (is (= ["seed-strand"] (mapv :key (scheduler/recent-fires rt)))
@@ -82,7 +84,9 @@
       (let [rt2 (runtime/start! db-file {:world world :publish? false})]
         (try
           (is (await-fire) "the persisted overdue wake fires after a real weaver restart")
-          (test-support/poll-until #(empty? (scheduler/pending rt2)))
+          (test-support/poll-until #(empty? (scheduler/pending rt2))
+                                   {:on-timeout #(throw (ex-info "Timed out waiting for scheduler pending to drain"
+                                                                 {:pending (scheduler/pending rt2)}))})
           (is (= ["Survivor strand"] (scheduler-strand-titles rt2))
               "the re-armed handler mutated the graph in the fresh weaver")
           (is (= ["survivor"] (mapv :key (scheduler/recent-fires rt2)))

@@ -143,14 +143,9 @@
       (swap! cleanup-events conj {:root root-id :burned temporary-child-ids}))))
 
 (defn wait-for-events [n]
-  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms 1000))]
-    (loop []
-      (cond
-        (<= n (count @delivered-events)) @delivered-events
-        (> (System/currentTimeMillis) deadline) @delivered-events
-        :else (do
-                (Thread/sleep 50)
-                (recur))))))
+  (test-support/poll-until #(when (<= n (count @delivered-events)) @delivered-events)
+                           {:timeout-ms (test-support/await-budget-ms 1000)
+                            :on-timeout (fn [] @delivered-events)}))
 
 (defn wait-until [pred]
   (test-support/poll-until #(when (pred) true)
