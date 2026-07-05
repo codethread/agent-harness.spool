@@ -12,7 +12,8 @@
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]
             [skein.repl :as repl]
-            [skein.spools.chime :as chime]))
+            [skein.spools.chime :as chime]
+            [skein.spools.test-support :as test-support]))
 
 (defn- temp-config-dir []
   (doto (.toFile (java.nio.file.Files/createTempDirectory
@@ -54,7 +55,7 @@
     (.getCanonicalPath script)))
 
 (defn- eventually [pred]
-  (let [deadline (+ (System/currentTimeMillis) 5000)]
+  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms 5000))]
     (loop []
       (if-let [value (pred)]
         value
@@ -74,7 +75,7 @@
   []
   (doseq [^Thread t (keys (Thread/getAllStackTraces))
           :when (str/starts-with? (.getName t) "chime-notify-")]
-    (.join t 5000)))
+    (.join t (test-support/await-budget-ms 5000))))
 
 (defn- bind-file-notifier! [dir]
   (let [out-file (io/file dir "notifications.txt")

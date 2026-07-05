@@ -11,7 +11,8 @@
             [skein.core.weaver.metadata :as metadata]
             [skein.core.weaver.runtime :as runtime]
             [skein.core.db :as db]
-            [skein.core.db-test :as db-test])
+            [skein.core.db-test :as db-test]
+            [skein.spools.test-support :as test-support])
   (:import [java.io BufferedReader BufferedWriter InputStreamReader OutputStreamWriter]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels SocketChannel]))
@@ -142,22 +143,24 @@
       (swap! cleanup-events conj {:root root-id :burned temporary-child-ids}))))
 
 (defn wait-for-events [n]
-  (loop [remaining 20]
-    (cond
-      (<= n (count @delivered-events)) @delivered-events
-      (zero? remaining) @delivered-events
-      :else (do
-              (Thread/sleep 50)
-              (recur (dec remaining))))))
+  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms 1000))]
+    (loop []
+      (cond
+        (<= n (count @delivered-events)) @delivered-events
+        (> (System/currentTimeMillis) deadline) @delivered-events
+        :else (do
+                (Thread/sleep 50)
+                (recur))))))
 
 (defn wait-until [pred]
-  (loop [remaining 20]
-    (cond
-      (pred) true
-      (zero? remaining) false
-      :else (do
-              (Thread/sleep 50)
-              (recur (dec remaining))))))
+  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms 1000))]
+    (loop []
+      (cond
+        (pred) true
+        (> (System/currentTimeMillis) deadline) false
+        :else (do
+                (Thread/sleep 50)
+                (recur))))))
 
 (defn test-event [type id]
   {:event/type type
@@ -186,7 +189,7 @@
                                  'skein.weaver-test/event-drain-handler {})
     (try
       (api/enqueue-event! rt (test-event :test/event-drain (str (random-uuid))))
-      (when-not (deref signal 5000 false)
+      (when-not (deref signal (test-support/await-budget-ms 5000) false)
         (throw (ex-info "Timed out draining event queue" {})))
       (finally
         (api/unregister-event-handler! rt :event-drain)))))
@@ -921,8 +924,8 @@
       (let [strand (api/add rt {:title "Slow handler target"})
             update-result (future (api/update rt (:id strand) {:state "closed"}))]
         (try
-          (is (deref @handler-started 1000 false))
-          (let [updated (deref update-result 1000 ::mutation-blocked)]
+          (is (deref @handler-started (test-support/await-budget-ms 1000) false))
+          (let [updated (deref update-result (test-support/await-budget-ms 1000) ::mutation-blocked)]
             (is (not= ::mutation-blocked updated))
             (is (= "closed" (:state updated))))
           (is (= [] @delivered-events))
@@ -943,7 +946,7 @@
       (reset! handler-release (promise))
       (api/register-event-handler! rt :slow #{:x} 'skein.weaver-test/slow-capture-event {})
       (api/enqueue-event! rt (test-event :x "started"))
-      (is (deref @handler-started 1000 false))
+      (is (deref @handler-started (test-support/await-budget-ms 1000) false))
       (doseq [n (range runtime/event-queue-capacity)]
         (api/enqueue-event! rt (test-event :x (str "queued-" n))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"queue is full"

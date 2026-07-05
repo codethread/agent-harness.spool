@@ -10,7 +10,8 @@
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]
             [skein.spools.agents :as agents]
-            [skein.spools.shuttle :as shuttle]))
+            [skein.spools.shuttle :as shuttle]
+            [skein.spools.test-support :as test-support]))
 
 (defn- temp-config-dir []
   (let [root (.toFile (java.nio.file.Files/createTempDirectory
@@ -42,7 +43,7 @@
         (db-test/delete-sqlite-family! db-file)))))
 
 (defn- await-phase [rt id phases]
-  (let [deadline (+ (System/currentTimeMillis) 10000)]
+  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms))]
     (loop []
       (let [s (api/show rt id)
             phase (get-in s [:attributes :shuttle/phase])]
@@ -86,7 +87,7 @@
         (let [spawned (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo via-op"]})]
           (is (= "pending" (:phase spawned)))
           (let [{:keys [runs timed-out]}
-                (agents/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" "10"]})]
+                (agents/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" (str (test-support/await-budget-secs))]})]
             (is (false? timed-out))
             (is (= "via-op" (:result (first runs)))))
           (agents/agent-op {:op/argv ["note" (:id spawned) "op note" "--by" (:id spawned)]})
@@ -118,7 +119,7 @@
   (with-agents
     (fn [_]
       (let [spawned (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "printf 'a\\nb\\n'; printf 'e\\n' >&2"]})]
-        (agents/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" "10"]})
+        (agents/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" (str (test-support/await-budget-secs))]})
         (let [logs (agents/agent-op {:op/argv ["logs" (:id spawned) "--tail" "1"]})]
           (is (= "b" (get-in logs [:out :text])))
           (is (= "e" (get-in logs [:err :text]))))))))
@@ -789,7 +790,7 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing required flag --prompt"
                               (agents/agent-op {:op/argv ["spawn" "--harness" "sh"]})))
         (let [done (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo done"]})]
-          (agents/agent-op {:op/argv ["await" (:id done) "--timeout-secs" "10"]})
+          (agents/agent-op {:op/argv ["await" (:id done) "--timeout-secs" (str (test-support/await-budget-secs))]})
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no live process"
                                 (agents/agent-op {:op/argv ["kill" (:id done)]}))))))))
 
@@ -939,7 +940,7 @@
             _ (api/update rt (:id plan) {:edges [{:type "parent-of" :to (:id task)}]})
             delegated {:run (select-keys (shuttle/run-summary (shuttle/spawn-run! {:harness :sh :prompt "echo first" :parent (:id task) :depends-on [(:id gate)]})) [:id :phase :harness])}]
         (api/update rt (:id gate) {:state "closed"})
-        (let [{:keys [timed-out runs]} (agents/agent-op {:op/argv ["await" "--under" (:id plan) "--timeout-secs" "10"]})]
+        (let [{:keys [timed-out runs]} (agents/agent-op {:op/argv ["await" "--under" (:id plan) "--timeout-secs" (str (test-support/await-budget-secs))]})]
           (is (false? timed-out))
           (is (= (:id (get delegated :run)) (:id (first runs)))))
         (let [failed-task (api/add rt {:title "fails" :attributes {:body "exit 2" :harness "sh"}})
@@ -1003,7 +1004,7 @@
   "Poll until the run's backend handle pid lands (it is written strictly
   after phase running) or timeout; return the strand."
   [rt id]
-  (let [deadline (+ (System/currentTimeMillis) 10000)]
+  (let [deadline (+ (System/currentTimeMillis) (test-support/await-budget-ms))]
     (loop []
       (let [s (api/show rt id)]
         (cond

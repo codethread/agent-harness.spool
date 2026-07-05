@@ -13,7 +13,8 @@
             [skein.spools.shuttle :as shuttle]
             [skein.api.weaver.alpha :as api]
             [skein.core.weaver.config :as daemon-config]
-            [skein.core.weaver.runtime :as runtime]))
+            [skein.core.weaver.runtime :as runtime]
+            [skein.spools.test-support :as test-support]))
 
 (defn- temp-config-dir []
   (doto (.toFile (java.nio.file.Files/createTempDirectory
@@ -42,22 +43,9 @@
       (finally
         (db-test/delete-sqlite-family! db-file)))))
 
-(defn- await-budget-ms
-  "Default poll deadline for the await-* helpers below, in ms. Scales via the
-  SKEIN_TEST_AWAIT_SCALE env var (a multiplier, default 1) so a single knob
-  widens every call site under fork-heavy or otherwise loaded machines instead
-  of editing each timeout."
-  []
-  (long (* 10000 (if-let [scale (System/getenv "SKEIN_TEST_AWAIT_SCALE")]
-                   (try (Double/parseDouble scale)
-                        (catch NumberFormatException _
-                          (throw (ex-info "SKEIN_TEST_AWAIT_SCALE must be a number"
-                                          {:env "SKEIN_TEST_AWAIT_SCALE" :value scale}))))
-                   1.0))))
-
 (defn- await-phase
   "Poll until the strand's shuttle/phase is in `phases` or timeout; return it."
-  ([rt id phases] (await-phase rt id phases (await-budget-ms)))
+  ([rt id phases] (await-phase rt id phases (test-support/await-budget-ms)))
   ([rt id phases timeout-ms]
    (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
      (loop []
@@ -72,7 +60,7 @@
 
 (defn- await-attr-matching
   "Poll until attribute `k` satisfies `pred` or timeout; return the strand."
-  ([rt id k pred] (await-attr-matching rt id k pred (await-budget-ms)))
+  ([rt id k pred] (await-attr-matching rt id k pred (test-support/await-budget-ms)))
   ([rt id k pred timeout-ms]
    (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
      (loop []
@@ -149,7 +137,7 @@
         ;; delivered entirely off-argv while still driving the process.
         (shuttle/defharness! :sh-stdin {:argv ["sh"] :prompt-via :stdin :preamble? false})
         (let [run (shuttle/spawn-run! {:harness :sh-stdin :prompt "echo hello-stdin"})
-              done (await-phase rt (:id run) #{"done"} 10000)]
+              done (await-phase rt (:id run) #{"done"})]
           (is (= "closed" (:state done)))
           (is (= "hello-stdin" (get-in done [:attributes :shuttle/result]))))))))
 
@@ -238,7 +226,7 @@
             run (shuttle/spawn-run! {:harness :sh
                                      :prompt "echo delegated"
                                      :attrs {"treadle/gate" (:id gate)}})]
-        (await-phase rt (:id run) #{"done"} 10000)
+        (await-phase rt (:id run) #{"done"})
         (is (= [(:id run)]
                (mapv :id (shuttle/runs {:for (:id gate)})))
             "the gate-delegated run must survive the --for prefilter")))))
@@ -253,7 +241,7 @@
       (let [target (api/add rt {:title "delegated target"})
             run (shuttle/spawn-run! {:harness :sh :prompt "echo work"
                                      :parent (:id target)})]
-        (await-phase rt (:id run) #{"done"} 10000)
+        (await-phase rt (:id run) #{"done"})
         ;; unrelated strands the summary path must never touch per-strand
         (dotimes [i 150] (api/add rt {:title (str "noise-" i)}))
         (let [subgraph-calls (atom 0)
@@ -297,7 +285,7 @@
   (with-shuttle
     (fn [rt]
       (let [quick (shuttle/spawn-run! {:harness :sh :prompt "echo quick"})
-            {:keys [timed-out runs]} (shuttle/await-runs [(:id quick)] {:timeout-secs 10})]
+            {:keys [timed-out runs]} (shuttle/await-runs [(:id quick)] {:timeout-secs (test-support/await-budget-secs)})]
         (is (false? timed-out))
         (is (= "quick" (:result (first runs)))))
       (let [blocker (api/add rt {:title "never closes"})
@@ -443,19 +431,21 @@
   (let [handle (java.lang.ProcessHandle/of (Long/parseLong (str pid)))]
     (and (.isPresent handle) (.isAlive (.get handle)))))
 
-(defn- await-process-death [pid timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (cond
-        (not (process-alive? pid)) true
-        (> (System/currentTimeMillis) deadline) false
-        :else (do (Thread/sleep 50) (recur))))))
+(defn- await-process-death
+  ([pid] (await-process-death pid (test-support/await-budget-ms 5000)))
+  ([pid timeout-ms]
+   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+     (loop []
+       (cond
+         (not (process-alive? pid)) true
+         (> (System/currentTimeMillis) deadline) false
+         :else (do (Thread/sleep 50) (recur)))))))
 
 (defn- await-attr
   "Poll until the strand carries attribute `k` or timeout; return the strand.
   Needed for interactive launches: phase running is written durably before
   the backend starts, so the handle lands strictly after running."
-  ([rt id k] (await-attr rt id k (await-budget-ms)))
+  ([rt id k] (await-attr rt id k (test-support/await-budget-ms)))
   ([rt id k timeout-ms]
    (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
      (loop []
@@ -537,7 +527,7 @@
           (let [done (await-phase rt (:id run) #{"done"})]
             (is (= "closed" (:state done)))
             (is (nil? (get-in done [:attributes :shuttle/teardown-error])))
-            (is (true? (await-process-death pid 5000)))
+            (is (true? (await-process-death pid)))
             (testing "scrollback was captured before teardown"
               (let [log (get-in done [:attributes :shuttle/log])]
                 (is (some? log))
@@ -551,7 +541,7 @@
         (api/update rt (:id run) {:state "closed"})
         (let [done (await-phase rt (:id run) #{"done"})]
           (is (= "closed" (:state done)))
-          (is (true? (await-process-death pid 5000))))))))
+          (is (true? (await-process-death pid))))))))
 
 (deftest reap-manual-leaves-the-session-to-the-human
   (with-shuttle
@@ -571,7 +561,7 @@
         (let [target (api/add rt {:title "abandoned"})
               {:keys [run pid]} (spawn-interactive! rt {:parent (:id target)})]
           (clojure.java.shell/sh "kill" "-9" (str pid))
-          (is (true? (await-process-death pid 5000)))
+          (is (true? (await-process-death pid)))
           (shuttle/supervise!)
           (let [failed (await-phase rt (:id run) #{"failed"})]
             (is (= "active" (:state failed)))
@@ -636,7 +626,7 @@
     (fn [rt]
       (let [{:keys [run pid]} (spawn-interactive! rt)]
         (shuttle/kill! (:id run))
-        (is (true? (await-process-death pid 5000)))
+        (is (true? (await-process-death pid)))
         (let [failed (api/show rt (:id run))]
           (is (= "failed" (get-in failed [:attributes :shuttle/phase])))
           (is (str/includes? (get-in failed [:attributes :shuttle/error]) "killed")))
@@ -657,7 +647,7 @@
           (is (process-alive? pid)))
         (testing "a dead orphan fails loudly instead of respawning"
           (clojure.java.shell/sh "kill" "-9" (str pid))
-          (is (true? (await-process-death pid 5000)))
+          (is (true? (await-process-death pid)))
           (forget-in-flight!)
           (let [summary (shuttle/reconcile!)]
             (is (= [(:id run)] (:failed summary))))
@@ -684,7 +674,7 @@
             pid (str/trim (slurp pid-file))]
         (is (str/includes? (get-in failed [:attributes :shuttle/error]) "not a JSON handle"))
         (testing "the leaked session process was stopped"
-          (is (true? (await-process-death pid 5000))))
+          (is (true? (await-process-death pid))))
         (.delete pid-file)))))
 
 (deftest await-detects-dead-interactive-sessions
