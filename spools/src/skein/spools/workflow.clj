@@ -737,7 +737,7 @@
    (compile workflow params {}))
   ([workflow params opts]
    (let [phase (or (:phase opts) (:phase workflow) :molecule)
-         [workflow params root-ref steps] (resolve-and-normalize workflow params opts)
+         [workflow _params root-ref steps] (resolve-and-normalize workflow params opts)
          root {:ref root-ref
                :title (:name workflow)
                :state (or (:state workflow) "active")
@@ -1664,7 +1664,7 @@
   params so leaving the stage sheds its loop state. Params persist as the new
   root's `workflow/context`, and the resolved constructor symbol as its
   `workflow/definition` so a later `:revise` can re-pour the stage."
-  [rt run-id step next-str input]
+  [rt run-id _step next-str input]
   (let [next-sym (resolve-next-symbol next-str)
         workflow-fn (or (requiring-resolve next-sym)
                         (fail! "Choice next workflow cannot be resolved"
@@ -1689,7 +1689,7 @@
   overrides winning, and persist as the new root's `workflow/context`; the
   overridden keys are recorded as stage-local (see `stage-params-attrs`). Fails
   loudly (TEN-003) when the root has no resolvable `workflow/definition`."
-  [rt run-id step choice input override-params]
+  [rt run-id _step choice input override-params]
   (let [root (current-root-with-rt rt run-id)
         def-str (or (attr root :workflow/definition)
                     (fail! "Cannot revise a run whose root has no workflow/definition"

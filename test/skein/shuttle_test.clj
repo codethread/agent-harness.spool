@@ -302,7 +302,7 @@
 
 (deftest spawn-validates-inputs-before-creating-anything
   (with-shuttle
-    (fn [rt]
+    (fn [_rt]
       (testing "reserved control attributes cannot be overridden"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"control attributes"
                               (shuttle/spawn-run! {:harness :sh :prompt "echo x"

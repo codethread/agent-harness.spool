@@ -13,7 +13,6 @@
 
 (def ^:private section-order [:strand :blockers :dependents :parents :children :notes :workflow])
 (def ^:private selectable-sections (set section-order))
-(def ^:private related-sections (disj selectable-sections :strand :workflow))
 
 (defn- attr [strand k]
   (attr-get strand k))

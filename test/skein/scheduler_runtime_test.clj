@@ -123,7 +123,7 @@
       ;; generation guard to drop.
       (db/schedule-wake! ds {:key "live" :wake-at (instant 100) :handler 'a/b})
       (with-scheduler ds 8 500
-        (fn [rt st]
+        (fn [rt _st]
           (let [^ArrayBlockingQueue queue (get-in rt [:event-system :queue])
                 real-due db/due-wakes]
             (with-redefs [db/due-wakes (fn [ds now]

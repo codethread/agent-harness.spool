@@ -278,7 +278,7 @@
 
   Generates a unique id, defaults missing state to active, validates core strand fields,
   and throws if an id cannot be allocated after bounded retries."
-  [ds {:keys [title state attributes] :as strand}]
+  [ds {:keys [title attributes] :as strand}]
   (reject-removed-lifecycle-fields! strand :create)
   (reject-unknown-strand-keys! strand strand-input-keys :create)
   (let [strand (merge {:state "active"} strand)]
@@ -296,19 +296,6 @@
         (case (first result)
           :created (second result)
           :retry (recur (inc attempt)))))))
-
-(defn- add-strand-with-edges!
-  [ds strand edges]
-  (jdbc/with-transaction [tx ds]
-    (let [created-strand (add-strand! tx strand)]
-      (doseq [{:keys [to type attributes]} edges]
-        (when-not (get-strand tx to)
-          (throw (ex-info "Link target strand not found" {:to to :type type})))
-        (add-edge! tx {:from (:id created-strand)
-                       :to to
-                       :type type
-                       :attributes attributes}))
-      created-strand)))
 
 (defn ^:no-doc add-strand-batch-in-transaction!
   [tx strands]
@@ -883,15 +870,15 @@
                         FROM nodes n
                         JOIN strand_edges e ON e.from_strand_id = n.id
                         WHERE e.edge_type = ?
-                      )")]
-         (let [rows (mapv identity
-                          (execute! ds (into [(str cte "
+                      )")
+             rows (mapv identity
+                        (execute! ds (into [(str cte "
                                        SELECT " strand-columns "
                                        FROM strands
                                        WHERE id IN (SELECT id FROM nodes)
                                        ORDER BY id")]
-                                             (concat root-ids [type]))))
-               edges (execute! ds (into [(str cte "
+                                           (concat root-ids [type]))))
+             edges (execute! ds (into [(str cte "
                                        SELECT e.from_strand_id, e.to_strand_id,
                                               e.edge_type, e.attributes
                                        FROM strand_edges e
@@ -899,10 +886,10 @@
                                          AND e.from_strand_id IN (SELECT id FROM nodes)
                                          AND e.to_strand_id IN (SELECT id FROM nodes)
                                        ORDER BY e.from_strand_id, e.to_strand_id, e.edge_type")]
-                                        (concat root-ids [type type])))]
-           {:root-ids root-ids
-            :strands rows
-            :edges edges}))))))
+                                      (concat root-ids [type type])))]
+         {:root-ids root-ids
+          :strands rows
+          :edges edges})))))
 
 (defn incoming-edges
   "Return edges of `edge-type` whose target is one of `to-ids`.

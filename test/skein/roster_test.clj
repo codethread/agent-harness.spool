@@ -177,10 +177,10 @@
         (roster/finish! rt (:id missing) {}))
       (let [bad (api/add rt {:title "hand-stamped, bad heartbeat"
                              :attributes {:roster/entry "true" :roster/feature "f"
-                                          :roster/owner "o" :roster/heartbeat-at "not-an-instant"}})]
-        (let [ex (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unparseable roster/heartbeat-at"
-                                       (roster/roster rt {})))]
-          (is (= (:id bad) (:id (ex-data ex))) "failure names the offending strand"))))))
+                                          :roster/owner "o" :roster/heartbeat-at "not-an-instant"}})
+            ex (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unparseable roster/heartbeat-at"
+                                     (roster/roster rt {})))]
+        (is (= (:id bad) (:id (ex-data ex))) "failure names the offending strand")))))
 
 (deftest roster-lists-active-entries-scoped-by-attributes-and-excludes-finished
   (with-runtime

@@ -1,4 +1,5 @@
 (ns skein.core.db-test
+  "Tests for skein.core.db: strand/edge persistence, queries, and SQLite behavior."
   (:require [clojure.spec.alpha :as s]
             [clojure.test :refer [deftest is testing]]
             [next.jdbc :as jdbc]

@@ -9,11 +9,29 @@
             [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
             [skein.api.graph.alpha :as graph]
+            [skein.api.runtime.alpha :as runtime]
             [skein.api.weaver.alpha :as api]
             [skein.spools.util :refer [fail!]]))
 
-(defonce ^:private vocab-state (atom {}))
-(defonce ^:private violation-state (atom []))
+(def ^:private state-version
+  "Shape version for selvage's runtime spool-state map. Bump whenever `new-state`'s
+  key set changes: spool-state survives `reload!`, so a post-upgrade reload would
+  otherwise reuse a preserved map missing the new key (docs/writing-shared-spools.md
+  'Versioned spool state', SPEC-004.C95). The `state-shape-matches-declared-version`
+  test fails loudly if `new-state` and this version drift apart."
+  1)
+
+(defn- new-state []
+  {:vocab-registry (atom {})
+   :violation-log (atom [])})
+
+(defn- state []
+  (runtime/spool-state (current/runtime) ::state {:version state-version} new-state))
+
+;; Event handlers run under `with-runtime-binding`, so `(current/runtime)`
+;; resolves on the event worker thread as well as on caller threads.
+(defn- vocab-registry [] (:vocab-registry (state)))
+(defn- violation-log [] (:violation-log (state)))
 
 (def ^:private allowed-spec-keys #{:checks :doc})
 (def ^:private allowed-check-keys #{:attr :enum :kind :required-with :doc})
@@ -87,13 +105,13 @@
   (let [spec (validate-spec! name spec)
         entry {:name (check-name! name)
                :spec spec}]
-    (swap! vocab-state assoc name entry)
+    (swap! (vocab-registry) assoc name entry)
     entry))
 
 (defn vocabs
   "Return registered vocabulary metadata in deterministic order."
   []
-  (->> @vocab-state vals (sort-by (comp pr-str :name)) vec))
+  (->> @(vocab-registry) vals (sort-by (comp pr-str :name)) vec))
 
 (defn remove-vocab!
   "Remove a registered vocabulary by name.
@@ -101,9 +119,9 @@
   Missing vocabularies fail loudly. Returns `{:removed name}`."
   [name]
   (check-name! name)
-  (when-not (contains? @vocab-state name)
-    (fail! "Vocabulary is not registered" {:vocab name :available (vec (sort-by pr-str (keys @vocab-state)))}))
-  (swap! vocab-state dissoc name)
+  (when-not (contains? @(vocab-registry) name)
+    (fail! "Vocabulary is not registered" {:vocab name :available (vec (sort-by pr-str (keys @(vocab-registry))))}))
+  (swap! (vocab-registry) dissoc name)
   {:removed name})
 
 (defn- attr-key [attr]
@@ -198,7 +216,7 @@
              {:event/id (:event/id event) :event/type (:event/type event)}))
     (let [found (check-strand strand)]
       (when (seq found)
-        (swap! violation-state into found))
+        (swap! (violation-log) into found))
       found)))
 
 (defn watch!
@@ -211,12 +229,12 @@
 (defn violations
   "Return recorded watch-mode violations in delivery order."
   []
-  @violation-state)
+  @(violation-log))
 
 (defn clear-violations!
   "Clear recorded watch-mode violations."
   []
-  (reset! violation-state [])
+  (reset! (violation-log) [])
   {:cleared true})
 
 (defn install!

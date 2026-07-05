@@ -1,4 +1,5 @@
 (ns skein.plugin-test
+  "Tests for weaver plugin/op registration and dispatch."
   (:require [clojure.test :refer [deftest is]]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.api.weaver.alpha]

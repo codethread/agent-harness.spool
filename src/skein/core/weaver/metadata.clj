@@ -19,19 +19,19 @@
   [db-file]
   (.getPath (.getCanonicalFile (io/file db-file))))
 
-(defn ^java.io.File metadata-file
+(defn metadata-file
   "Return the EDN metadata file for `world`."
-  [world]
+  ^java.io.File [world]
   (io/file (:state-dir world) edn-file-name))
 
-(defn ^java.io.File json-metadata-file
+(defn json-metadata-file
   "Return the JSON metadata file for `world`."
-  [world]
+  ^java.io.File [world]
   (io/file (:state-dir world) json-file-name))
 
-(defn ^java.io.File socket-file
+(defn socket-file
   "Return the Unix-domain socket file for `world`."
-  [world]
+  ^java.io.File [world]
   (io/file (:state-dir world) socket-file-name))
 
 (defn new-nonce

@@ -1,7 +1,7 @@
 (ns skein.treadle-test
   "Tests for the treadle workflow-gate to shuttle-run adapter."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [skein.spools.shuttle :as shuttle]
             [skein.spools.treadle :as treadle]
             [skein.spools.agents :as agents]
@@ -366,5 +366,8 @@
   ;; Drift alarm for the treadle's versioned spool-state: a key added to
   ;; new-state without a state-version bump would survive reload! as a stale map.
   (test-support/assert-state-shape
+   ;; white-box read of a private var: kondo flags cross-ns private access, but
+   ;; #'ns/private is legal and intentional here.
+   #_{:clj-kondo/ignore [:unresolved-var]}
    #'treadle/new-state
    #{:scan-monitor}))

@@ -4,7 +4,6 @@
             [clojure.spec.alpha :as s]
             [clojure.data.json :as json]
             [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]
             [skein.spools.guild :as guild]
             [skein.spools.test-support :refer [with-runtime]]))
 

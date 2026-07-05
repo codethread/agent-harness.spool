@@ -1,8 +1,10 @@
 (ns skein.weaver-test
+  "Tests for the weaver runtime: transport, op dispatch, and lifecycle."
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [skein.api.batch.alpha :as batch]
             [skein.api.current.alpha :as current]
@@ -1903,8 +1905,8 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Pattern doc"
                             (api/register-pattern! rt 'bad-doc "" 'skein.weaver-test/test-pattern ::pattern-input)))
-      (is (clojure.string/includes? (:spec-form (api/pattern-explain rt :dev-task))
-                                    "clojure.spec.alpha/keys"))
+      (is (str/includes? (:spec-form (api/pattern-explain rt :dev-task))
+                         "clojure.spec.alpha/keys"))
       (reset! delivered-events [])
       (api/register-event-handler! rt :capture-weave #{:batch/applied}
                                    'skein.weaver-test/capture-event {})

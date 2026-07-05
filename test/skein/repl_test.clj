@@ -1,4 +1,5 @@
 (ns skein.repl-test
+  "Tests for skein.repl interactive convenience wrappers."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
@@ -117,7 +118,7 @@
 
 (deftest helpers-use-daemon-backed-strand-flow
   (with-runtime
-    (fn [rt db-file]
+    (fn [rt _db-file]
       (is (= (:config-dir (:metadata rt)) (repl/connect! (:config-dir (:metadata rt)))))
       (is (= {:database "initialized"} (repl/init!)))
       (is (nil? (ns-resolve 'skein.repl 'task!)))
@@ -242,7 +243,7 @@
 
 (deftest query-helpers-use-daemon-backed-task-flow
   (with-runtime
-    (fn [rt db-file]
+    (fn [rt _db-file]
       (repl/connect! (:config-dir (:metadata rt)))
       (repl/init!)
       (let [design (:id (repl/strand! "Design" {:owner "agent"} {:state "closed"}))

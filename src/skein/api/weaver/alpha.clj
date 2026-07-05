@@ -30,7 +30,7 @@
     (sequential? result) (mapv normalize result)
     :else result))
 
-(declare enqueue-event! register-built-in-ops! runtime? apply-edges! op-detail)
+(declare enqueue-event! register-built-in-ops! apply-edges! op-detail)
 
 (defn- ds [runtime]
   (:datasource runtime))
@@ -65,7 +65,7 @@
 (defn- config-dir [runtime]
   (get-in runtime [:metadata :config-dir]))
 
-(defn- ^java.io.File spools-file [runtime name]
+(defn- spools-file ^java.io.File [runtime name]
   (io/file (config-dir runtime) name))
 
 (defn- expand-user-home [path]
@@ -307,7 +307,7 @@
       (throw (ex-info "git command failed" (fetch-failure result))))
     result))
 
-(defn- ^java.io.File cache-root-file [entry]
+(defn- cache-root-file ^java.io.File [entry]
   (io/file (cache-base) "skein" "spools" (:git/sha entry)))
 
 (defn- tag-refs [tag]
@@ -543,9 +543,6 @@
                                                               :class (str (class t))}
                                                        (ex-data t) (assoc :data (ex-data t))
                                                        fetch (assoc :fetch fetch))))))))
-
-(defn- successful-sync? [sync]
-  (#{:loaded :already-available} (:status sync)))
 
 (defn sync-approved-spools
   "Load approved local spools into the runtime classloader and record sync status."
@@ -1560,9 +1557,6 @@
   (when-not (and (string? doc) (not (str/blank? doc)))
     (throw (ex-info "Pattern doc must be a non-blank string" {:doc doc})))
   doc)
-
-(defn- runtime? [x]
-  (and (map? x) (contains? x :pattern-registry)))
 
 (defn- pattern-entry [pattern-name doc fn-sym input-spec]
   (cond-> {:name (canonical-pattern-name pattern-name)

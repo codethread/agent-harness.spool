@@ -1,4 +1,5 @@
 (ns skein.runtime-deps-test
+  "Tests for runtime dependency loading against a live weaver."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [nrepl.core :as nrepl]

@@ -1,4 +1,5 @@
 (ns skein.core.client-test
+  "Tests for skein.core.client: routing CLI calls to a running weaver over nREPL."
   (:refer-clojure :exclude [list update])
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [nrepl.core :as nrepl]
@@ -85,7 +86,7 @@
 
 (deftest client-calls-running-daemon-and-returns-clojure-data
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (is (= {:database "initialized"} (call-world world :init)))
       (let [task (call-world world :add {:title "Bridge" :attributes {:owner "agent"}})]
         (is (= "Bridge" (:title task)))
@@ -96,14 +97,14 @@
 
 (deftest client-finds-metadata-in-explicit-state-dir
   (with-runtime
-    (fn [rt world db-file]
+    (fn [rt world _db-file]
       (is (not (.exists (java.io.File. (:config-dir world) "weaver.edn"))))
       (is (= (:metadata rt)
              (client/status-world (:config-dir world) {:state-dir (:state-dir world)}))))))
 
 (deftest client-supersede-routes-to-weaver-and-preserves-domain-errors
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (call-world world :init)
       (let [old (call-world world :add {:title "Old"})
             replacement (call-world world :add {:title "New"})
@@ -120,7 +121,7 @@
 
 (deftest client-query-registry-calls-share-daemon-state
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (let [query-def {:params [:owner]
                        :where [:= [:attr :owner] [:param :owner]]}]
         (is (= {"mine" query-def} (call-world world :register-query :mine query-def)))
@@ -134,7 +135,7 @@
 
 (deftest client-mutations-thread-nrepl-request-context-to-hooks
   (with-runtime
-    (fn [rt world db-file]
+    (fn [rt world _db-file]
       (call-world world :init)
       (reset! client-hook-contexts [])
       (api/register-hook! rt :client-normalize #{:attributes/normalize} 'skein.core.client-test/client-normalize-hook {})
@@ -150,7 +151,7 @@
 
 (deftest client-routes-runtime-transformation-operations
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (call-world world :init)
       (let [agent (call-world world :add {:title "Agent" :attributes {:owner "agent"}})]
         (is (= {"mine" [:= [:attr :owner] "agent"]}
@@ -169,7 +170,7 @@
 
 (deftest client-query-registry-preserves-domain-errors
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (try
         (call-world world :resolve-query :missing)
         (is false "expected missing query error")
@@ -233,7 +234,7 @@
 
 (deftest client-fails-loudly-for-wrong-daemon-identity
   (with-runtime
-    (fn [rt world db-file]
+    (fn [rt world _db-file]
       (let [bad (assoc (:metadata rt) :nonce "wrong")]
         (metadata/publish! bad)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -242,7 +243,7 @@
 
 (deftest client-fails-loudly-for-daemon-thrown-domain-errors
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (call-world world :init)
       (try
         (call-world world :add {:title ""})
@@ -255,7 +256,7 @@
 
 (deftest client-fails-loudly-for-timeouts
   (with-runtime
-    (fn [_ world db-file]
+    (fn [_ world _db-file]
       (with-redefs [nrepl/client (fn [conn _timeout-ms] conn)
                     nrepl/client-session (fn [client _timeout-ms] client)
                     nrepl/message (fn [_session _message]

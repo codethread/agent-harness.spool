@@ -1,6 +1,7 @@
 (ns skein.core.weaver.runtime
   "Start, stop, and supervise the in-process weaver daemon runtime."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [nrepl.server :as nrepl]
             [skein.core.weaver.config :as config]
             [skein.core.weaver.metadata :as metadata]
@@ -140,7 +141,7 @@
   [world]
   (into []
         (keep (fn [name]
-                (let [file (clojure.java.io/file (:config-dir world) name)]
+                (let [file (io/file (:config-dir world) name)]
                   (when (.isFile file)
                     {:name name
                      :file (.getCanonicalPath file)}))))
@@ -209,7 +210,7 @@
              (clojure.lang.Var/popThreadBindings)))))))
 
 (defn- default-name [world]
-  (.getName (clojure.java.io/file (:config-dir world))))
+  (.getName (io/file (:config-dir world))))
 
 (defn- close-spool-state!
   "Close runtime-owned spool state resources before storage disappears."
@@ -271,8 +272,8 @@
      (when (and (nil? existing) (.exists socket-file))
        (throw (ex-info "Weaver socket exists without metadata; cannot prove weaver world is stale" {:config-dir (:config-dir world)
                                                                                                     :socket-path (.getPath socket-file)})))
-     (.mkdirs (clojure.java.io/file (:state-dir world)))
-     (.mkdirs (clojure.java.io/file (:data-dir world)))
+     (.mkdirs (io/file (:state-dir world)))
+     (.mkdirs (io/file (:data-dir world)))
      (let [storage (storage-for storage db-file world)
            ds (:connectable storage)
            _ (db/init! ds)

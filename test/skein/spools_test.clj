@@ -3,18 +3,17 @@
   spools.local.edn reading, sync!, layered use!, reload!, event helper routing,
   daemon init, and the ephemeral helper spool."
   (:require [clojure.java.io :as io]
+            [clojure.repl.deps]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [skein.core.client :as client]
-            [skein.core.db-test :as db-test]
             [skein.api.events.alpha :as events]
             [skein.api.graph.alpha :as graph]
             [skein.spools.ephemeral :as ephemeral]
-            [skein.spools.test-support :refer [temp-config-dir test-world with-runtime]]
+            [skein.spools.test-support :refer [temp-config-dir with-runtime]]
             [skein.repl :as repl]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.api.weaver.alpha :as api]
-            [skein.core.weaver.runtime :as runtime]
             [skein.test.alpha :as t]))
 
 (defn- delete-recursive [file]

@@ -6,7 +6,10 @@
 ;; `:op/emit!` and returns `{"emitted": <count>}` as the terminator payload.
 ;; Tasks 8 and 10 load this exact file to exercise the strand -> mill -> weaver
 ;; stream relay end to end; keep it dependency-free beyond blessed core APIs.
-(ns skein.test.fixtures.stream-op
+;; ns name intentionally differs from the file path: this is a load-file
+;; fixture, not a classpath namespace, so the -init filename cannot match.
+(ns ^{:clj-kondo/ignore [:namespace-name-mismatch]} skein.test.fixtures.stream-op
+  "Streaming-op fixture registering `test-stream`, loaded via load-file."
   (:require [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as weaver]))
 

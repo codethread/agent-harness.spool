@@ -1,4 +1,5 @@
 (ns skein.alpha-test
+  "Tests for the blessed skein.api.*.alpha surfaces (batch, graph, hooks, views)."
   (:require [skein.api.batch.alpha :as batch]
             [skein.api.graph.alpha :as graph]
             [skein.api.hooks.alpha :as hooks]
@@ -8,8 +9,7 @@
             [skein.api.weaver.alpha :as api]
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]
-            [skein.core.db-test :as db-test]
-            [skein.repl :as repl]))
+            [skein.core.db-test :as db-test]))
 (defn test-world [config-dir]
   (daemon-config/world config-dir
                        (str config-dir "/state")

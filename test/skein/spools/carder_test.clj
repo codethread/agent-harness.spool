@@ -26,7 +26,7 @@
 
 (deftest orphans-require-no-edges-and-no-workflow-attributes
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (let [orphan (repl/strand! "Loose strand")
             parent (repl/strand! "Parent")
             child (repl/strand! "Child")
@@ -40,7 +40,7 @@
 
 (deftest blocked-by-failure-reports-failed-blocker-details
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (let [blocked (repl/strand! "Blocked work")
             ok-blocked (repl/strand! "Blocked by nonfailed")
             failed (repl/strand! "Failed run" {"shuttle/phase" "failed" "shuttle/error" "boom"})
@@ -75,6 +75,6 @@
 
 (deftest report-rejects-unknown-options
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown carder option keys"
                             (carder/report {:days 1 :surprise true}))))))

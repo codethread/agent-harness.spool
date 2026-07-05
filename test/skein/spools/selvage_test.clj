@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [skein.repl :as repl]
             [skein.spools.selvage :as selvage]
-            [skein.spools.test-support :refer [with-runtime]]))
+            [skein.spools.test-support :refer [assert-state-shape with-runtime]]))
 
 (defn- unique-vocab []
   (keyword (str "selvage-test-" (java.util.UUID/randomUUID))))
@@ -32,7 +32,7 @@
 
 (deftest check-reports-clean-and-violating-strands
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)]
         (selvage/defvocab! vocab (shuttle-spec))
@@ -56,14 +56,14 @@
 
 (deftest check-fails-loudly-for-missing-strand-id
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (clear-vocabs!)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Strand not found"
                             (selvage/check "missing-strand"))))))
 
 (deftest check-all-can-be-scoped-by-query-form
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)]
         (selvage/defvocab! vocab (shuttle-spec))
@@ -75,7 +75,7 @@
 
 (deftest watch-records-and-clears-violations
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)
             strand (repl/strand! "Watch target" {:shuttle/phase "pending"})]
@@ -96,7 +96,7 @@
 
 (deftest defvocab-replaces-existing-vocabulary
   (with-runtime
-    (fn [rt _]
+    (fn [_rt _]
       (clear-vocabs!)
       (let [vocab (unique-vocab)
             strand (repl/strand! "Replace target" {:shuttle/phase "running"})]
@@ -107,3 +107,8 @@
         (is (= {:removed vocab} (selvage/remove-vocab! vocab)))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not registered"
                               (selvage/remove-vocab! vocab)))))))
+
+(deftest state-shape-matches-declared-version
+  ;; Drift alarm for selvage's versioned spool-state: a key added to new-state
+  ;; without a state-version bump would survive reload! as a stale map.
+  (assert-state-shape #'selvage/new-state #{:vocab-registry :violation-log}))

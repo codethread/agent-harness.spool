@@ -5,7 +5,7 @@
   schema init, schedule/cancel/list persistence, due-row selection under an
   injected clock, state transitions, bounded history pruning, and isolation
   from strand list/ready/query/traversal/burn paths."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [skein.core.db :as db]
             [skein.core.db-test :refer [with-db]])
   (:import [java.time Instant]))

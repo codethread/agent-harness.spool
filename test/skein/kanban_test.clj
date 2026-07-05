@@ -1,6 +1,7 @@
 (ns skein.kanban-test
   "Tests for the kanban board spool against a disposable weaver runtime."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.api.weaver.alpha :as api]
@@ -324,13 +325,13 @@
         (op! rt "claim" working-id "--owner" "agent-a" "--branch" "feature-x")
         (op! rt "note" working-id "Done: half. Next: rest." "--handover")
         (let [rendered ((requiring-resolve 'skein.spools.kanban/board-str) (op! rt "board"))
-              lines (clojure.string/split-lines rendered)]
-          (is (clojure.string/includes? rendered "REFINEMENT (1)"))
-          (is (clojure.string/includes? rendered "PENDING (0)"))
-          (is (clojure.string/includes? rendered "CLAIMED / WIP (1)"))
-          (is (clojure.string/includes? rendered "[p3 @feature-x agent-a] Working card"))
-          (is (clojure.string/includes? rendered "Done: half. Next: rest."))
-          (is (clojure.string/includes? rendered "NEEDS REVIEW (0)"))
+              lines (str/split-lines rendered)]
+          (is (str/includes? rendered "REFINEMENT (1)"))
+          (is (str/includes? rendered "PENDING (0)"))
+          (is (str/includes? rendered "CLAIMED / WIP (1)"))
+          (is (str/includes? rendered "[p3 @feature-x agent-a] Working card"))
+          (is (str/includes? rendered "Done: half. Next: rest."))
+          (is (str/includes? rendered "NEEDS REVIEW (0)"))
           (testing "rows are clipped to the board width"
             (is (every? #(<= (count %) 100) lines))))))))
 

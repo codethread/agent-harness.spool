@@ -1,4 +1,5 @@
 (ns skein.relations-test
+  "Tests for the skein.api.relations.alpha edge-relation catalog."
   (:require [clojure.test :refer [deftest is]]
             [skein.api.relations.alpha :as relations]))
 

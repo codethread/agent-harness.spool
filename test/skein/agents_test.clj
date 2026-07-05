@@ -1045,5 +1045,8 @@
   ;; Drift alarm for the agents-roster versioned spool-state: a key added to
   ;; new-state without a state-version bump would survive reload! as a stale map.
   (test-support/assert-state-shape
+   ;; white-box read of a private var: kondo flags cross-ns private access, but
+   ;; #'ns/private is legal and intentional here.
+   #_{:clj-kondo/ignore [:unresolved-var]}
    #'agents/new-state
    #{:rosters}))
