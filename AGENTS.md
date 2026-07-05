@@ -246,6 +246,17 @@ PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test
 PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 ```
 
+Quality gates (all blocking in CI via `.github/workflows/quality.yml` and held at zero findings — run before committing source changes):
+
+```sh
+make fmt-check       # cljfmt (style-guide defaults, .cljfmt.edn) + gofumpt; `make fmt` fixes
+make lint            # clj-kondo (custom project hooks in .clj-kondo/) + splint + golangci-lint
+make reflect-check   # compiles every src + spool namespace with *warn-on-reflection*, fails on any warning
+make deps-report     # non-blocking: antq outdated deps, govulncheck, clj-watson (needs an NVD API key)
+```
+
+The codebase-wide formatting commit is listed in `.git-blame-ignore-revs`; enable locally with `git config blame.ignoreRevsFile .git-blame-ignore-revs`. Splint intentionally disables `prefer-method-values` (parked 1.12 style migration) and `catch-throwable` (audited load-bearing daemon boundaries) — rationale in `.splint.edn`; do not silence new findings without the same written justification.
+
 The smoke demo builds temporary `strand` and `mill` CLIs, `mill init`s a disposable `--workspace` workspace, starts a disposable mill and weaver, exercises the strand dispatcher's batteries ops (`add`/`update`/`list`/`ready`/`show`/`weave`, payload-ref flags, `--dry-run`, `strand help`, unknown-op failure, and a streaming op) plus direct live `mill weaver repl --stdin`, exercises REPL helpers against a real weaver, then removes generated state, data, config, socket, metadata, and built CLI artifacts.
 
 ### Cooperative swarm validation gate
