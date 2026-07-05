@@ -88,7 +88,7 @@
       (or (pred->result value)
           (if (>= (System/currentTimeMillis) deadline)
             (on-timeout value)
-            (do (Thread/sleep poll-ms) (recur)))))))
+            (do (Thread/sleep (long poll-ms)) (recur)))))))
 
 (defn attr-get
   "Read attribute `k` from a normalized strand, tolerating keyword- or

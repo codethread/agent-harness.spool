@@ -39,7 +39,7 @@
       .toFile
       .getCanonicalFile))
 
-(defn- require-inside-root! [root file relative-path]
+(defn- require-inside-root! [^java.io.File root ^java.io.File file relative-path]
   (when-not (str/starts-with? (.getCanonicalPath file)
                               (str (.getCanonicalPath root) java.io.File/separator))
     (throw (ex-info "Workspace fixture files must stay inside the generated workspace root"
@@ -74,17 +74,17 @@
     (doseq [[relative-path content] files]
       (write-fixture! root relative-path content))))
 
-(defn- classpath-root-for-resource [resource-file resource-path]
-  (let [root (reduce (fn [f _] (.getParentFile f))
-                     resource-file
-                     (str/split resource-path #"/"))]
+(defn- classpath-root-for-resource ^java.io.File [resource-file resource-path]
+  (let [root ^java.io.File (reduce (fn [^java.io.File f _] (.getParentFile f))
+                                   resource-file
+                                   (str/split resource-path #"/"))]
     (when-not (and root (.isDirectory root))
       (throw (ex-info "Spool source classpath root is not a directory"
                       {:resource resource-path
                        :classpath-root (some-> root .getPath)})))
     root))
 
-(defn- deps-paths [deps-file]
+(defn- deps-paths [^java.io.File deps-file]
   (let [paths (:paths (edn/read-string (slurp deps-file)))]
     (when-not (and (vector? paths) (every? string? paths))
       (throw (ex-info "Spool checkout deps.edn must declare string :paths"
@@ -92,7 +92,7 @@
                        :paths paths})))
     paths))
 
-(defn- matching-deps-checkout-root [classpath-root]
+(defn- matching-deps-checkout-root [^java.io.File classpath-root]
   (some (fn [candidate]
           (let [deps-file (io/file candidate "deps.edn")]
             (when (.isFile deps-file)
@@ -101,7 +101,7 @@
                                 (.getCanonicalFile classpath-root))
                             paths)
                   candidate)))))
-        (take-while some? (iterate #(.getParentFile %) classpath-root))))
+        (take-while some? (iterate #(.getParentFile ^java.io.File %) classpath-root))))
 
 (defn spool-checkout-root
   "Resolve the checkout root of a spool from one of its classpath source files.
@@ -141,8 +141,8 @@
           .getParentFile .getParentFile .getParentFile .getParentFile
           .getCanonicalPath))))
 
-(defn- delete-tree! [root]
-  (doseq [file (reverse (file-seq root))]
+(defn- delete-tree! [^java.io.File root]
+  (doseq [^java.io.File file (reverse (file-seq root))]
     (when (and (.exists file) (not (.delete file)))
       (throw (ex-info "Failed to delete weaver world file"
                       {:root (.getPath root) :file (.getPath file)})))))
@@ -174,7 +174,7 @@
   (when-let [unknown (seq (remove known-option-keys (keys opts)))]
     (throw (ex-info "Unknown weaver world options" {:keys (vec unknown)})))
   (let [explicit-root (some-> (:root opts) io/file .getCanonicalFile)
-        root (or explicit-root (create-temp-root))
+        ^java.io.File root (or explicit-root (create-temp-root))
         delete? (if (contains? opts :delete?)
                   (boolean (:delete? opts))
                   (nil? explicit-root))

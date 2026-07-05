@@ -22,9 +22,9 @@
   (let [weavers (io/file root "weavers")]
     (if (.isDirectory weavers)
       (->> (or (seq (.listFiles weavers)) [])
-           (filter #(.isDirectory %))
+           (filter #(.isDirectory ^java.io.File %))
            (map #(io/file % "weaver.edn"))
-           (filter #(.isFile %)))
+           (filter #(.isFile ^java.io.File %)))
       [])))
 
 (defn- expand-home
@@ -40,14 +40,14 @@
 (defn- canonical-path [path]
   (.getPath (.getCanonicalFile (io/file (expand-home path)))))
 
-(defn- malformed-metadata [file metadata cause]
+(defn- malformed-metadata [^java.io.File file metadata cause]
   (ex-info "Malformed weaver metadata"
            (cond-> {:code :peer/malformed-metadata
                     :file (.getPath file)}
              metadata (assoc :metadata metadata))
            cause))
 
-(defn- read-peer-metadata [file]
+(defn- read-peer-metadata [^java.io.File file]
   (let [state-dir (.getPath (.getParentFile file))
         m (try
             (metadata/read-metadata {:state-dir state-dir})
@@ -74,7 +74,7 @@
   throws with `:code :peer/malformed-metadata` rather than being skipped."
   []
   (->> (weaver-metadata-files (state-root))
-       (sort-by #(.getPath %))
+       (sort-by #(.getPath ^java.io.File %))
        (map read-peer-metadata)
        (mapv row)))
 
@@ -181,7 +181,7 @@
 (defn- socket-roundtrip! [peer op envelope]
   (try
     (with-open [ch (doto (SocketChannel/open StandardProtocolFamily/UNIX)
-                     (.connect (UnixDomainSocketAddress/of (:socket-path peer))))
+                     (.connect (UnixDomainSocketAddress/of ^String (:socket-path peer))))
                 rdr (BufferedReader. (InputStreamReader. (Channels/newInputStream ch)))
                 wrt (BufferedWriter. (OutputStreamWriter. (Channels/newOutputStream ch)))]
       (.write wrt (json/write-str envelope))

@@ -44,7 +44,7 @@
   [runtime]
   (when-let [{:keys [queue running? worker]} (:event-system runtime)]
     (reset! running? false)
-    (.clear queue)
+    (.clear ^ArrayBlockingQueue queue)
     (when-let [worker-thread @worker]
       (.interrupt ^Thread worker-thread)
       (.join ^Thread worker-thread 1000)
@@ -117,7 +117,7 @@
     (stop-event-system! runtime)
     (reset! handler-registry {})
     (reset! recent-failures [])
-    (.clear queue)
+    (.clear ^ArrayBlockingQueue queue)
     (reset! running? false)
     nil))
 

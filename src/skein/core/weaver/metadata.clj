@@ -19,17 +19,17 @@
   [db-file]
   (.getPath (.getCanonicalFile (io/file db-file))))
 
-(defn metadata-file
+(defn ^java.io.File metadata-file
   "Return the EDN metadata file for `world`."
   [world]
   (io/file (:state-dir world) edn-file-name))
 
-(defn json-metadata-file
+(defn ^java.io.File json-metadata-file
   "Return the JSON metadata file for `world`."
   [world]
   (io/file (:state-dir world) json-file-name))
 
-(defn socket-file
+(defn ^java.io.File socket-file
   "Return the Unix-domain socket file for `world`."
   [world]
   (io/file (:state-dir world) socket-file-name))
@@ -101,7 +101,7 @@
 
 (defn- write-atomic!
   "Write pretty-printed EDN `data` to `file` via an atomic rename."
-  [file data]
+  [^java.io.File file data]
   (.mkdirs (.getParentFile file))
   (let [tmp (io/file (.getParentFile file) (str (.getName file) "." (new-nonce) ".tmp"))]
     (spit tmp (with-out-str (pprint/pprint data)))
@@ -113,7 +113,7 @@
 
 (defn- write-raw-atomic!
   "Write raw string `content` to `file` via an atomic rename."
-  [file content]
+  [^java.io.File file content]
   (.mkdirs (.getParentFile file))
   (let [tmp (io/file (.getParentFile file) (str (.getName file) "." (new-nonce) ".tmp"))]
     (spit tmp content)
@@ -150,7 +150,7 @@
 (defn pid-alive?
   "Return true when `pid` identifies a live OS process."
   [pid]
-  (boolean (some-> (ProcessHandle/of (long pid)) (.orElse nil) .isAlive)))
+  (boolean (some-> (ProcessHandle/of (long pid)) ^ProcessHandle (.orElse nil) .isAlive)))
 
 (defn- valid-pid? [pid]
   (and (integer? pid)

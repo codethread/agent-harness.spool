@@ -68,7 +68,7 @@
   ([config-dir state-dir]
    (reset! active-config-dir no-connection)
    (reset! active-state-dir no-connection)
-   (when (and config-dir (.isFile (java.io.File. config-dir)))
+   (when (and config-dir (.isFile (java.io.File. ^String config-dir)))
      (throw (ex-info "connect! expects a daemon config directory, not a database file" {:config-dir config-dir})))
    (let [world (if state-dir
                  (daemon-config/world config-dir state-dir (str state-dir "/data"))
@@ -361,7 +361,7 @@
 (defn- attach-stdin! [host port]
   (let [source (slurp *in*)
         [conn session] (attach-session host port)]
-    (with-open [_ conn]
+    (with-open [_ ^java.io.Closeable conn]
       (let [responses (eval-remote-responses! session {:ns "skein.repl"
                                                        :code (str "(skein.repl/eval-source-forms! " (pr-str source) ")")})]
         (doseq [{:keys [out value]} (read-string (last (keep :value responses)))]

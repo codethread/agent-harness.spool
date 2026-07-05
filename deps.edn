@@ -31,7 +31,7 @@
                    :main-opts ["-m" "clj-kondo.main" "--lint" "src" "spools/src" "test"]}
   :lint/splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
                 :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "src" "spools/src" "test"]}
-  :reflect-check {:extra-paths ["scripts"]
+  :reflect-check {:extra-paths ["scripts" "spools/shuttle/src" "spools/agents/src" "spools/chime/src" "spools/kanban/src"]
                   :jvm-opts ["--enable-native-access=ALL-UNNAMED" "-Dclojure.compiler.direct-linking=true"]
                   :main-opts ["-m" "quality.reflect-check"]}
   :deps/antq {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}

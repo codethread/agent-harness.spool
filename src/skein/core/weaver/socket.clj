@@ -306,7 +306,7 @@
   (let [file (io/file socket-path)
         _ (.mkdirs (.getParentFile file))
         _ (.delete file)
-        address (UnixDomainSocketAddress/of socket-path)
+        address (UnixDomainSocketAddress/of ^String socket-path)
         server (ServerSocketChannel/open StandardProtocolFamily/UNIX)
         running? (atom true)]
     (try
@@ -355,5 +355,5 @@
   [socket-runtime]
   (when socket-runtime
     (reset! (:running? socket-runtime) false)
-    (.close (:server socket-runtime))
+    (.close ^ServerSocketChannel (:server socket-runtime))
     (.delete (io/file (:socket-path socket-runtime)))))

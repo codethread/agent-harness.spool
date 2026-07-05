@@ -11,7 +11,7 @@ Generated on 2026-07-05 from the `quality-gates` worktree. Commands were run aft
 | clj-kondo 2025.06.05 | `clojure -M:lint/clj-kondo` | fails | 18 errors, 105 warnings |
 | golangci-lint v2.1.6 | `make lint-go` | fails | 31 issues |
 | splint 1.21.0 | `clojure -M:lint/splint` | fails | 646 warnings |
-| reflection gate | `clojure -M:reflect-check` | fails | 62 reflection warnings |
+| reflection gate | `clojure -M:reflect-check` | blocking, clean | 0 reflection warnings |
 | antq 2.11.1276 | `clojure -M:deps/antq` | report-only | 35 outdated entries |
 | govulncheck v1.1.4 | `cd cli && go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...` | clean | 0 vulnerabilities |
 | clj-watson v6.1.0 | `clojure -M:security/clj-watson` | report-only | NVD update hit HTTP 429 without API key; non-blocking |
@@ -59,14 +59,16 @@ Top categories:
 
 ### Reflection
 
-Totals: 62 reflection warnings. Repeated compile/reload warnings are preserved rather than deduplicated so the gate stays compiler-faithful.
+Totals: 0 reflection warnings. Every warning is fixed with a type hint at the definition site, so the gate is a blocking CI check that fails on any reflected interop. The gate compiles all of `src` (every `skein.*` namespace) plus every spool source root — `spools/src`, `spools/shuttle/src`, `spools/agents/src`, `spools/chime/src`, and `spools/kanban/src` — so no shipped namespace escapes it. Repeated compile/reload warnings are preserved rather than deduplicated so the gate stays compiler-faithful.
 
-Known clusters include:
+The clusters hinted to reach zero:
 
-- `skein.core.client`: `.close` on untyped socket/connection values.
-- `skein.core.db`: `.nextInt` on untyped `SecureRandom`.
-- `skein.core.weaver.metadata`, `runtime`, and `socket`: untyped file/socket/channel interop.
-- `skein.spools.carder` and `skein.spools.roster`: untyped date/thread interop.
+- `skein.core.client` / `skein.repl`: `.close` on nREPL transports (`^java.io.Closeable`).
+- `skein.core.db`: `.nextInt` on `^SecureRandom`.
+- `skein.core.weaver.metadata`, `runtime`, and `socket`: file/socket/channel interop hinted at the file-returning helpers, queue, and socket-channel definition sites.
+- `skein.api.weaver.alpha` and `skein.api.peers.alpha`: spool checkout `File`, `ProcessBuilder`/`Process`, and event-queue interop.
+- `skein.test.alpha`: workspace-fixture `File` interop.
+- `skein.spools.carder`/`util`/`agents`/`chime`/`shuttle`: date, thread, `File`, executor, and `ProcessHandle` interop.
 
 ### Dependency reports
 

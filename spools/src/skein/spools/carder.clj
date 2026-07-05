@@ -74,7 +74,7 @@
        (remove #(excluded? opts %))
        vec))
 
-(defn- parse-db-time [s]
+(defn- ^LocalDateTime parse-db-time [^String s]
   (try
     (LocalDateTime/parse (.replace s " " "T"))
     (catch Exception e

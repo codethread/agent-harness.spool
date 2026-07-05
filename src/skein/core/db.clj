@@ -19,7 +19,7 @@
 (def ^:private id-alphabet "abcdefghijklmnopqrstuvwxyz0123456789")
 (def ^:private id-length 5)
 (def ^:private max-id-attempts 32)
-(def ^:private secure-random (SecureRandom.))
+(def ^:private ^SecureRandom secure-random (SecureRandom.))
 
 (defn- generate-id
   "Return a random short strand id candidate."

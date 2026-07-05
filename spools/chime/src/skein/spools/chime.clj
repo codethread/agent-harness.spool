@@ -112,7 +112,7 @@
              (try
                (let [process (.start (ProcessBuilder. ^java.util.List argv))]
                  (with-open [writer (OutputStreamWriter. (.getOutputStream process) "UTF-8")]
-                   (.write writer (or (:body notification) "")))
+                   (.write writer (str (or (:body notification) ""))))
                  (let [exit (.waitFor process)]
                    (swap! result assoc :exit-code exit)
                    (when-not (zero? exit)

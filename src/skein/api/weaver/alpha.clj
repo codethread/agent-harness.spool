@@ -65,7 +65,7 @@
 (defn- config-dir [runtime]
   (get-in runtime [:metadata :config-dir]))
 
-(defn- spools-file [runtime name]
+(defn- ^java.io.File spools-file [runtime name]
   (io/file (config-dir runtime) name))
 
 (defn- expand-user-home [path]
@@ -191,7 +191,7 @@
          (catch Throwable t
            (throw (ex-info (str name " is malformed or unreadable") source t))))))))
 
-(defn- legacy-config-present? [file]
+(defn- legacy-config-present? [^java.io.File file]
   (or (.exists file)
       (java.nio.file.Files/isSymbolicLink (.toPath file))))
 
@@ -252,14 +252,14 @@
                 resolved))
             paths))))
 
-(defn- non-empty-directory? [file]
+(defn- non-empty-directory? [^java.io.File file]
   (and (.isDirectory file)
        (boolean (seq (.list file)))))
 
 (defn- delete-tree!
   "Delete a tree without following symlinks: links are removed as links, so a
   checkout containing a symlink can never delete content outside `file`."
-  [file]
+  [^java.io.File file]
   (let [path (.toPath file)]
     (when (Files/exists path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
       (Files/walkFileTree
@@ -275,7 +275,7 @@
 
 (defn- run-git [dir & args]
   (let [process (try
-                  (-> (ProcessBuilder. (into-array String (cons "git" args)))
+                  (-> (ProcessBuilder. ^"[Ljava.lang.String;" (into-array String (cons "git" args)))
                       (.directory dir)
                       (.redirectErrorStream false)
                       (.start))
@@ -284,9 +284,9 @@
                      :stderr (ex-message e)}))]
     (if (map? process)
       process
-      (let [stderr (future (slurp (.getErrorStream process)))
-            stdout (future (slurp (.getInputStream process)))
-            exit (.waitFor process)]
+      (let [stderr (future (slurp (.getErrorStream ^Process process)))
+            stdout (future (slurp (.getInputStream ^Process process)))
+            exit (.waitFor ^Process process)]
         {:exit exit
          :stdout @stdout
          :stderr @stderr}))))
@@ -307,7 +307,7 @@
       (throw (ex-info "git command failed" (fetch-failure result))))
     result))
 
-(defn- cache-root-file [entry]
+(defn- ^java.io.File cache-root-file [entry]
   (io/file (cache-base) "skein" "spools" (:git/sha entry)))
 
 (defn- tag-refs [tag]
@@ -336,7 +336,7 @@
                          :expected (:git/sha entry)
                          :actual actual}))))))
 
-(defn- git-cache-miss-failure [entry cache-root result]
+(defn- git-cache-miss-failure [entry ^java.io.File cache-root result]
   (assoc (fetch-failure result)
          :remote (:git/url entry)
          :cache-path (.getPath cache-root)))
@@ -366,7 +366,7 @@
   (checked-git tmp "checkout" "--detach" (:git/sha entry))
   (delete-tree! (io/file tmp ".git")))
 
-(defn- move-git-spool-to-cache! [tmp cache-root]
+(defn- move-git-spool-to-cache! [^java.io.File tmp ^java.io.File cache-root]
   (try
     (Files/move (.toPath tmp) (.toPath cache-root)
                 (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE]))
@@ -404,7 +404,7 @@
 
 (defn- add-root-paths-to-spool-loader! [runtime root]
   (let [loader (:spool-classloader runtime)]
-    (doseq [path (root-paths root)]
+    (doseq [^java.io.File path (root-paths root)]
       (when-not (.isDirectory path)
         (throw (ex-info "Local root classpath entry must be a directory" {:root root :path (.getPath path)})))
       (.addURL ^clojure.lang.DynamicClassLoader loader (.toURL (.toURI path))))))
@@ -706,7 +706,7 @@
                    roots)]
     {:file file
      :relative-path relative
-     :searched-roots (mapv #(.getCanonicalPath %) roots)}))
+     :searched-roots (mapv #(.getCanonicalPath ^java.io.File %) roots)}))
 
 (defn- load-synced-namespace! [runtime ns-sym]
   (if (find-ns ns-sym)
@@ -1906,7 +1906,7 @@
       (throw (ex-info "Event requires key" {:key k :event event}))))
   (when-not (keyword? (:event/type event))
     (throw (ex-info "Event :event/type must be a keyword" {:event/type (:event/type event)})))
-  (when-not (.offer (:queue (event-system runtime)) event)
+  (when-not (.offer ^java.util.concurrent.BlockingQueue (:queue (event-system runtime)) event)
     (throw (ex-info "Event queue is full" {:event/type (:event/type event) :event/id (:event/id event)})))
   {:enqueued true :event/id (:event/id event) :event/type (:event/type event)})
 

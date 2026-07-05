@@ -141,7 +141,7 @@
   [port]
   (str "(do (require '[skein.core.weaver.runtime]) (let [rt " (runtime-form port) "] (future (Thread/sleep 50) (skein.core.weaver.runtime/stop! rt)) {:stopped true}))"))
 
-(defn- connect
+(defn- ^java.io.Closeable connect
   "Open an nREPL connection to the endpoint in validated weaver metadata."
   [metadata timeout-ms]
   (let [{:keys [host port]} (:endpoint metadata)]

@@ -27,7 +27,7 @@
   []
   (let [config-dir (or (get-in (rt) [:metadata :config-dir])
                        (fail! "agents requires an active workspace" {}))
-        config-file (java.io.File. config-dir)]
+        config-file (java.io.File. ^String config-dir)]
     (if (= ".skein" (.getName config-file))
       (-> config-file .getParentFile .getCanonicalPath)
       (.getCanonicalPath config-file))))
@@ -359,7 +359,7 @@
     (let [run (or (api/show (rt) run-id) (fail! "Run not found" {:id run-id}))
           n (some->> (get flags "--tail") (parse-int! "--tail"))
           clip (fn [text] (let [lines (str/split-lines text)] (str/join "\n" (if n (take-last n lines) lines))))
-          rf (fn [path] (let [f (java.io.File. path)] (when-not (.exists f) (fail! "Run log file missing" {:id run-id :path path})) (clip (slurp f))))]
+          rf (fn [^String path] (let [f (java.io.File. path)] (when-not (.exists f) (fail! "Run log file missing" {:id run-id :path path})) (clip (slurp f))))]
       (if (= "interactive" (sattr run "mode"))
         ;; phase running alone keys the fresh capture: a closed-but-unreaped
         ;; run (mid-teardown) has no persisted transcript yet, but its session

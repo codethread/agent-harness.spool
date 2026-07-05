@@ -58,7 +58,7 @@
 (defn- rt []
   (or *runtime* (current/runtime)))
 
-(defn- daemon-thread-factory [prefix]
+(defn- ^ThreadFactory daemon-thread-factory [prefix]
   (let [counter (atom 0)]
     (reify ThreadFactory
       (newThread [_ runnable]
@@ -154,8 +154,8 @@
 (defn- in-flight [] (:in-flight (state)))
 (defn- preamble-extension [] (:preamble-extension (state)))
 (defn- preamble-conflicts-atom [] (:preamble-conflicts (state)))
-(defn- recovery-scheduler [] (require-state-entry :recovery-scheduler))
-(defn- worker-executor [] (require-state-entry :worker-executor))
+(defn- ^ScheduledThreadPoolExecutor recovery-scheduler [] (require-state-entry :recovery-scheduler))
+(defn- ^java.util.concurrent.ExecutorService worker-executor [] (require-state-entry :worker-executor))
 
 (defn in-flight-run-ids
   "Return the set of run ids the shuttle is currently tracking in-flight
@@ -748,7 +748,7 @@
                            (when-let [run (first (api/ready runtime [:and pending-query [:= :id id]] {}))]
                              (when (claim! id)
                                (launch-run! runtime run)))))
-             recovery-harness-retry-ms
+             (long recovery-harness-retry-ms)
              TimeUnit/MILLISECONDS))
 
 (defn- defer-recovered-missing-harness!
@@ -790,7 +790,7 @@
 (defn- sh-quote [s]
   (str "'" (str/replace (str s) "'" "'\\''") "'"))
 
-(defn- launcher-script-file [id]
+(defn- ^java.io.File launcher-script-file [id]
   (io/file (log-dir) (str id ".launch.sh")))
 
 (defn- write-launcher-script!
@@ -1256,9 +1256,9 @@
   PIDs are recycled, so the handle is returned only when the OS start instant
   matches the one recorded at launch; an unverified pid must never be
   signalled — it could belong to an unrelated process."
-  [run]
+  ^ProcessHandle [run]
   (when-let [pid (sattr run "pid")]
-    (when-let [handle (.orElse (ProcessHandle/of (long pid)) nil)]
+    (when-let [handle ^ProcessHandle (.orElse (ProcessHandle/of (long pid)) nil)]
       (when (.isAlive handle)
         (let [recorded (sattr run "pid-started-at")
               actual (some-> (.info handle) (.startInstant) (.orElse nil) str)]

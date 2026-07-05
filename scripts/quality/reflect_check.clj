@@ -21,8 +21,12 @@
            (map #(clj-file->ns root %))))))
 
 (defn -main [& _]
-  (let [roots {"src" "skein/core"
-               "spools/src" "skein/spools"}
+  (let [roots {"src" "skein"
+               "spools/src" "skein/spools"
+               "spools/shuttle/src" "skein/spools"
+               "spools/agents/src" "skein/spools"
+               "spools/chime/src" "skein/spools"
+               "spools/kanban/src" "skein/spools"}
         namespaces (sort (mapcat (fn [[root subdir]]
                                    (namespaces-under root subdir))
                                  roots))
