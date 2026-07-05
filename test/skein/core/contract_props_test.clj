@@ -112,8 +112,16 @@
 (defspec batch-spec-validity-matches-db-acceptance 40
   (prop/for-all [batch coherent-batch-gen]
                 (let [spec-valid? (s/valid? ::specs/batch-input batch)
+                      ;; Only require-valid! rejections (ex-data carries :explain)
+                      ;; count as the db refusing the batch; anything else - id
+                      ;; collisions, connection failures - rethrows so an
+                      ;; unexpected error fails the property loudly instead of
+                      ;; shrinking into a false spec/db mismatch.
                       db-accepts? (try
                                     (db/add-strand-batch! *ds* batch)
                                     true
-                                    (catch clojure.lang.ExceptionInfo _ false))]
+                                    (catch clojure.lang.ExceptionInfo e
+                                      (if (contains? (ex-data e) :explain)
+                                        false
+                                        (throw e))))]
                   (= spec-valid? db-accepts?))))
