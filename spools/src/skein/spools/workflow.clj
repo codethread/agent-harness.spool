@@ -12,7 +12,7 @@
             [skein.api.current.alpha :as current]
             [skein.api.graph.alpha :as graph]
             [skein.api.weaver.alpha :as api]
-            [skein.spools.util :refer [fail! require-valid! attr-get attr-key->str]]))
+            [skein.spools.util :refer [fail! require-valid! attr-get attr-key->str poll-until-deadline!]]))
 
 (defn- non-blank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -1279,8 +1279,8 @@
   step, at a gate whose waiter has no registered executor, at an
   executor-owned gate whose stall predicate reports detail, or timed out.
 
-  opts: `:timeout-secs` (default 1800). Polls every 250ms, matching the
-  shuttle await surface.
+  opts: `:timeout-secs` (default 1800) and `:poll-ms` (default 250, matching
+  the shuttle await surface).
 
   The three-arg `(runtime run-id opts)` arity threads the target runtime
   explicitly, agreeing with `skein.spools.roster/await-quiet!`; the shorter
@@ -1290,14 +1290,13 @@
    (await! run-id {}))
   ([run-id opts]
    (await! (current/runtime) run-id opts))
-  ([runtime run-id {:keys [timeout-secs] :or {timeout-secs 1800}}]
-   (let [deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))]
-     (loop []
-       (let [state (attention runtime run-id)]
-         (cond
-           (not= :waiting (:reason state)) state
-           (>= (System/currentTimeMillis) deadline) (assoc state :reason :timeout)
-           :else (do (Thread/sleep 250) (recur))))))))
+  ([runtime run-id {:keys [timeout-secs poll-ms] :or {timeout-secs 1800 poll-ms 250}}]
+   (poll-until-deadline!
+    {:deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))
+     :poll-ms poll-ms
+     :check #(attention runtime run-id)
+     :pred->result (fn [state] (when (not= :waiting (:reason state)) state))
+     :on-timeout (fn [state] (assoc state :reason :timeout))})))
 
 (defn- run-result
   "Return the run-mutation result shape: the run's ready step views plus its

@@ -4,12 +4,13 @@
   Reference spools all need the same tiny fail-loud and validation seams: throw
   an `ex-info` with a contextual data map (TEN-003), reject unknown option keys,
   validate a boundary shape against a `clojure.spec` and attach its explain data,
-  coerce an attribute key to its string wire form, and tolerantly read an
+  coerce an attribute key to its string wire form, tolerantly read an
   attribute back regardless of whether its key arrived keyword- or
-  string-keyed. Those were copy-pasted - and had begun to drift - across most
-  shipped spools, and now share this one source instead of re-deriving them per
-  file. `skein.spools.workflow` is a deliberate exception: it keeps its own
-  branded `reject-unknown-keys!` rather than adopting this one."
+  string-keyed, and poll a check fn until a deadline. Those were copy-pasted -
+  and had begun to drift - across most shipped spools, and now share this one
+  source instead of re-deriving them per file. `skein.spools.workflow` is a
+  deliberate exception: it keeps its own branded `reject-unknown-keys!` rather
+  than adopting this one."
   (:require [clojure.spec.alpha :as s]))
 
 (defn fail!
@@ -53,6 +54,28 @@
   not a tolerant reader."
   [k]
   (if (keyword? k) (subs (str k) 1) (str k)))
+
+(defn poll-until-deadline!
+  "The shared spool-tier long-poll skeleton behind `skein.spools.workflow/await!`
+  and `skein.spools.roster/await-quiet!`: call `check` (a zero-arg fn) once,
+  test its value with `pred->result`, and repeat every `poll-ms` until either
+  `pred->result` returns a non-nil result or `deadline` (a `System/currentTimeMillis`
+  epoch millis value, as already computed by each caller from its own
+  `:timeout-secs`/`:timeout-ms` option) has passed.
+
+  `pred->result` receives each `check` value and returns a non-nil result to
+  stop and return it, or nil to keep polling. Once `deadline` passes with
+  `pred->result` still nil, `on-timeout` receives the last `check` value and
+  its return value becomes the result. `deadline` and `poll-ms` are both
+  required — this helper does not supply timeout/cadence defaults; those stay
+  owned by each caller so existing behavior is unchanged."
+  [{:keys [deadline poll-ms check pred->result on-timeout]}]
+  (loop []
+    (let [value (check)]
+      (or (pred->result value)
+          (if (>= (System/currentTimeMillis) deadline)
+            (on-timeout value)
+            (do (Thread/sleep poll-ms) (recur)))))))
 
 (defn attr-get
   "Read attribute `k` from a normalized strand, tolerating keyword- or

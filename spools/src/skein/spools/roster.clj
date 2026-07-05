@@ -29,7 +29,7 @@
             [skein.api.events.alpha :as events]
             [skein.api.weaver.alpha :as api]
             [skein.spools.format :as fmt]
-            [skein.spools.util :refer [fail! reject-unknown-keys! attr-key->str attr-get]])
+            [skein.spools.util :refer [fail! reject-unknown-keys! attr-key->str attr-get poll-until-deadline!]])
   (:import [java.time Duration Instant]))
 
 (def default-stale-after-ms
@@ -232,6 +232,7 @@
 (s/def ::result non-blank-string?)
 (s/def ::stale-after-ms pos-int?)
 (s/def ::timeout-ms (s/and integer? (complement neg?)))
+(s/def ::poll-ms (s/and integer? (complement neg?)))
 
 (s/def ::track-attrs
   (s/keys :opt-un [::id ::feature ::owner ::title ::body ::branch ::worktree
@@ -241,7 +242,7 @@
 (s/def ::roster-opts
   (s/keys :opt-un [::feature ::owner ::branch ::worktree ::engine ::stale-after-ms]))
 (s/def ::await-quiet-opts
-  (s/keys :opt-un [::feature ::branch ::worktree ::timeout-ms ::stale-after-ms]))
+  (s/keys :opt-un [::feature ::branch ::worktree ::timeout-ms ::stale-after-ms ::poll-ms]))
 
 (defn finish!
   "Close an active roster entry with a final `roster/status`.
@@ -349,11 +350,11 @@
   (* 30 60 1000))
 
 (def ^:private await-poll-ms
-  "Poll interval between `roster` re-checks while awaiting quiet."
+  "Default poll interval between `roster` re-checks while awaiting quiet."
   50)
 
 (def ^:private await-quiet-opts-keys
-  #{:feature :branch :worktree :timeout-ms :stale-after-ms})
+  #{:feature :branch :worktree :timeout-ms :stale-after-ms :poll-ms})
 
 (defn- timeout-ms-opt
   [opts]
@@ -362,32 +363,42 @@
       (fail! "await-quiet! :timeout-ms must be a non-negative integer" {:timeout-ms timeout}))
     timeout))
 
+(defn- poll-ms-opt
+  [opts]
+  (let [poll-ms (get opts :poll-ms await-poll-ms)]
+    (when-not (s/valid? ::poll-ms poll-ms)
+      (fail! "await-quiet! :poll-ms must be a non-negative integer" {:poll-ms poll-ms}))
+    poll-ms))
+
 (defn await-quiet!
   "Block until the selected scope has no active non-stale entries.
 
   `opts` accepts `:feature`, `:branch`, `:worktree`, `:timeout-ms` (default
-  thirty minutes), and `:stale-after-ms` (default fifteen minutes). Polls
-  `roster` every fifty milliseconds. Returns
-  `{:reason :quiet|:stale|:timeout :entries [...]}`: `:stale` short-circuits
-  as soon as any selected entry exceeds the stale threshold (checked before
-  waiting further), `:quiet` when the scope has no active entries, and
-  `:timeout` when neither happens before the deadline. `:entries` is whatever
-  `roster` returned for the scope at the decision point. Fails loudly for a
-  malformed opts map, unknown keys, or a negative `:timeout-ms`."
+  thirty minutes), `:stale-after-ms` (default fifteen minutes), and `:poll-ms`
+  (default fifty). Returns `{:reason :quiet|:stale|:timeout :entries [...]}`:
+  `:stale` short-circuits as soon as any selected entry exceeds the stale
+  threshold (checked before waiting further), `:quiet` when the scope has no
+  active entries, and `:timeout` when neither happens before the deadline.
+  `:entries` is whatever `roster` returned for the scope at the decision
+  point. Fails loudly for a malformed opts map, unknown keys, or a negative
+  `:timeout-ms`/`:poll-ms`."
   [runtime opts]
   (when-not (map? opts)
     (fail! "await-quiet! opts must be a map" {:opts opts}))
   (reject-unknown-keys! "await-quiet!" await-quiet-opts-keys opts)
   (let [timeout-ms (timeout-ms-opt opts)
+        poll-ms (poll-ms-opt opts)
         scope (select-keys opts [:feature :branch :worktree :stale-after-ms])
         deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (let [entries (roster runtime scope)]
-        (cond
-          (some :stale? entries) {:reason :stale :entries entries}
-          (empty? entries) {:reason :quiet :entries entries}
-          (>= (System/currentTimeMillis) deadline) {:reason :timeout :entries entries}
-          :else (do (Thread/sleep await-poll-ms) (recur)))))))
+    (poll-until-deadline!
+     {:deadline deadline
+      :poll-ms poll-ms
+      :check #(roster runtime scope)
+      :pred->result (fn [entries]
+                       (cond
+                         (some :stale? entries) {:reason :stale :entries entries}
+                         (empty? entries) {:reason :quiet :entries entries}))
+      :on-timeout (fn [entries] {:reason :timeout :entries entries})})))
 
 ;; ---------------------------------------------------------------------------
 ;; workflow/devflow graph integration
