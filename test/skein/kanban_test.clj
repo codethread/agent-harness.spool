@@ -71,7 +71,7 @@
               alias (op! rt "help")
               verbs (mapv :name (get-in detail [:arg-spec :subcommands]))]
           (is (= detail alias))
-          (is (= ["about" "add" "board" "card" "claim" "finish" "next" "note" "prime" "promote"] verbs))
+          (is (= ["about" "add" "board" "card" "claim" "finish" "next" "note" "prime" "priority" "promote"] verbs))
           (is (some #(= "about" (:name %)) (get-in alias [:arg-spec :subcommands])))))
       (testing "missing and unknown verbs fail during parser routing with available names"
         (let [missing (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing subcommand"
@@ -80,7 +80,7 @@
                                             (op! rt "bogus")))]
           (is (= :missing-subcommand (:reason (ex-data missing))))
           (is (= :unknown-subcommand (:reason (ex-data unknown))))
-          (is (= ["about" "add" "board" "card" "claim" "finish" "next" "note" "prime" "promote"]
+          (is (= ["about" "add" "board" "card" "claim" "finish" "next" "note" "prime" "priority" "promote"]
                  (:available-subcommands (ex-data missing))))
           (is (= (:available-subcommands (ex-data missing))
                  (:available-subcommands (ex-data unknown)))))))))
@@ -149,6 +149,42 @@
                                 (op! rt "add" "Bad lane" "--status" "someday")))
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"feature or epic"
                                 (op! rt "add" "Bad type" "--type" "story"))))))))
+
+(deftest kanban-priority-orders-lanes-and-next
+  (with-runtime
+    (fn [rt config-dir]
+      (install-kanban! rt config-dir)
+      (let [old-default (get-in (op! rt "add" "Default work") [:card :id])
+            someday (get-in (op! rt "add" "Someday idea" "--priority" "p4") [:card :id])
+            blocker (get-in (op! rt "add" "Breaking change blocker" "--priority" "p1") [:card :id])]
+        (testing "add stamps p3 unless told otherwise and validates the flag"
+          (is (= "p3" (get-in (api/show rt old-default) [:attributes :kanban/priority])))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"p1, p2, p3, p4"
+                                (op! rt "add" "Bad priority" "--priority" "urgent"))))
+        (testing "next serves the highest priority first despite creation order"
+          (is (= blocker (get-in (op! rt "next") [:next :id]))))
+        (testing "board lanes sort p1 first and expose :priority on compact cards"
+          (let [pending (:pending (op! rt "board"))]
+            (is (= [blocker old-default someday] (mapv :id pending)))
+            (is (= ["p1" "p3" "p4"] (mapv :priority pending)))))
+        (testing "cards that predate priorities read as p3"
+          (let [legacy (api/add rt {:title "Legacy card"
+                                    :attributes {:kanban/card "true"
+                                                 :kanban/status "pending"
+                                                 :kanban/type "feature"}})
+                on-board (some #(when (= (:id legacy) (:id %)) %)
+                               (:pending (op! rt "board")))]
+            (is (= "p3" (:priority on-board)))))
+        (testing "priority reprioritises an active card and fails loudly otherwise"
+          (is (= "p2" (get-in (op! rt "priority" someday "p2")
+                              [:card :attributes :kanban/priority])))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"p1, p2, p3, p4"
+                                (op! rt "priority" someday "p9")))
+          (op! rt "finish" blocker)
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be active"
+                                (op! rt "priority" blocker "p1"))))
+        (testing "about documents the priority ladder"
+          (is (= #{:p1 :p2 :p3 :p4} (set (keys (:priorities (op! rt "about")))))))))))
 
 (deftest kanban-epics-group-features
   (with-runtime
@@ -292,7 +328,7 @@
           (is (clojure.string/includes? rendered "REFINEMENT (1)"))
           (is (clojure.string/includes? rendered "PENDING (0)"))
           (is (clojure.string/includes? rendered "CLAIMED / WIP (1)"))
-          (is (clojure.string/includes? rendered "[@feature-x agent-a] Working card"))
+          (is (clojure.string/includes? rendered "[p3 @feature-x agent-a] Working card"))
           (is (clojure.string/includes? rendered "Done: half. Next: rest."))
           (is (clojure.string/includes? rendered "NEEDS REVIEW (0)"))
           (testing "rows are clipped to the board width"
@@ -306,7 +342,8 @@
             result (api/weave! rt :kanban-batch
                                {:items [{:key "design"
                                          :title "Design batch"
-                                         :body "Design body"}
+                                         :body "Design body"
+                                         :priority "p2"}
                                         {:key "docs"
                                          :title "Write docs"
                                          :deps ["design" (:id existing)]}]})
@@ -318,8 +355,10 @@
                                (:edges (api/subgraph rt [docs-id] {:type "depends-on"}))))]
         (is (= "Design batch" (:title design)))
         (is (= "Design body" (get-in design [:attributes :body])))
+        (is (= "p2" (get-in design [:attributes :kanban/priority])))
         (is (= "true" (get-in docs [:attributes :kanban/card])))
         (is (= "pending" (get-in docs [:attributes :kanban/status])))
+        (is (= "p3" (get-in docs [:attributes :kanban/priority])))
         (is (contains? edge-set [docs-id design-id "depends-on"]))
         (is (contains? edge-set [docs-id (:id existing) "depends-on"]))))))
 
@@ -330,6 +369,9 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Pattern input failed spec validation"
                             (api/weave! rt :kanban-batch
                                         {:items [{:key "x" :title "X" :surprise true}]})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Pattern input failed spec validation"
+                            (api/weave! rt :kanban-batch
+                                        {:items [{:key "x" :title "X" :priority "urgent"}]})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"item keys must be unique"
                             (api/weave! rt :kanban-batch
                                         {:items [{:key "x" :title "X"}

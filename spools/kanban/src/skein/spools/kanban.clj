@@ -5,7 +5,9 @@
   `feature` card (occasionally grouped under an `epic`), and every agent
   working directly with a user works under a claimed card. All card state
   lives under `kanban/*` attributes; `kanban/status` is the board lane
-  (`refinement` -> `pending` -> `claimed` -> explicit closed outcome).
+  (`refinement` -> `pending` -> `claimed` -> explicit closed outcome) and
+  `kanban/priority` (p1 immediate blocker .. p4 someday, default p3) orders
+  lanes and `kanban next`.
 
   Cards are work roots: claiming stamps `owner`/`branch`/`worktree`, and
   plans, devflow runs, and task DAGs hang beneath the card with `parent-of`
@@ -23,11 +25,14 @@
 (def ^:private card-attr :kanban/card)
 (def ^:private status-attr :kanban/status)
 (def ^:private type-attr :kanban/type)
+(def ^:private priority-attr :kanban/priority)
 (def ^:private note-attr :kanban/note)
 (def ^:private handover-attr :kanban/handover)
 
 (def ^:private addable-statuses #{"pending" "refinement"})
 (def ^:private card-types #{"feature" "epic"})
+(def ^:private card-priorities #{"p1" "p2" "p3" "p4"})
+(def ^:private default-priority "p3")
 
 (defn- non-blank-string?
   "Return true when v is a non-blank string."
@@ -62,11 +67,25 @@
   [strand]
   (or (attr-value strand type-attr) "feature"))
 
+(defn- card-priority
+  "Return a card's priority, defaulting to p3 for cards that predate priorities."
+  [strand]
+  (or (attr-value strand priority-attr) default-priority))
+
+(defn- require-priority!
+  "Return priority when it is one of p1-p4, failing loudly otherwise."
+  [priority]
+  (when-not (contains? card-priorities priority)
+    (throw (ex-info "kanban priority must be one of p1, p2, p3, p4"
+                    {:priority priority :allowed (sort card-priorities)})))
+  priority)
+
 (defn- card-attributes
   "Return the attributes for a newly added kanban card strand."
   [flags]
   (let [status (or (get flags "--status") "pending")
-        type (or (get flags "--type") "feature")]
+        type (or (get flags "--type") "feature")
+        priority (require-priority! (or (get flags "--priority") default-priority))]
     (when-not (contains? addable-statuses status)
       (throw (ex-info "kanban add --status must be pending or refinement"
                       {:status status :allowed (sort addable-statuses)})))
@@ -76,6 +95,7 @@
     (cond-> {card-attr "true"
              status-attr status
              type-attr type
+             priority-attr priority
              :kind type}
       (get flags "--body") (assoc :body (get flags "--body"))
       (get flags "--source") (assoc :kanban/source (get flags "--source")))))
@@ -88,6 +108,7 @@
            :state (:state strand)
            :status (attr-value strand status-attr)
            :type (card-type strand)
+           :priority (card-priority strand)
            :created_at (:created_at strand)}
     (attr-value strand :owner) (assoc :owner (attr-value strand :owner))
     (attr-value strand :branch) (assoc :branch (attr-value strand :branch))
@@ -137,7 +158,8 @@
 (s/def ::title ::non-blank-string)
 (s/def ::body ::non-blank-string)
 (s/def ::deps (s/coll-of ::non-blank-string :kind vector?))
-(def ^:private batch-item-keys #{:key :title :body :deps})
+(s/def ::priority card-priorities)
+(def ^:private batch-item-keys #{:key :title :body :deps :priority})
 (def ^:private batch-input-keys #{:items})
 
 (defn- known-keys?
@@ -149,7 +171,7 @@
   (s/and map?
          #(known-keys? batch-item-keys %)
          (s/keys :req-un [::key ::title]
-                 :opt-un [::body ::deps])))
+                 :opt-un [::body ::deps ::priority])))
 (s/def ::items (s/coll-of ::batch-item :kind vector? :min-count 1))
 (s/def ::kanban-batch-input
   (s/and map?
@@ -170,6 +192,7 @@
   "Create pending feature cards with bodies and depends-on edges.
 
   Input shape: {:items [{:key \"slug\" :title \"Title\" :body \"optional\"
+  :priority \"p1|p2|p3|p4 (optional, default p3)\"
   :deps [\"sibling-key-or-existing-strand-id\"]}]}. `deps` values matching sibling
   keys become batch-local edges; all other values are treated as durable strand
   ids and fail loudly if absent."
@@ -179,11 +202,12 @@
     (when-let [duplicate-key (duplicate-item keys)]
       (throw (ex-info "kanban-batch item keys must be unique" {:key duplicate-key})))
     (let [sibling-keys (set keys)]
-      (mapv (fn [{:keys [key title body deps]}]
+      (mapv (fn [{:keys [key title body deps priority]}]
               (cond-> {:ref (item-ref key)
                        :title title
                        :attributes (card-attributes (cond-> {}
-                                                      body (assoc "--body" body)))}
+                                                      body (assoc "--body" body)
+                                                      priority (assoc "--priority" priority)))}
                 (seq deps)
                 (assoc :edges (mapv (fn [dep]
                                       {:type "depends-on"
@@ -227,6 +251,18 @@
         updated (update-card! strand {status-attr "pending"} nil)]
     {:operation "kanban promote"
      :card (select-keys updated [:id :title :state :attributes])}))
+
+(defn set-priority!
+  "Set an active card's priority (p1 highest urgency .. p4 someday)."
+  [id priority]
+  (let [strand (card-strand (require-non-blank! :id id))
+        priority (require-priority! priority)]
+    (when-not (= "active" (:state strand))
+      (throw (ex-info "Kanban card must be active to reprioritise"
+                      {:id (:id strand) :state (:state strand)})))
+    (let [updated (update-card! strand {priority-attr priority} nil)]
+      {:operation "kanban priority"
+       :card (select-keys updated [:id :title :state :attributes])})))
 
 (defn claim!
   "Claim a pending feature card, stamping the work-root attributes.
@@ -408,14 +444,19 @@
   [strands]
   (sort-by (juxt :created_at :id) strands))
 
+(defn- by-priority
+  "Return strands sorted p1 first, oldest first within a priority."
+  [strands]
+  (sort-by (juxt card-priority :created_at :id) strands))
+
 (defn next-card
-  "Return the oldest active pending feature card, or nil."
+  "Return the highest-priority (p1 first) oldest active pending feature card, or nil."
   []
   (some->> (cards)
            (filter #(and (= "active" (:state %))
                          (= "pending" (attr-value % status-attr))
                          (= "feature" (card-type %))))
-           by-created
+           by-priority
            first
            compact-card))
 
@@ -479,7 +520,7 @@
         lane (fn [status]
                (->> features
                     (filter #(= status (attr-value % status-attr)))
-                    by-created
+                    by-priority
                     (mapv with-epic)))
         known-lanes #{"refinement" "pending" "claimed"}
         unknown (->> features
@@ -494,7 +535,7 @@
                               (cond-> (with-epic card)
                                 (latest-handover-for rt card)
                                 (assoc :latest-handover (latest-handover-for rt card))))
-                            (by-created claimed-features))
+                            (by-priority claimed-features))
              :needs-review (needs-review-entries rt claimed-features)
              :closed {:count (count (filter #(= "closed" (:state %)) all))}}
       ;; active cards outside the known lanes are drift; surface them loudly
@@ -514,8 +555,9 @@
 
 (defn- card-line
   "Return one ASCII board row for a compact card map."
-  [{:keys [id title owner branch epic]}]
+  [{:keys [id title owner branch epic priority]}]
   (let [tags (cond-> []
+               priority (conj priority)
                branch (conj (str "@" branch))
                owner (conj owner)
                epic (conj (str "epic:" epic)))
@@ -578,12 +620,17 @@
   {:operation "kanban about"
    :summary "Kanban cards are the user<->agent work board; agents working directly with a user work under a claimed card."
    :lanes {:refinement "not actionable until an explicit human `kanban promote`"
-           :pending "actionable queue; `kanban next` serves the oldest feature first"
+           :pending "actionable queue; `kanban next` serves the highest-priority (p1 first) oldest feature"
            :claimed "work started; owner/branch (and worktree) stamped at claim"
            :closed "finished with kanban/status recording the outcome (done, abandoned, ...)"}
+   :priorities {:p1 "immediate blocker; must be done first — e.g. anything requiring a mill/weaver restart or a breaking change"
+                :p2 "high value bug fixes or high leverage features"
+                :p3 "the default: most things"
+                :p4 "maybe one day — the never-ending someday list"}
    :attributes {card-attr "true"
                 type-attr "feature (default) | epic (grouping; parent-of its features)"
                 status-attr "refinement|pending|claimed|<outcome>"
+                priority-attr "p1|p2|p3|p4 (default p3); orders lanes and `kanban next`"
                 note-attr "true on note strands (closed parent-of children of a card)"
                 handover-attr "true on handover notes"
                 :kanban/source "optional path or URL for design context"
@@ -601,11 +648,13 @@
                         |`kanban card <id>` -> latest handover.")
    :commands [{:usage "strand kanban prime — full agent priming: working discipline + command surface (repo agent docs point here)"}
               {:usage (str "strand kanban add <title> [--body <text>] [--source <path-or-url>] "
-                           "[--status pending|refinement] [--type feature|epic] [--epic <epic-id>]")}
+                           "[--status pending|refinement] [--type feature|epic] [--epic <epic-id>] "
+                           "[--priority p1|p2|p3|p4]")}
               {:usage "strand weave --pattern kanban-batch --input '<json>'"}
               {:usage "strand kanban board"}
               {:usage "strand kanban card <id>"}
               {:usage "strand kanban next"}
+              {:usage "strand kanban priority <id> <p1|p2|p3|p4>"}
               {:usage "strand kanban promote <id>"}
               {:usage "strand kanban claim <id> --owner <name> --branch <branch> [--worktree <path>]"}
               {:usage "strand kanban note <id> <text> [--author <name>] [--handover]"}
@@ -615,6 +664,7 @@
                :input {:items [{:key "slug"
                                 :title "Feature title"
                                 :body "optional body"
+                                :priority "optional p1|p2|p3|p4 (default p3)"
                                 :deps ["sibling-key-or-existing-strand-id"]}]}}]})
 
 (defn prime
@@ -644,7 +694,9 @@
                |refinement`); they stay inert until a human `kanban promote`s them.")
          :pick-up-next-card
          (fmt/fill "
-               |`kanban next` serves the oldest pending feature card.
+               |`kanban next` serves the highest-priority pending feature card (p1 first, oldest
+               |first within a priority). p1 is an immediate blocker and must be done before
+               |anything else; reprioritise with `kanban priority <id> <p1|p2|p3|p4>`.
                |
                |Claim it: `kanban claim <id> --owner <name> --branch <branch> [--worktree
                |<path>]` — owner and branch are mandatory; the claim is what makes branch work
@@ -699,7 +751,8 @@
                    :source {:doc "Path or URL for design context."}
                    :status {:doc "Initial lane: pending or refinement."}
                    :type {:doc "Card type: feature or epic."}
-                   :epic {:doc "Existing epic card id to parent this feature under."}}
+                   :epic {:doc "Existing epic card id to parent this feature under."}
+                   :priority {:doc "Priority p1|p2|p3|p4; defaults to p3."}}
            :positionals [{:name :title
                           :required? true
                           :variadic? true
@@ -707,7 +760,10 @@
     "board" {:doc "Return the grouped board snapshot."}
     "card" {:doc "Return one card's resume view."
             :positionals [{:name :id :required? true :doc "Kanban card id."}]}
-    "next" {:doc "Return the oldest active pending feature card."}
+    "next" {:doc "Return the highest-priority (p1 first) oldest active pending feature card."}
+    "priority" {:doc "Set an active card's priority (p1 immediate blocker .. p4 someday)."
+                :positionals [{:name :id :required? true :doc "Kanban card id."}
+                              {:name :priority :required? true :doc "Priority: p1, p2, p3, or p4."}]}
     "promote" {:doc "Move a refinement card into the pending lane."
                :positionals [{:name :id :required? true :doc "Kanban card id."}]}
     "claim" {:doc "Claim a pending feature card."
@@ -749,6 +805,7 @@
       "board" (board)
       "card" (card-view (:id args))
       "next" {:operation "kanban next" :next (next-card)}
+      "priority" (set-priority! (:id args) (:priority args))
       "promote" (promote! (:id args))
       "claim" (claim! (:id args) flags)
       "note" (note! (:id args) (str/join " " (:text args)) flags)

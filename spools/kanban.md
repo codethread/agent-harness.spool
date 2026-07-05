@@ -7,9 +7,16 @@ The kanban spool is the user-facing work board held entirely in Skein strands. I
 Each card is one strand whose `kanban/status` places it in a board lane:
 
 - **refinement** — an idea or undecided direction; never actionable until a human explicitly runs `kanban promote`.
-- **pending** — the actionable queue; `kanban next` serves the oldest pending feature.
+- **pending** — the actionable queue; `kanban next` serves the highest-priority (p1 first) oldest pending feature.
 - **claimed** — work has started; the claim stamps who is driving it and where.
 - **closed** — the strand is closed and `kanban/status` records the explicit outcome (`done`, `abandoned`, ...).
+
+Every card also carries a `kanban/priority` that orders lanes and `kanban next` (oldest first within a priority):
+
+- **p1** — immediate blocker; must be done first (e.g. anything requiring a mill/weaver restart or a breaking change).
+- **p2** — high value bug fixes or high leverage features.
+- **p3** — the default: most things.
+- **p4** — maybe one day; the never-ending someday list.
 
 Card state lives under the `kanban/*` attribute topic:
 
@@ -18,6 +25,7 @@ Card state lives under the `kanban/*` attribute topic:
 | `kanban/card` | String `"true"` for card strands. |
 | `kanban/type` | `feature` (default) or `epic` (grouping card; `parent-of` its features). |
 | `kanban/status` | `refinement`, `pending`, `claimed`, or an explicit closed outcome. |
+| `kanban/priority` | `p1`, `p2`, `p3` (default), or `p4`; cards without the attribute read as `p3`. |
 | `kanban/source` | Optional path or URL for design context (RFC, feature folder). |
 | `kanban/note` | `"true"` on note strands (closed `parent-of` children of a card). |
 | `kanban/handover` | `"true"` on handover notes. |
@@ -52,10 +60,11 @@ Install registers one declared-subcommand operation. `strand help kanban` shows 
 ```sh
 strand kanban prime
 strand kanban about
-strand kanban add "Feature idea" [--body "Longer context"] [--source devflow/rfcs/...] [--status pending|refinement] [--type feature|epic] [--epic <epic-id>]
+strand kanban add "Feature idea" [--body "Longer context"] [--source devflow/rfcs/...] [--status pending|refinement] [--type feature|epic] [--epic <epic-id>] [--priority p1|p2|p3|p4]
 strand kanban board
 strand kanban card <id>
 strand kanban next
+strand kanban priority <id> <p1|p2|p3|p4>
 strand kanban promote <id>
 strand kanban claim <id> --owner <name> --branch <branch> [--worktree /path]
 strand kanban note <id> <text> [--author <name>] [--handover]
@@ -64,14 +73,14 @@ strand kanban finish <id> [--outcome done|abandoned]
 
 `prime` is the agent onboarding surface: a superset of `about` that adds the working discipline (work under a claimed card, the pick-up-next flow, notes/handover contract, adjacent-work awareness, and branch visibility) so repo agent docs point at it instead of duplicating conventions that then drift from the spool. `about` stays the terse command manual.
 
-`board` returns the grouped snapshot (epics, refinement/pending/claimed lanes, closed count); active cards with a status outside the known lanes surface in `unknown-status` rather than being hidden. It also returns `needs-review`: a vector aggregated across all claimed feature cards of `{:card :item}` entries (plus `:branch` from the claim stamp), one per card descendant that is active, in the engine ready frontier, and marks human review (`hitl`/`workflow/hitl` true, or `kind` `review`), sorted by card id then item id — the always-present cross-card review queue. `next` returns the oldest active pending feature (epics are never served). `promote` is the explicit human command that moves a refinement card into the pending lane. `claim` fails loudly without `--owner` and `--branch` and refuses epics; `--worktree` is optional for direct work in the main checkout. `finish` closes the card with the outcome status.
+`board` returns the grouped snapshot (epics, refinement/pending/claimed lanes sorted p1-first then oldest, closed count); active cards with a status outside the known lanes surface in `unknown-status` rather than being hidden. It also returns `needs-review`: a vector aggregated across all claimed feature cards of `{:card :item}` entries (plus `:branch` from the claim stamp), one per card descendant that is active, in the engine ready frontier, and marks human review (`hitl`/`workflow/hitl` true, or `kind` `review`), sorted by card id then item id — the always-present cross-card review queue. `next` returns the highest-priority (p1 first) oldest active pending feature (epics are never served). `priority` restamps an active card's `kanban/priority` and fails loudly on unknown values or closed cards. `promote` is the explicit human command that moves a refinement card into the pending lane. `claim` fails loudly without `--owner` and `--branch` and refuses epics; `--worktree` is optional for direct work in the main checkout. `finish` closes the card with the outcome status.
 
 `card` returns the resume view (card, notes, latest handover, active work, ready frontier) plus `related`: a vector of `{:relation :strand}` entries for every `depends-on` edge touching the card — `depends-on` when the card is the dependent, `depended-on-by` when it is the dependency — sorted by other-endpoint id.
 
 For bulk authoring, the `kanban-batch` weave pattern creates pending feature cards with bodies and `depends-on` edges atomically:
 
 ```sh
-strand weave --pattern kanban-batch --input '{"items":[{"key":"design","title":"Design feature","body":"..."},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}'
+strand weave --pattern kanban-batch --input '{"items":[{"key":"design","title":"Design feature","body":"...","priority":"p2"},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}'
 ```
 
 ## Human view
