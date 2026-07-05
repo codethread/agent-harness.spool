@@ -17,7 +17,8 @@
             [clojure.string :as str]
             [skein.api.current.alpha :as current]
             [skein.api.patterns.alpha :as patterns]
-            [skein.api.weaver.alpha :as api]))
+            [skein.api.weaver.alpha :as api]
+            [skein.spools.format :as fmt]))
 
 (def ^:private card-attr :kanban/card)
 (def ^:private status-attr :kanban/status)
@@ -611,9 +612,18 @@
                 :owner "claimant, required at claim"
                 :branch "work branch, required at claim"
                 :worktree "optional worktree path"}
-   :convention "The card is the work root: claim stamps owner/branch, and plans, devflow runs, and task DAGs hang under it with parent-of. Kanban complements devflow and delegation; it never tracks shuttle runs directly."
-   :handover-contract "Before stopping (or at any interruption risk), write `kanban note <id> --handover` covering: what is done, what is next, validation state, gotchas, and where the work lives (branch/worktree). Resume path for a cold agent: `kanban board` -> `kanban card <id>` -> latest handover."
-   :commands [{:usage "strand kanban add <title> [--body <text>] [--source <path-or-url>] [--status pending|refinement] [--type feature|epic] [--epic <epic-id>]"}
+   :convention (fmt/reflow "
+                 |The card is the work root: claim stamps owner/branch, and plans, devflow runs, and
+                 |task DAGs hang under it with parent-of. Kanban complements devflow and delegation;
+                 |it never tracks shuttle runs directly.")
+   :handover-contract (fmt/reflow "
+                        |Before stopping (or at any interruption risk), write `kanban note <id> --handover`
+                        |covering: what is done, what is next, validation state, gotchas, and where the
+                        |work lives (branch/worktree). Resume path for a cold agent: `kanban board` ->
+                        |`kanban card <id>` -> latest handover.")
+   :commands [{:usage "strand kanban prime — full agent priming: working discipline + command surface (repo agent docs point here)"}
+              {:usage (str "strand kanban add <title> [--body <text>] [--source <path-or-url>] "
+                           "[--status pending|refinement] [--type feature|epic] [--epic <epic-id>]")}
               {:usage "strand weave --pattern kanban-batch --input '<json>'"}
               {:usage "strand kanban board"}
               {:usage "strand kanban card <id>"}
@@ -629,6 +639,76 @@
                                 :body "optional body"
                                 :deps ["sibling-key-or-existing-strand-id"]}]}}]})
 
+(defn prime
+  "Return the full agent-priming payload for working the kanban board.
+
+  The single source of truth for kanban usage discipline: repo agent docs
+  point here (`strand kanban prime`) rather than duplicating conventions that
+  then drift from the spool. A superset of `about` — it reuses the same lane,
+  attribute, command, and pattern surface and adds the working agreement,
+  pick-up flow, notes/handover discipline, adjacent-work awareness, and branch
+  visibility that an agent needs before touching the board."
+  []
+  (assoc (about)
+         :operation "kanban prime"
+         :working-agreement
+         (fmt/fill "
+               |Every user request is a feature card; occasionally group related cards under an
+               |`epic` (`--type epic`, link features with `--epic <id>`).
+               |
+               |Every agent working directly with the user works under a claimed card — claim
+               |before starting user work.
+               |
+               |Kanban complements devflow, agent plans, and delegation; those hang beneath a
+               |card via `parent-of`. Kanban never tracks shuttle runs directly.
+               |
+               |Half-formed ideas go to the refinement lane (`kanban add \"...\" --status
+               |refinement`); they stay inert until a human `kanban promote`s them.")
+         :pick-up-next-card
+         (fmt/fill "
+               |`kanban next` serves the oldest pending feature card.
+               |
+               |Claim it: `kanban claim <id> --owner <name> --branch <branch> [--worktree
+               |<path>]` — owner and branch are mandatory; the claim is what makes branch work
+               |discoverable.
+               |
+               |Create feature plans, devflow runs, or task DAGs under the card via `parent-of`.
+               |The card is the parent/audit root; child strands are the executable work.
+               |
+               |`kanban finish <id> [--outcome done|abandoned]` after merge, archive, or
+               |explicit abandonment.")
+         :notes-and-handovers
+         (fmt/fill "
+               |Record significant decisions as you go: `kanban note <id> \"...\" --author
+               |<name>`.
+               |
+               |Always leave a `--handover` note before stopping or at any interruption risk,
+               |covering: what is done, what is next, validation state, gotchas, and where the
+               |work lives (branch/worktree).
+               |
+               |Crash recovery is self-discovering: `kanban board` shows claimed cards with their
+               |latest handover; `kanban card <id>` returns the card, notes, active work, and
+               |ready frontier.")
+         :staying-aware
+         (fmt/fill "
+               |`kanban board` returns `needs-review`: the human-review frontier aggregated
+               |across claimed cards (ready hitl/review work grouped by card and branch).
+               |
+               |Inside a feature branch, `strand branches \"$(git branch --show-current)\"`
+               |shows the feature cards worked on there and their substrands.
+               |
+               |Relate adjacent work with `depends-on` edges (`strand update <a> --edge
+               |depends-on:<b>`) and check `related` in `kanban card <id>` when claiming or
+               |resuming, so blockers and dependents surface.")
+         :branch-visibility
+         (fmt/reflow "
+               |Every piece of work on a branch has exactly one active work root strand stamped
+               |`branch` (plus `owner`, and `worktree` when one exists), with execution strands
+               |beneath it via `parent-of`. `kanban claim` stamps card roots; for non-card roots
+               |(ad hoc agent-plan roots, coordination strands) stamp them yourself: `strand
+               |update <root-id> --attr branch=<branch> --attr owner=<name>`. Children are
+               |reachable from the root and need no `branch` attr of their own.")))
+
 (defn kanban-op
   "Dispatch `strand kanban ...` subcommands."
   [ctx]
@@ -639,6 +719,7 @@
                   (first positional))]
     (case subcommand
       "about" (about)
+      "prime" (prime)
       "add" (let [{:keys [positional flags]}
                   (parse-op-argv "kanban add" argv {"--body" :single
                                                     "--source" :single
@@ -667,7 +748,7 @@
                      (parse-op-argv "kanban finish" argv {"--outcome" :single})]
                  (finish! (one-id! "kanban finish" parsed) flags))
       (throw (ex-info "kanban expects a subcommand"
-                      {:usage "strand kanban <about|add|board|card|next|promote|claim|note|finish> ..."
+                      {:usage "strand kanban <prime|about|add|board|card|next|promote|claim|note|finish> ..."
                        :subcommand subcommand})))))
 
 (defn install!

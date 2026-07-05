@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.api.weaver.alpha :as api]
+            [skein.spools.format :as fmt]
             [skein.spools.test-support :refer [with-runtime]]))
 
 (defn- spool-root []
@@ -60,6 +61,48 @@
             (let [finished (op! rt "finish" id)]
               (is (= "closed" (get-in finished [:card :state])))
               (is (= "done" (get-in finished [:card :attributes :kanban/status]))))))))))
+
+(deftest kanban-prime-supersets-about-with-working-discipline
+  (with-runtime
+    (fn [rt config-dir]
+      (install-kanban! rt config-dir)
+      (let [prime (op! rt "prime")
+            about (op! rt "about")]
+        (is (= "kanban prime" (:operation prime)))
+        (testing "prime reuses about's command/lane/attribute surface"
+          (is (= (:commands about) (:commands prime)))
+          (is (= (:lanes about) (:lanes prime)))
+          (is (= (:attributes about) (:attributes prime))))
+        (testing "prime carries the working discipline about does not"
+          (is (seq (:working-agreement prime)))
+          (is (seq (:pick-up-next-card prime)))
+          (is (seq (:notes-and-handovers prime)))
+          (is (seq (:staying-aware prime)))
+          (is (string? (:branch-visibility prime)))
+          (is (nil? (:working-agreement about))))
+        (testing "prime's fill-authored blocks wrap into single-line prose items"
+          (is (= 4 (count (:working-agreement prime))))
+          (is (= 3 (count (:staying-aware prime))))
+          (is (every? #(nil? (re-find #"\n" %)) (:staying-aware prime))))
+        (testing "prime advertises itself in the command surface"
+          (is (some #(re-find #"kanban prime" (:usage %)) (:commands prime))))))))
+
+(deftest fill-wraps-prose-and-preserves-indented-blocks
+  (testing "flush-left lines soft-wrap; a bare bar starts a new item; an indented line keeps the item verbatim"
+    (is (= ["Prose that is long enough to wrap across two source lines."
+            "Before running:\n    strand kanban prime\n    strand kanban board"]
+           (fmt/fill "
+                     |Prose that is long enough to
+                     |wrap across two source lines.
+                     |
+                     |Before running:
+                     |    strand kanban prime
+                     |    strand kanban board"))))
+  (testing "reflow soft-wraps a single-paragraph block into one string"
+    (is (= "One sentence spread over two source lines."
+           (fmt/reflow "
+                       |One sentence spread over
+                       |two source lines.")))))
 
 (deftest kanban-refinement-lane-and-promote
   (with-runtime

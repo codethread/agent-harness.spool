@@ -50,6 +50,7 @@ A **handover** note is the stop/interruption contract: what is done, what is nex
 Install registers one operation:
 
 ```sh
+strand kanban prime
 strand kanban about
 strand kanban add "Feature idea" [--body "Longer context"] [--source devflow/rfcs/...] [--status pending|refinement] [--type feature|epic] [--epic <epic-id>]
 strand kanban board
@@ -60,6 +61,8 @@ strand kanban claim <id> --owner <name> --branch <branch> [--worktree /path]
 strand kanban note <id> <text> [--author <name>] [--handover]
 strand kanban finish <id> [--outcome done|abandoned]
 ```
+
+`prime` is the agent onboarding surface: a superset of `about` that adds the working discipline (work under a claimed card, the pick-up-next flow, notes/handover contract, adjacent-work awareness, and branch visibility) so repo agent docs point at it instead of duplicating conventions that then drift from the spool. `about` stays the terse command manual.
 
 `board` returns the grouped snapshot (epics, refinement/pending/claimed lanes, closed count); active cards with a status outside the known lanes surface in `unknown-status` rather than being hidden. It also returns `needs-review`: a vector aggregated across all claimed feature cards of `{:card :item}` entries (plus `:branch` from the claim stamp), one per card descendant that is active, in the engine ready frontier, and marks human review (`hitl`/`workflow/hitl` true, or `kind` `review`), sorted by card id then item id — the always-present cross-card review queue. `next` returns the oldest active pending feature (epics are never served). `promote` is the explicit human command that moves a refinement card into the pending lane. `claim` fails loudly without `--owner` and `--branch` and refuses epics; `--worktree` is optional for direct work in the main checkout. `finish` closes the card with the outcome status.
 

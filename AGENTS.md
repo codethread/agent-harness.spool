@@ -163,26 +163,9 @@ strand list --query feature-run --param feature=<feature>
 
 ### Kanban board convention
 
-The kanban board (`spools/kanban.md`) is the user↔agent work surface, held entirely in strands. Anything the user asks for is a `feature` card — occasionally grouped under an `epic` (`--type epic`, linked with `--epic <id>`) — and **every agent working directly with the user works under a claimed card**. The board complements devflow, agent plans, and delegation; those all hang beneath cards. Run `strand kanban about` for the live manual.
+The kanban board (`spools/kanban.md`) is the user↔agent work surface, held entirely in strands: anything the user asks for is a `feature` card, and **every agent working directly with the user works under a claimed card**. It complements devflow, agent plans, and delegation, which hang beneath cards via `parent-of`.
 
-```sh
-strand kanban add "Build the thing; see devflow/rfcs/..." [--source devflow/rfcs/...]
-strand kanban add "Half-formed idea" --status refinement
-```
-
-`kanban/status` lanes: `refinement` (never actionable until a human runs `strand kanban promote <id>`), `pending` (the queue, oldest first), `claimed` (in flight), and a closed outcome (`done`, `abandoned`, ...). `strand kanban board` is the user's high-level overview; `strand list --query kanban-cards` and `--query kanban-unstarted` are the flat views.
-
-For bulk authoring, use `strand weave --pattern kanban-batch --input '<json>'` with `{"items":[{"key":"design","title":"Design feature","body":"..."},{"key":"docs","title":"Write docs","deps":["design","existing-strand-id"]}]}`. The pattern creates all feature cards and `depends-on` edges atomically.
-
-Agents asked to "pick up the next card" should run `strand kanban next`, claim the returned id with `strand kanban claim <id> --owner <name> --branch <branch> [--worktree <path>]` (owner and branch are mandatory — the claim is what makes branch work discoverable), then create feature plans, devflow runs, or task DAGs under that card using `parent-of`. The card is the parent/audit root; child strands are the executable work. Finish with `strand kanban finish <id>` after merge, archive, or explicit abandonment.
-
-**Notes and handovers.** Record significant decisions as you work with `strand kanban note <card-id> "..." --author <name>`, and always leave a handover before stopping or at interruption risk: `strand kanban note <card-id> --handover --author <name> "Done: ... Next: ... Validation: ... Gotchas: ..."`. Crash recovery is self-discovering: `strand kanban board` shows claimed cards with their latest handover; `strand kanban card <id>` returns the card, notes, active work, and ready frontier.
-
-Staying aware of adjacent work:
-
-- `strand kanban board` also returns `needs-review`: the human-review frontier aggregated across claimed cards — ready `hitl`/`review` work grouped by card with its branch — so a human sees what awaits attention and where.
-- Inside a feature branch, `strand branches "$(git branch --show-current)"` shows the feature cards being worked on there and their substrands.
-- Relate adjacent work with `depends-on` edges (`strand update <a> --edge depends-on:<b>`) and check `related` in `strand kanban card <id>` when claiming or resuming, so agents see each other's blockers and dependents.
+Run **`strand kanban prime`** before working the board — it is the live, spool-generated source of truth for the full working discipline (lanes, the pick-up-next flow, `kanban-batch` bulk authoring, the notes/handover contract, `needs-review`, and adjacent-work awareness). `strand kanban about` is the terse command manual.
 
 ### Branch work visibility
 
@@ -232,6 +215,15 @@ Smoke test config changes in a disposable `--workspace` world when possible; do 
 ```sh
 printf "(do (require '[skein.api.current.alpha :as current] '[skein.api.runtime.alpha :as runtime-alpha]) (runtime-alpha/reload! (current/runtime)))\n" | mill weaver repl --stdin --workspace "$world"
 ```
+
+### Weaver reload vs restart
+
+Never restart a running weaver (`mill weaver stop`/`start`) just to pick up code or config changes — a restart tears down live shuttle runs and weaver-lifetime registries other agents depend on. Restarting the canonical weaver requires explicit user sign-off. Match the change to the lightest pickup path:
+
+- Go CLI changes (`cli/`): `make install` only; no weaver action at all.
+- Selected-workspace config/startup file changes: `runtime-alpha/reload!` (above) — it clears registries, reinstalls built-ins, and re-runs startup files. Spool state under `skein.api.runtime.alpha/spool-state` (including shuttle run supervision) survives reload.
+- Changes to already-loaded Clojure namespaces (core `src/skein/**` or spool sources): `reload!` alone is NOT enough — startup files re-run but `require`/sync skip namespaces already loaded in the JVM. Send a targeted `(require 'the.changed.ns :reload)` via `mill weaver repl --stdin` first, then `reload!` if the namespace registers ops/queries/patterns.
+- Restart is genuinely needed only when the JVM itself must change: classpath/deps.edn edits, weaver launch/transport/socket changes, or an unhealthy JVM.
 
 ### Coordination attention surface
 
