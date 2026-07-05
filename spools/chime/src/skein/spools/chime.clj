@@ -17,13 +17,23 @@
 
 (declare rt)
 
+(def ^:private state-version
+  "Shape version for chime's runtime spool-state map. Bump whenever `new-state`'s
+  key set changes: spool-state survives `reload!`, so a post-upgrade reload would
+  otherwise reuse a preserved map missing the new key (docs/writing-shared-spools.md
+  'Versioned spool state', SPEC-004.C95). The `state-shape-matches-declared-version`
+  test fails loudly if `new-state` and this version drift apart."
+  1)
+
+(defn- new-state []
+  {:notifier-binding (atom nil)
+   :rule-registry (atom {})
+   :seen-notifications (atom #{})
+   :failure-log (atom [])
+   :scanned-batch-ids (atom [])})
+
 (defn- state []
-  (runtime/spool-state (rt) ::state
-                       #(hash-map :notifier-binding (atom nil)
-                                  :rule-registry (atom {})
-                                  :seen-notifications (atom #{})
-                                  :failure-log (atom [])
-                                  :scanned-batch-ids (atom []))))
+  (runtime/spool-state (rt) ::state {:version state-version} new-state))
 
 (defn- notifier-binding [] (:notifier-binding (state)))
 (defn- rule-registry [] (:rule-registry (state)))

@@ -365,3 +365,10 @@
         (Thread/sleep 300)
         (is (nil? (run-for-gate rt gate-id)))
         (is (nil? (attr (api/show rt gate-id) :treadle/run)))))))
+
+(deftest state-shape-matches-declared-version
+  ;; Drift alarm for the treadle's versioned spool-state: a key added to
+  ;; new-state without a state-version bump would survive reload! as a stale map.
+  (test-support/assert-state-shape
+   #'treadle/new-state
+   #{:scan-monitor}))

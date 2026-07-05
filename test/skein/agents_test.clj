@@ -1071,3 +1071,10 @@
           (is (= "interactive" (get-in new-run [:attributes :shuttle/mode])))
           (is (= "fake-mux" (get-in new-run [:attributes :shuttle/backend])))
           (agents/agent-op {:op/argv ["kill" (:id new-run)]}))))))
+
+(deftest state-shape-matches-declared-version
+  ;; Drift alarm for the agents-roster versioned spool-state: a key added to
+  ;; new-state without a state-version bump would survive reload! as a stale map.
+  (test-support/assert-state-shape
+   #'agents/new-state
+   #{:rosters}))

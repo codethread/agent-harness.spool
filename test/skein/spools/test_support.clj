@@ -4,6 +4,7 @@
   and skein.spools.workflow-test; also the shared await-budget-ms poll-deadline
   knob used by tests that wait on cross-thread/subprocess readiness."
   (:require [clojure.java.io :as io]
+            [clojure.test :as t]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.config :as daemon-config]
             [skein.core.weaver.runtime :as runtime]))
@@ -40,6 +41,22 @@
   :timeout-secs rather than a millisecond budget."
   ([] (long (/ (await-budget-ms) 1000)))
   ([base-secs] (long (/ (await-budget-ms (* base-secs 1000)) 1000))))
+
+(defn assert-state-shape
+  "Assert that versioned-spool-state builder `new-state-fn` produces exactly
+  `expected-keys`.
+
+  The drift alarm for the versioned spool-state convention
+  (docs/writing-shared-spools.md 'Versioned spool state'): a spool declares a
+  `state-version` alongside `new-state`, and spool-state reuses a preserved map
+  across `reload!` until that version changes. If `new-state` gains or loses a
+  key without a matching version bump, a post-upgrade reload would silently reuse
+  a shape-mismatched map, so each versioned spool pins its key set here and bumps
+  both together. Call from a deftest with the spool's private `new-state` var,
+  e.g. `(assert-state-shape #'chime/new-state #{:notifier-binding ...})`."
+  [new-state-fn expected-keys]
+  (t/is (= (set expected-keys) (set (keys (new-state-fn))))
+        "spool-state key set drifted — bump the spool's state-version and this expected key set together"))
 
 (defn with-runtime [f]
   (let [db-file (db-test/temp-db-file)

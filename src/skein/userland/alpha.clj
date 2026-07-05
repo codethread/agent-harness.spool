@@ -72,11 +72,9 @@
   []
   (or *scope*
       @bound-runtime
-      (try
-        (current/runtime)
-        (catch clojure.lang.ExceptionInfo _
-          (throw (ex-info "No Skein runtime for skein.userland.alpha; call (bind! rt), wrap in (with-runtime rt ...), or run inside a started/published weaver."
-                          {}))))))
+      (current/runtime-or-nil)
+      (throw (ex-info "No Skein runtime for skein.userland.alpha; call (bind! rt), wrap in (with-runtime rt ...), or run inside a started/published weaver."
+                      {}))))
 
 (defn runtime
   "Return the resolved terse-call runtime for explicit `skein.api.*.alpha` use.

@@ -7,15 +7,28 @@
   connected REPL state."
   (:require [skein.core.weaver.runtime :as runtime]))
 
+(defn runtime-or-nil
+  "Return the thread-bound or published in-process weaver runtime, or nil.
+
+  The non-throwing sibling of `runtime`, and the only sanctioned way to *probe*
+  for an ambient runtime without fabricating one. Trusted resolvers that want to
+  fall back to another source (a caller-held binding, a connected client, a loud
+  error with their own message) branch on this nil instead of catching
+  `runtime`'s exception as control flow. This is the single ambient-runtime read
+  point: callers must not reach into `skein.core.weaver.runtime` internals."
+  []
+  (or runtime/*runtime*
+      @runtime/current-runtime))
+
 (defn runtime
   "Return the thread-bound or published in-process weaver runtime.
 
   Trusted startup, reload, and nREPL contexts bind a per-thread runtime. Daemon
   processes also publish one ambient runtime for legacy REPL ergonomics. When
-  neither exists, fail loudly."
+  neither exists, fail loudly. Use `runtime-or-nil` when a missing runtime is a
+  branch rather than an error."
   []
-  (or runtime/*runtime*
-      @runtime/current-runtime
+  (or (runtime-or-nil)
       (throw (ex-info "No active Skein weaver runtime" {}))))
 
 (defn with-runtime*

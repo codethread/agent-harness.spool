@@ -250,8 +250,13 @@ start! ──▶ next-steps / next-step ──▶ complete! / choose! ──▶ 
 `await!` blocks in-process until a run is done or needs its coordinator:
 
 ```clojure
-(workflow/await! "feat-x" {:timeout-secs 1800})
+(workflow/await! "feat-x" {:timeout-secs 1800})       ; ergonomic: current/runtime
+(workflow/await! runtime "feat-x" {:timeout-secs 1800}) ; explicit runtime
 ```
+
+The three-arg `(runtime run-id opts)` arity threads the target runtime
+explicitly, agreeing with `roster/await-quiet!`; the shorter arities resolve the
+ambient `current/runtime` as the ergonomic default.
 
 It returns `{:reason :done|:checkpoint|:step|:gate|:stalled|:timeout :ready
 [...] :done boolean :detail ...}`. `opts` takes only `:timeout-secs` (default

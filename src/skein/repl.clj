@@ -13,7 +13,7 @@
             [skein.api.weaver.alpha :as api]
             [skein.core.terse :as terse]
             [skein.core.weaver.config :as daemon-config]
-            [skein.core.weaver.runtime :as weaver-runtime]
+            [skein.api.current.alpha :as current]
             [skein.core.query :as query]))
 
 (def ^:private no-connection ::no-connection)
@@ -109,8 +109,7 @@
 
 (defn- daemon [op & args]
   (call-daemon
-   #(if-let [rt (when-not (connected?) (or weaver-runtime/*runtime*
-                                      @weaver-runtime/current-runtime))]
+   #(if-let [rt (when-not (connected?) (current/runtime-or-nil))]
       (in-process-call rt op args)
       (let [dir (config-dir)]
         (apply client/call-world dir (client-opts) op args)))))
@@ -208,7 +207,7 @@
   The file must contain exactly one map of query names to query definitions.
   Returns the loaded query entries."
   [path]
-  (when-not (or @weaver-runtime/current-runtime (connected?))
+  (when-not (or (current/runtime-or-nil) (connected?))
     (config-dir))
   (let [registry (query/read-edn-file path)]
     (when-not (map? registry)

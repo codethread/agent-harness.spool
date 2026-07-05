@@ -42,6 +42,37 @@ the wrong world or throws.
 
    Two runtimes then get two independent registries; nothing resets or races
    across runtimes.
+
+   **Versioned spool state.** Spool-state entries deliberately survive `reload!`
+   (unlike the registries a reload clears), so a preserved value outlives the
+   code that built it. If your state map's *shape* changes between deploys — a
+   new key, a swapped resource — a post-upgrade reload would otherwise reuse the
+   stale map, and code reaching for the new key silently gets `nil` (this is a
+   real incident: a shuttle reload once reused a map predating its executor keys
+   and parked every run). Declare a `state-version` next to the builder and pass
+   it, so a version mismatch reinits deliberately instead of reusing a
+   shape-mismatched value:
+
+   ```clojure
+   (def ^:private state-version
+     "Bump whenever new-state's key set changes."
+     1)
+
+   (defn- new-state []
+     {:registry (atom {})})
+
+   (defn- state [runtime]
+     (runtime-alpha/spool-state runtime ::state {:version state-version} new-state))
+   ```
+
+   Any state holding a live resource (executor, scheduler, socket) must also
+   store a no-arg `:close-fn` in its map so the runtime releases it on stop and
+   on version-mismatch reinit; supply a `:migrate-fn` when a version bump must
+   carry durable sub-state across (it then owns the old value's resources). See
+   `skein.api.runtime.alpha/spool-state` and SPEC-004.C95 for the full contract.
+   Pin the current key set with a drift-alarm test using
+   `skein.spools.test-support/assert-state-shape`, which fails loudly if
+   `new-state` and `state-version` drift apart.
 3. **Register behaviour by symbol, not by closure.** Views, patterns, event
    handlers, and hooks register a fully qualified function *symbol* the weaver
    resolves. This keeps registration serialisable and runtime-portable.

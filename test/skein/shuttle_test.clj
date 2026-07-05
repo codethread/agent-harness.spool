@@ -914,16 +914,14 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest state-shape-matches-declared-version
-  ;; If new-state gains or loses a key without a matching state-version bump, a
-  ;; post-upgrade reload would reuse a shape-mismatched preserved map. This test
-  ;; is the drift alarm: it pins the exact key set the current version covers.
-  (with-shuttle
-    (fn [_rt]
-      (is (= #{:harness-registry :backend-registry :in-flight :recovery-scheduler
-               :worker-executor :preamble-extension :preamble-conflicts
-               :default-review-contract :close-fn}
-             (set (keys (#'shuttle/new-state))))
-          "new-state key set changed — bump shuttle/state-version and this assertion together"))))
+  ;; Drift alarm for the versioned spool-state convention: if new-state gains or
+  ;; loses a key without a matching state-version bump, a post-upgrade reload
+  ;; would reuse a shape-mismatched preserved map. Pins the current key set.
+  (test-support/assert-state-shape
+   #'shuttle/new-state
+   #{:harness-registry :backend-registry :in-flight :recovery-scheduler
+     :worker-executor :preamble-extension :preamble-conflicts
+     :default-review-contract :close-fn}))
 
 (deftest set-preamble-extension-tolerates-reload
   (with-shuttle

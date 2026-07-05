@@ -1284,14 +1284,20 @@
   executor-owned gate whose stall predicate reports detail, or timed out.
 
   opts: `:timeout-secs` (default 1800). Polls every 250ms, matching the
-  shuttle await surface."
+  shuttle await surface.
+
+  The three-arg `(runtime run-id opts)` arity threads the target runtime
+  explicitly, agreeing with `skein.spools.roster/await-quiet!`; the shorter
+  arities resolve `current/runtime` as the ergonomic default for trusted
+  in-process callers."
   ([run-id]
    (await! run-id {}))
-  ([run-id {:keys [timeout-secs] :or {timeout-secs 1800}}]
-   (let [rt (current/runtime)
-         deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))]
+  ([run-id opts]
+   (await! (current/runtime) run-id opts))
+  ([runtime run-id {:keys [timeout-secs] :or {timeout-secs 1800}}]
+   (let [deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))]
      (loop []
-       (let [state (attention rt run-id)]
+       (let [state (attention runtime run-id)]
          (cond
            (not= :waiting (:reason state)) state
            (>= (System/currentTimeMillis) deadline) (assoc state :reason :timeout)

@@ -323,3 +323,11 @@
         (chime/scan! {:strand/id (:id strand)})
         (is (= :rule (:kind (last (chime/failures)))))
         (is (= :invalid (:rule (last (chime/failures)))))))))
+
+(deftest state-shape-matches-declared-version
+  ;; Drift alarm for chime's versioned spool-state: a key added to new-state
+  ;; without a state-version bump would survive reload! as a stale map.
+  (test-support/assert-state-shape
+   #'chime/new-state
+   #{:notifier-binding :rule-registry :seen-notifications :failure-log
+     :scanned-batch-ids}))
