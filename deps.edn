@@ -22,4 +22,19 @@
           :main-opts ["-m" "rebel-readline.main"]}
   :skein {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
   :smoke {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]
-          :main-opts ["-m" "skein.smoke"]}}}
+          :main-opts ["-m" "skein.smoke"]}
+  :format {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
+           :main-opts ["-m" "cljfmt.main" "check" "src" "spools/src" "test" "dev" "scripts" ".skein/init.clj" ".skein/config.clj" ".skein/reviewers.clj"]}
+  :format/fix {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
+               :main-opts ["-m" "cljfmt.main" "fix" "src" "spools/src" "test" "dev" "scripts" ".skein/init.clj" ".skein/config.clj" ".skein/reviewers.clj"]}
+  :lint/clj-kondo {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
+                   :main-opts ["-m" "clj-kondo.main" "--lint" "src" "spools/src" "test"]}
+  :lint/splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
+                :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "src" "spools/src" "test"]}
+  :reflect-check {:extra-paths ["scripts"]
+                  :jvm-opts ["--enable-native-access=ALL-UNNAMED" "-Dclojure.compiler.direct-linking=true"]
+                  :main-opts ["-m" "quality.reflect-check"]}
+  :deps/antq {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}
+              :main-opts ["-m" "antq.core"]}
+  :security/clj-watson {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.1.0" :git/sha "be98e4d"}}
+                        :main-opts ["-m" "clj-watson.cli" "scan" "-p" "deps.edn" "--run-without-nvd-api-key"]}}}

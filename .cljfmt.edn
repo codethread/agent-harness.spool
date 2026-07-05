@@ -1,0 +1,5 @@
+{:remove-consecutive-blank-lines? false
+ :remove-multiple-non-indenting-spaces? false
+ :split-keypairs-over-multiple-lines? false
+ :sort-ns-references? false
+ :indents {#re ".*" [[:inner 0]]}}
