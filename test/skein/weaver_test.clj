@@ -507,6 +507,62 @@
       (finally
         (delete-tree! (io/file (:config-dir world) ".."))))))
 
+(defn- live-thread-names [prefix]
+  (->> (Thread/getAllStackTraces)
+       keys
+       (filter #(.isAlive ^Thread %))
+       (map #(.getName ^Thread %))
+       (filter #(.startsWith ^String % prefix))
+       sort
+       vec))
+
+(defn- throwable-messages [t]
+  (loop [messages []
+         t t]
+    (if t
+      (recur (conj messages (ex-message t)) (ex-cause t))
+      messages)))
+
+(deftest startup-failure-closes-spool-state-before-storage
+  (let [world (temp-world)
+        thread-prefix (str "skein-test-startup-spool-" (random-uuid))]
+    (try
+      (spit (io/file (:config-dir world) "init.clj")
+            (str "(require '[skein.api.runtime.alpha :as runtime]\n"
+                 "         '[skein.core.weaver.runtime :as weaver-runtime])\n"
+                 "(let [thread-prefix " (pr-str thread-prefix) "\n"
+                 "      worker (doto (Thread. (reify Runnable\n"
+                 "                               (run [_]\n"
+                 "                                 (try\n"
+                 "                                   (while true\n"
+                 "                                     (Thread/sleep 100))\n"
+                 "                                   (catch Throwable _ nil))))\n"
+                 "                             (str thread-prefix \"-worker\"))\n"
+                 "               (.setDaemon true))\n"
+                 "      rt weaver-runtime/*runtime*]\n"
+                 "  (.start worker)\n"
+                 "  (runtime/spool-state rt :test/executor\n"
+                 "                       (fn [] {:close-fn (fn []\n"
+                 "                                          (.interrupt worker)\n"
+                 "                                          (.join worker 1000))}))\n"
+                 "  (runtime/spool-state rt :test/bad-close\n"
+                 "                       (fn [] {:close-fn (fn []\n"
+                 "                                          (throw (ex-info \"close boom\" {:source :spool-close})))}))\n"
+                 "  (throw (ex-info \"post spool boom\" {:source :startup})))\n"))
+      (let [failure (try
+                      (runtime/start! nil {:world world :publish? false})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e e))]
+        (is failure "expected startup failure")
+        (is (= "Selected workspace startup file failed to load" (ex-message failure)))
+        (is (some #(= "post spool boom" %) (throwable-messages failure)))
+        (is (some #(= "Spool state close hook failed" (ex-message %))
+                  (.getSuppressed failure))))
+      (is (empty? (live-thread-names thread-prefix)))
+      (is (nil? (metadata/read-metadata world)))
+      (finally
+        (delete-tree! (io/file (:config-dir world) ".."))))))
+
 (deftest startup-loads-layered-init-files-in-order
   (let [db-file (db-test/temp-db-file)
         world (temp-world)

@@ -200,6 +200,25 @@
 (defn- default-name [world]
   (.getName (clojure.java.io/file (:config-dir world))))
 
+(defn- close-spool-state!
+  "Close runtime-owned spool state resources before storage disappears."
+  ([runtime] (close-spool-state! runtime nil))
+  ([runtime startup-error]
+   (doseq [[key value] @(:spool-state runtime)
+           :let [close-fn (:close-fn value)]
+           :when close-fn]
+     (try
+       (close-fn)
+       (catch Throwable t
+         (let [close-error (ex-info "Spool state close hook failed"
+                                    {:spool-state/key key
+                                     :exception/message (ex-message t)}
+                                    t)]
+           (if startup-error
+             (.addSuppressed ^Throwable startup-error close-error)
+             (throw close-error))))))
+   nil))
+
 (defn- close-storage!
   "Close weaver-owned storage resources for `runtime`, when the handle has any."
   [runtime]
@@ -298,6 +317,10 @@
            (when-let [socket-runtime (:socket-runtime @runtime-state)]
              (socket/stop! socket-runtime))
            (nrepl/stop-server server)
+           ;; Spool state may own executors started by config before metadata is
+           ;; published. Close it on failed startup too, while storage remains
+           ;; available, without masking the original startup exception.
+           (close-spool-state! @runtime-state t)
            (close-storage! @runtime-state)
            (metadata/delete! world)
            (throw t)))))))
@@ -315,8 +338,11 @@
     (socket/stop! socket-runtime))
   (when-let [server (:server runtime)]
     (nrepl/stop-server server))
-  ;; Storage closes only after transports and event dispatch stop, so no
-  ;; in-flight weaver work can observe closed storage.
+  ;; Spool state closes before storage so runtime-owned schedulers/workers can
+  ;; cancel or join their work while storage is still valid.
+  (close-spool-state! runtime)
+  ;; Storage closes only after transports, event dispatch, and spool-owned
+  ;; workers stop, so no in-flight weaver work can observe closed storage.
   (close-storage! runtime)
   (when-let [port (get-in runtime [:metadata :endpoint :port])]
     (swap! nrepl-port-runtimes dissoc port))

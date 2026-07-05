@@ -32,7 +32,7 @@ Shuttle is shipped as an approved-local-root spool example under `spools/shuttle
    :required? true})
 ```
 
-`install!` registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. It does **not** register any CLI operations. Load the [agents spool](../agents/README.md) after shuttle for the `strand agent` surface, and the companion [treadle adapter](./treadle.md) to fulfill workflow `:subagent` gates with shuttle runs.
+`install!` registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, deferred-recovery scheduling, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. The deferred-recovery scheduler is owned by runtime spool state and is shut down during runtime stop before storage closes. It does **not** register any CLI operations. Load the [agents spool](../agents/README.md) after shuttle for the `strand agent` surface, and the companion [treadle adapter](./treadle.md) to fulfill workflow `:subagent` gates with shuttle runs.
 
 ## 3. Harness registry
 
@@ -139,7 +139,7 @@ An interactive run's completion signal is graph state, not process exit:
 
 ### 5.2 Crash reconciliation
 
-`reconcile!` runs on `install!`. **Headless:** any active `running` run this weaver holds no in-flight handle for was owned by a dead predecessor: its stale process is killed when its identity can be verified (pid plus recorded OS start instant), then the run is reset to `pending` for respawn or marked `exhausted` (loudly, still active) once `shuttle/max-attempts` (default `3`) is spent. **Interactive:** sessions survive the weaver by design, so orphans are *adopted*, never respawned — a live session (probed via its durable handle attrs) keeps its run `running`; a dead one is reaped as done when its target already closed, otherwise failed loudly regardless of attempts. Runs survive weaver crashes because the strands are durable.
+`reconcile!` runs on `install!`. **Headless:** any active `running` run this weaver holds no in-flight handle for was owned by a dead predecessor: its stale process is killed when its identity can be verified (pid plus recorded OS start instant), then the run is reset to `pending` for respawn or marked `exhausted` (loudly, still active) once `shuttle/max-attempts` (default `3`) is spent. Recovered runs are stamped with `shuttle/recovered-at`; if a recovery-origin respawn references a harness alias that is not registered yet, the run is returned to `pending` with a loud `shuttle/error` and `shuttle/recovery-deferred-until`, and scans skip it until that quiet retry timestamp passes rather than immediately self-looping. The retry wakeup is runtime-owned spool state and is cancelled/joined on runtime stop; after a restart, ordinary scans still enforce the persisted `shuttle/recovery-deferred-until` timestamp. That deferral is bounded by a recovery window (currently 30 seconds from `shuttle/recovered-at`): transient startup/config alias races can heal, but a genuinely missing alias becomes a normal `failed` run and is visible to failure queries. User-created spawns and handmade pending runs with unknown harnesses still fail loudly. **Interactive:** sessions survive the weaver by design, so orphans are *adopted*, never respawned — a live session (probed via its durable handle attrs) keeps its run `running`; a dead one is reaped as done when its target already closed, otherwise failed loudly regardless of attempts. Runs survive weaver crashes because the strands are durable.
 
 ## 6. Run memory (notes)
 
@@ -183,6 +183,8 @@ Interactive runs get their own preamble variant carrying the completion contract
 | `shuttle/session-id` | Harness session id when parsed from harness output. |
 | `shuttle/resumes` | Predecessor run id whose harness session this run continues (also carried as a `resumes` annotation edge). |
 | `shuttle/error-class` | `resume` on a failure that resolving/continuing a session caused, so recovery can branch to a fresh spawn instead of retrying against a lost session. |
+| `shuttle/recovered-at` | Timestamp set when crash reconciliation returned a headless orphan to `pending`; missing harness aliases on these recovery-origin retries defer back to `pending` only inside the bounded recovery window. |
+| `shuttle/recovery-deferred-until` | Timestamp for the next quiet retry after a recovered run hit an unregistered harness alias. |
 | `shuttle/log` | Path to captured stdout log under the weaver state dir. |
 | `shuttle/pid` | Live process pid recorded after launch. |
 | `shuttle/pid-started-at` | OS process start instant used to avoid signalling recycled pids. |

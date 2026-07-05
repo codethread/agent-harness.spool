@@ -44,7 +44,7 @@
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
            [java.time Instant]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent Executors ScheduledThreadPoolExecutor ThreadFactory TimeUnit]))
 
 
 
@@ -60,19 +60,42 @@
 (defn- rt []
   (or *runtime* (current/runtime)))
 
+(defn- daemon-thread-factory [prefix]
+  (let [counter (atom 0)]
+    (reify ThreadFactory
+      (newThread [_ runnable]
+        (doto (Thread. runnable (str prefix "-" (swap! counter inc)))
+          (.setDaemon true))))))
+
+(defn- new-state []
+  (let [scheduler (ScheduledThreadPoolExecutor. 1 (daemon-thread-factory "shuttle-recovery"))
+        workers (Executors/newCachedThreadPool (daemon-thread-factory "shuttle-run"))]
+    (.setRemoveOnCancelPolicy scheduler true)
+    {:harness-registry (atom {})
+     :backend-registry (atom {})
+     ;; run-id -> {:phase :claimed|:running|:deferred-recovery, :process Process}
+     :in-flight (atom {})
+     :recovery-scheduler scheduler
+     :worker-executor workers
+     :preamble-extension (atom nil)
+     :default-review-contract (atom nil)
+     :close-fn (fn []
+                 (.shutdownNow scheduler)
+                 (.shutdownNow workers)
+                 (when-not (.awaitTermination scheduler 1000 TimeUnit/MILLISECONDS)
+                   (fail! "Shuttle recovery scheduler did not stop" {}))
+                 (when-not (.awaitTermination workers 1000 TimeUnit/MILLISECONDS)
+                   (fail! "Shuttle worker executor did not stop" {})))}))
+
 (defn- state []
-  (runtime/spool-state (rt) ::state
-                       #(hash-map :harness-registry (atom {})
-                                  :backend-registry (atom {})
-                                  ;; run-id -> {:phase :claimed|:running, :process Process}
-                                  :in-flight (atom {})
-                                  :preamble-extension (atom nil)
-                                  :default-review-contract (atom nil))))
+  (runtime/spool-state (rt) ::state new-state))
 
 (defn- harness-registry [] (:harness-registry (state)))
 (defn- backend-registry [] (:backend-registry (state)))
 (defn- in-flight [] (:in-flight (state)))
 (defn- preamble-extension [] (:preamble-extension (state)))
+(defn- recovery-scheduler [] (:recovery-scheduler (state)))
+(defn- worker-executor [] (:worker-executor (state)))
 (defn- default-review-contract
   "Workspace review-contract override atom; nil means the generic contract applies."
   []
@@ -240,7 +263,9 @@
     (when (contains? seen key)
       (fail! "Harness alias chain contains a cycle" {:harness (harness-key name) :cycle (conj seen key)}))
     (let [def (or (get @(harness-registry) key)
-                  (fail! "Harness not found" {:harness key :available (sort (keys @(harness-registry)))}))]
+                  (fail! "Harness not found" {:error-class "harness-not-found"
+                                                :harness key
+                                                :available (sort (keys @(harness-registry)))}))]
       (if-let [base (:alias-of def)]
         (recur (harness-key base)
                (conj seen key)
@@ -433,7 +458,8 @@
   #{"shuttle/run" "shuttle/harness" "shuttle/prompt" "shuttle/phase"
     "shuttle/cwd" "shuttle/spawned-by" "shuttle/max-attempts" "shuttle/mode"
     "shuttle/backend" "shuttle/completion" "shuttle/for" "shuttle/reap"
-    "shuttle/session" "shuttle/session-id" "shuttle/resumes" "shuttle/error-class"})
+    "shuttle/session" "shuttle/session-id" "shuttle/resumes" "shuttle/error-class"
+    "shuttle/recovered-at" "shuttle/recovery-deferred-until"})
 
 (defn- interactive? [run]
   (= "interactive" (sattr run "mode")))
@@ -588,6 +614,56 @@
                           extra)
                 {})))
 
+(def ^:private ^:dynamic *recovery-harness-deferral-ms*
+  "Milliseconds a recovered run may wait for harness aliases to register."
+  30000)
+
+(def ^:private recovery-harness-retry-ms 250)
+
+(defn- harness-not-found? [t]
+  (= "harness-not-found" (:error-class (ex-data t))))
+
+(defn- recovered-run? [run]
+  (some? (sattr run "recovered-at")))
+
+(defn- recovery-deferral-expired? [run]
+  (let [recovered-at (java.time.Instant/parse (sattr run "recovered-at"))]
+    (not (.isBefore (java.time.Instant/now)
+                    (.plusMillis recovered-at *recovery-harness-deferral-ms*)))))
+
+(defn- recovery-deferred? [run]
+  (when-let [deferred-until (sattr run "recovery-deferred-until")]
+    (.isAfter (Instant/parse deferred-until) (Instant/now))))
+
+(declare claim! launch-run! scan!)
+
+(defn- schedule-deferred-recovery!
+  "Schedule a recovered run retry on the runtime-owned recovery executor."
+  [runtime id]
+  (.schedule (recovery-scheduler)
+             ^Runnable (fn []
+                         (binding [*runtime* runtime]
+                           (swap! (in-flight) dissoc id)
+                           (when-let [run (first (api/ready runtime [:and pending-query [:= :id id]] {}))]
+                             (when (claim! id)
+                               (launch-run! runtime run)))))
+             recovery-harness-retry-ms
+             TimeUnit/MILLISECONDS))
+
+(defn- defer-recovered-missing-harness!
+  "Return a recovered run to pending while its alias registration may still be loading."
+  [id run t]
+  (if (recovery-deferral-expired? run)
+    (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " "))))
+    (do
+      (swap! (in-flight) assoc id {:phase :deferred-recovery})
+      (update-run! id {"shuttle/phase" "pending"
+                       "shuttle/error" (str (ex-message t) (some->> (ex-data t) (str " ")))
+                       "shuttle/recovery-deferred-until" (str (.plusMillis (Instant/now)
+                                                                            recovery-harness-retry-ms))}
+                   {})
+      (schedule-deferred-recovery! (rt) id))))
+
 (defn- suggested-session
   "Deterministic session name suggested to backends. Workspace-namespaced:
   multiplexer session names live in a server-global namespace, so two
@@ -729,8 +805,6 @@
 
 (defn- tail [s n]
   (if (> (count s) n) (subs s (- (count s) n)) s))
-
-(declare scan!)
 
 (defn- finish-run! [id process harness out-file err-file]
   (let [exit (.waitFor ^Process process)
@@ -1007,9 +1081,11 @@
         (some-> ^Process @process-ref (.destroy))
         (swap! (in-flight) dissoc id)
         (try
-          (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " ")))
-                        (when (= "resume" (:error-class (ex-data t)))
-                          {"shuttle/error-class" "resume"}))
+          (if (and (recovered-run? run) (harness-not-found? t))
+            (defer-recovered-missing-harness! id run t)
+            (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " ")))
+                          (when (= "resume" (:error-class (ex-data t)))
+                            {"shuttle/error-class" "resume"})))
           (catch Throwable _
             nil))))))
 
@@ -1040,12 +1116,11 @@
   "Spawn every ready pending run not already claimed. Returns claimed run ids."
   []
   (let [runtime (rt)
-        ready-runs (api/ready runtime pending-query {})
+        workers (worker-executor)
+        ready-runs (remove recovery-deferred? (api/ready runtime pending-query {}))
         claimed (filterv (comp claim! :id) ready-runs)]
     (doseq [run claimed]
-      (doto (Thread. #(launch-run! runtime run) (str "shuttle-run-" (:id run)))
-        (.setDaemon true)
-        (.start)))
+      (.execute workers ^Runnable (fn [] (launch-run! runtime run))))
     (mapv :id claimed)))
 
 (defn on-event
@@ -1106,7 +1181,8 @@
                                                                  " attempts after weaver crash")}
                                         {})
                            (update acc :exhausted conj id))
-                       (do (update-run! id {"shuttle/phase" "pending"} {})
+                       (do (update-run! id {"shuttle/phase" "pending"
+                                            "shuttle/recovered-at" (now)} {})
                            (update acc :respawned conj id)))))
                  {:respawned [] :exhausted [] :adopted [] :reaped [] :failed []}
                  headless-orphans)

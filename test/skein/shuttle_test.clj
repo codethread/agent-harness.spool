@@ -56,6 +56,20 @@
                           {:id id :want phases :strand strand}))
           :else (do (Thread/sleep 50) (recur)))))))
 
+(defn- await-attr-matching
+  "Poll until attribute `k` satisfies `pred` or timeout; return the strand."
+  [rt id k pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [strand (api/show rt id)
+            value (get-in strand [:attributes k])]
+        (cond
+          (pred value) strand
+          (> (System/currentTimeMillis) deadline)
+          (throw (ex-info "Timed out waiting for matching attribute"
+                          {:id id :attr k :value value :strand strand}))
+          :else (do (Thread/sleep 50) (recur)))))))
+
 (deftest harness-registry-validates-and-resolves-aliases
   (with-shuttle
     (fn [_rt]
@@ -80,8 +94,12 @@
         (shuttle/defalias! :b {:alias-of :a})
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cycle"
                               (shuttle/resolve-harness :a)))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Harness not found"
-                              (shuttle/resolve-harness :missing)))))))
+        (try
+          (shuttle/resolve-harness :missing)
+          (is false "missing harness should throw")
+          (catch clojure.lang.ExceptionInfo e
+            (is (str/includes? (ex-message e) "Harness not found"))
+            (is (= "harness-not-found" (:error-class (ex-data e))))))))))
 
 (deftest run-spawns-when-ready-and-captures-result
   (with-shuttle
@@ -244,6 +262,53 @@
                                          (api/list rt shuttle/run-query {}))))
               failed (await-phase rt run-id #{"failed"} 10000)]
           (is (str/includes? (get-in failed [:attributes :shuttle/error]) "Harness not found")))))))
+
+(deftest recovered-run-with-late-registered-alias-defers-then-respawns
+  (with-shuttle
+    (fn [rt]
+      (let [orphan (api/add rt {:title "late-alias-orphan"
+                                :attributes {"shuttle/run" "true"
+                                             "shuttle/harness" "late-sh"
+                                             "shuttle/prompt" "echo recovered-late"
+                                             "shuttle/phase" "running"
+                                             "shuttle/attempt" 1
+                                             "shuttle/pid" 99999999}})
+            summary (shuttle/reconcile!)]
+        (is (= [(:id orphan)] (:respawned summary)))
+        (let [deferred (await-attr-matching rt (:id orphan) :shuttle/error
+                                            #(and % (str/includes? % "Harness not found"))
+                                            10000)]
+          (is (= "pending" (get-in deferred [:attributes :shuttle/phase])))
+          (is (some? (get-in deferred [:attributes :shuttle/recovered-at])))
+          (is (= 1 (get-in deferred [:attributes :shuttle/attempt]))))
+        (shuttle/defalias! :late-sh {:alias-of :sh})
+        (shuttle/scan!)
+        (let [done (await-phase rt (:id orphan) #{"done"} 10000)]
+          (is (= "closed" (:state done)))
+          (is (= "recovered-late" (get-in done [:attributes :shuttle/result])))
+          (is (= 2 (get-in done [:attributes :shuttle/attempt]))))))))
+
+(deftest recovered-run-with-permanently-missing-alias-eventually-fails
+  (let [original @#'shuttle/*recovery-harness-deferral-ms*]
+    (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly 0))
+    (try
+      (with-shuttle
+        (fn [rt]
+          (let [orphan (api/add rt {:title "missing-alias-orphan"
+                                    :attributes {"shuttle/run" "true"
+                                                 "shuttle/harness" "never-registered"
+                                                 "shuttle/prompt" "echo unreachable"
+                                                 "shuttle/phase" "running"
+                                                 "shuttle/attempt" 1
+                                                 "shuttle/pid" 99999999}})
+                summary (shuttle/reconcile!)]
+            (is (= [(:id orphan)] (:respawned summary)))
+            (let [failed (await-phase rt (:id orphan) #{"failed"} 10000)]
+              (is (= "active" (:state failed)))
+              (is (str/includes? (get-in failed [:attributes :shuttle/error])
+                                 "Harness not found"))))))
+      (finally
+        (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly original))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Interactive runs

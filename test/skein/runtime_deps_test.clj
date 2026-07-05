@@ -59,7 +59,7 @@
 (defn- daemon-value [rt form]
   (with-open [conn (nrepl/connect :host (get-in rt [:metadata :endpoint :host])
                                   :port (get-in rt [:metadata :endpoint :port]))]
-    (let [responses (nrepl/message (nrepl/client conn 5000)
+    (let [responses (nrepl/message (nrepl/client conn 30000)
                                    {:op "eval" :code (pr-str form)})]
       (when-let [ex (some :ex responses)]
         (throw (ex-info "Daemon eval threw" {:exception ex :responses responses})))
