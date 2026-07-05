@@ -12,9 +12,15 @@ export type KanbanRow = DetailRow & {
   lane: string;
   type: string;
   owner: string;
+  priority: string;
 };
 
 const LANE_COLOR: Record<string, string | undefined> = { claimed: "green", pending: "yellow", refinement: "cyan" };
+
+// Priority tint mirrors the spool's p1..p4 urgency (spools/kanban.md): p1 is an
+// immediate blocker, p4 is someday. p3 is the unstamped default and stays plain.
+const PRIO_COLOR: Record<string, string | undefined> = { p1: "red", p2: "yellow" };
+const prioDim = (p: string): boolean => p === "p4";
 
 // Board lane order: claimed work first, then the actionable queue, then ideas
 // still in refinement. Closed strands sink regardless of their kanban/status —
@@ -36,19 +42,23 @@ async function fetchKanban(all: boolean): Promise<KanbanRow[]> {
       lane: str(attrs["kanban/status"], "?"),
       type: str(attrs["kanban/type"], "feature"),
       owner: str(attrs["owner"], "-"),
+      priority: str(attrs["kanban/priority"], "p3"),
       createdAt: s.created_at,
       updatedAt: s.updated_at,
       attrs,
     };
   });
-  // created_at is "YYYY-MM-DD HH:MM:SS" (UTC), so lexical order is chronological.
-  // Active lanes are queues and list oldest-first to agree with `kanban next`
-  // (spools/kanban.md); the closed bucket lists newest-first so fresh outcomes
-  // stay in reach.
+  // created_at is "YYYY-MM-DD HH:MM:SS" (UTC), so lexical order is chronological,
+  // and "p1".."p4" also compares lexically. Active lanes are queues and sort
+  // priority-first then oldest-first to agree with `kanban next` (spools/kanban.md);
+  // the closed bucket lists newest-first so fresh outcomes stay in reach.
   return rows.sort((a, b) => {
     const rank = laneRank(a) - laneRank(b);
     if (rank !== 0) return rank;
-    return a.state === "closed" ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt);
+    if (a.state === "closed") return b.createdAt.localeCompare(a.createdAt);
+    const prio = a.priority.localeCompare(b.priority);
+    if (prio !== 0) return prio;
+    return a.createdAt.localeCompare(b.createdAt);
   });
 }
 
@@ -59,11 +69,12 @@ function KanbanList({ rows, selected, interactive, cols, termRows, all, loaded }
   const w = {
     id: fitCol("ID", rows.map((r) => r.id), 12),
     lane: fitCol("LANE", rows.map((r) => r.lane), 12),
+    prio: fitCol("PRIO", rows.map((r) => r.priority), 4),
     type: fitCol("TYPE", rows.map((r) => r.type), 8),
     owner: fitCol("OWNER", rows.map((r) => r.owner), 14),
     branch: fitCol("BRANCH", rows.map((r) => r.branch), 24),
   };
-  const titleWidth = Math.max(0, cols - 10 - w.id - w.lane - w.type - w.owner - w.branch);
+  const titleWidth = Math.max(0, cols - 12 - w.id - w.lane - w.prio - w.type - w.owner - w.branch);
   const { start, visible, below } = windowRows(rows, selected, interactive, termRows);
 
   return (
@@ -74,6 +85,7 @@ function KanbanList({ rows, selected, interactive, cols, termRows, all, loaded }
         cells={[
           { text: pad("ID", w.id) }, { text: "  " },
           { text: pad("LANE", w.lane) }, { text: "  " },
+          { text: pad("PRIO", w.prio) }, { text: "  " },
           { text: pad("TYPE", w.type) }, { text: "  " },
           { text: pad("OWNER", w.owner) }, { text: "  " },
           { text: pad("BRANCH", w.branch) }, { text: "  " },
@@ -87,6 +99,8 @@ function KanbanList({ rows, selected, interactive, cols, termRows, all, loaded }
           { text: pad(r.id, w.id) },
           { text: "  " },
           { text: pad(r.lane, w.lane), color: isSelected || closed ? undefined : LANE_COLOR[r.lane], dimColor: !isSelected && closed },
+          { text: "  " },
+          { text: pad(r.priority, w.prio), color: isSelected || closed ? undefined : PRIO_COLOR[r.priority], dimColor: !isSelected && (closed || prioDim(r.priority)) },
           { text: "  " },
           { text: pad(r.type, w.type), dimColor: !isSelected && r.type !== "epic" },
           { text: "  " },
