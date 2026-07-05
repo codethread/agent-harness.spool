@@ -2,7 +2,7 @@
 
 **Document ID:** `SPEC-002`
 **Status:** Implemented
-**Last Updated:** 2026-07-04
+**Last Updated:** 2026-07-05
 **Related RFCs:** [RFC-019 Op-only CLI](../archive/26-07-04__op-only-cli/rfcs/2026-07-04-op-only-cli.md), [RFC-002 Task Query DSL](../rfcs/2026-06-24-task-query-dsl.md), [RFC-003 Fast JSON Socket CLI](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-fast-json-socket-cli.md), [RFC-004 Go CLI Migration](../archive/26-06-25__go-cli-migration/rfcs/2026-06-25-go-cli-migration.md)
 **Code:** `cli/`, `src/skein/core/weaver`, `src/skein/api/weaver/alpha.clj`
 
@@ -47,7 +47,7 @@ Dispatcher flags: `--workspace <dir>`, `--cwd <dir>`, `--worktree-root <dir>`, `
 - **SPEC-002.C36:** Response relay is frame-driven: a single-result response prints the result as one JSON line; a stream response (header frame, emitted NDJSON lines, terminator frame) relays each emitted line as received with per-line flush and exits by the terminator's success flag. Errors surface on stderr with non-zero exit. Interrupt during a stream exits non-zero cleanly.
 - **SPEC-002.C37:** Payload references (`:stdin` / `:payload/<name>` as whole argv values) are resolved weaver-side by the blessed parser (`skein.api.cli.alpha`, SPEC-003), never by the bin.
 - **SPEC-002.C38:** Unknown op names fail non-zero with the weaver's not-found domain error carrying available op names. Malformed dispatcher flags, duplicate payload slots, no reachable mill, no running weaver, stale metadata/socket state, transport/identity failures, malformed weaver responses, database/domain errors, op arg-spec parse failures, and lifecycle hook rejections fail non-zero. Hook failures use the `hook/failed` domain error code with structured details.
-- **SPEC-002.C39:** Live discovery is the core-registered `help` op: `strand help` lists registered ops with metadata and provenance; `strand help <op>` renders one op's detail including its arg-spec. Query and pattern registry introspection are batteries read ops (`strand query list|explain`, `strand pattern list|explain`).
+- **SPEC-002.C39:** Live discovery is the core-registered `help` op: `strand help` lists registered ops with metadata and provenance; `strand help <op>` renders one op's detail including its arg-spec — when the arg-spec declares subcommands (SPEC-003.C64), the detail lists each subcommand's name, doc, flags, and positionals one level deep, with no extra flags required. Query and pattern registry introspection are batteries read ops (`strand query list|explain`, `strand pattern list|explain`). Subcommand routing is entirely weaver-side parser behavior; the dispatcher still ships verbatim argv (SPEC-002.C30).
 
 ## SPEC-002.P4 Mill contracts
 

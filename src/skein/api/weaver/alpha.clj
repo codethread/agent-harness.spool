@@ -1286,6 +1286,16 @@
                     {:hook-class (:hook-class opts)})))
   opts)
 
+(defn- validate-op-arg-spec! [op-name arg-spec]
+  (if (contains? arg-spec :subcommands)
+    (try
+      (cli/validate-subcommands! arg-spec)
+      (catch clojure.lang.ExceptionInfo e
+        (throw (ex-info "Operation arg-spec subcommands are invalid"
+                        (assoc (ex-data e) :operation (canonical-op-name op-name))
+                        e))))
+    arg-spec))
+
 (defn- build-op-entry
   "Build a validated op registry entry with metadata defaults and provenance.
 
@@ -1303,7 +1313,7 @@
              :hook-class (or (:hook-class opts) :mutating)
              :provenance (symbol (namespace validated-fn))}
       (:doc opts) (assoc :doc (validate-op-doc! (:doc opts)))
-      (some? (:arg-spec opts)) (assoc :arg-spec (:arg-spec opts)))))
+      (some? (:arg-spec opts)) (assoc :arg-spec (validate-op-arg-spec! op-name (:arg-spec opts))))))
 
 (defn register-op!
   "Register a trusted weaver-side CLI operation.
@@ -1312,7 +1322,8 @@
   symbol must resolve to a function that accepts one context map (see `op!` for
   the context keys) and returns JSON-compatible data. The third positional
   argument is either a doc string or an op metadata map with keys `:doc`,
-  `:arg-spec` (opaque parser spec), `:stream?` (default false), `:deadline-class`
+  `:arg-spec` (parser spec; opaque unless it declares `:subcommands`, whose
+  structure is validated at registration), `:stream?` (default false), `:deadline-class`
   (`:standard`/`:unbounded`, defaulting to `:unbounded` for stream ops), and
   `:hook-class` (`:read`/`:mutating`, default `:mutating`); unknown keys fail
   loudly. Provenance (the registering namespace) is recorded from the handler

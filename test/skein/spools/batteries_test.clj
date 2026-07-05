@@ -246,11 +246,23 @@
           (is (= ["=" ["attr" "owner"] ["param" "who"]] (get explained "where")))
           (is (string? (get explained "where-form")))
           (is (string? (get explained "summary")))))
-      (testing "unknown query subcommand fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown query subcommand"
-                              (api/op! rt 'query ["bogus"]))))
+      (testing "query help renders declared subcommands"
+        (let [detail (api/op! rt 'help ["query"])]
+          (is (= ["explain" "list"] (mapv :name (get-in detail [:arg-spec :subcommands]))))
+          (is (= [{:name "name" :type "string" :required true
+                   :variadic false :parse nil :doc "Query name."}]
+                 (->> (get-in detail [:arg-spec :subcommands])
+                      (filter #(= "explain" (:name %)))
+                      first
+                      :positionals)))))
+      (testing "unknown query subcommand fails in the parser with available names"
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown subcommand"
+                                      (api/op! rt 'query ["bogus"])))]
+          (is (= :unknown-subcommand (:reason (ex-data e))))
+          (is (= "bogus" (:token (ex-data e))))
+          (is (= ["explain" "list"] (:available-subcommands (ex-data e))))))
       (testing "query explain without a name fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires a query name"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing required"
                               (api/op! rt 'query ["explain"]))))
       (testing "query explain of an unknown query fails loudly"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Query not found"
@@ -268,11 +280,14 @@
           (is (= "task" (:name explained)))
           (is (= "skein.spools.batteries-test/weave-test-pattern" (:fn explained)))
           (is (string? (:input-spec explained)))))
-      (testing "unknown pattern subcommand fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown pattern subcommand"
-                              (api/op! rt 'pattern ["bogus"]))))
+      (testing "unknown pattern subcommand fails in the parser with available names"
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown subcommand"
+                                      (api/op! rt 'pattern ["bogus"])))]
+          (is (= :unknown-subcommand (:reason (ex-data e))))
+          (is (= "bogus" (:token (ex-data e))))
+          (is (= ["explain" "list"] (:available-subcommands (ex-data e))))))
       (testing "pattern explain without a name fails loudly"
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires a pattern name"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing required"
                               (api/op! rt 'pattern ["explain"]))))
       (testing "pattern explain of an unknown pattern fails loudly"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Pattern not found"

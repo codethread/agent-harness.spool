@@ -198,15 +198,17 @@ strand query explain <name>
 ```
 
 Read-only introspection of registered named queries (old C13aa/C13ab), moved
-from the deleted builtin to a batteries op (SPEC-002-D004.C12). `list` takes no
-arguments and returns a JSON array of metadata entries (`name`, `params`,
+from the deleted builtin to a batteries op (SPEC-002-D004.C12). `query`
+declares `list` and `explain` as parser-owned subcommands, so `strand help
+query` renders both verbs and missing/unknown subcommands fail in the parser
+with the available names before the handler runs. `list` takes no arguments and
+returns a JSON array of metadata entries (`name`, `params`,
 `referenced-params`) ordered by canonical name. `explain <name>` returns caller
 guidance for one query (`name`, `params`, `referenced-params`, `where`,
 `definition`, `where-form`, `definition-form`, `summary`). Both are projected
 JSON-safe (`json-safe-value`: keywords → names, symbols → strings, sets →
-sorted vectors), matching the old `query-list`/`query-explain` payloads. Unknown
-subcommands, a missing/blank name on `explain`, and unknown query names all
-fail loudly.
+sorted vectors), matching the old `query-list`/`query-explain` payloads. A
+missing/blank name on `explain` and unknown query names fail loudly.
 
 #### `pattern` — BAT-C15 (registry introspection)
 
@@ -215,14 +217,16 @@ strand pattern list
 strand pattern explain <name>
 ```
 
-Read-only introspection of registered weave patterns (old C13b). `list` takes
-no arguments and returns registered pattern metadata ordered by name.
-`explain <name>` returns input-spec guidance (`name`, `fn`, `input-spec`,
+Read-only introspection of registered weave patterns (old C13b). `pattern`
+declares `list` and `explain` as parser-owned subcommands, so help rendering and
+missing/unknown-subcommand failures are handled by the blessed arg-spec parser.
+`list` takes no arguments and returns registered pattern metadata ordered by
+name. `explain <name>` returns input-spec guidance (`name`, `fn`, `input-spec`,
 `spec-form`, `summary`, and expanded `required`/`optional` key specs for a
 `clojure.spec.alpha/keys` input spec, plus optional `doc`). Registry names are
-canonical strings (e.g. `"task"`). Unknown subcommands, a missing/blank name on
-`explain`, and unknown pattern names all fail loudly. Pattern *registration*
-stays a trusted config/REPL workflow — never exposed here.
+canonical strings (e.g. `"task"`). A missing/blank name on `explain` and unknown
+pattern names fail loudly. Pattern *registration* stays a trusted config/REPL
+workflow — never exposed here.
 
 ## 4. Attribute and edge flag semantics
 

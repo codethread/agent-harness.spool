@@ -262,14 +262,10 @@
   (let [rt (:op/runtime ctx)
         {:keys [subcommand] nm :name} (:op/args ctx)]
     (case subcommand
-      "list" (do (when (some? nm)
-                   (throw (ex-info "query list takes no arguments" {:unexpected nm})))
-                 (json-safe-value (api/query-metadata rt)))
+      "list" (json-safe-value (api/query-metadata rt))
       "explain" (do (when (str/blank? nm)
                       (throw (ex-info "query explain requires a query name" {})))
-                    (json-safe-value (api/query-explain rt (handle-name nm))))
-      (throw (ex-info (str "Unknown query subcommand: " subcommand)
-                      {:subcommand subcommand :allowed ["list" "explain"]})))))
+                    (json-safe-value (api/query-explain rt (handle-name nm)))))))
 
 (defn pattern-op
   "Introspect registered weave patterns: list all metadata or explain one."
@@ -277,14 +273,10 @@
   (let [rt (:op/runtime ctx)
         {:keys [subcommand] nm :name} (:op/args ctx)]
     (case subcommand
-      "list" (do (when (some? nm)
-                   (throw (ex-info "pattern list takes no arguments" {:unexpected nm})))
-                 (api/patterns rt))
+      "list" (api/patterns rt)
       "explain" (do (when (str/blank? nm)
                       (throw (ex-info "pattern explain requires a pattern name" {})))
-                    (api/pattern-explain rt (handle-name nm)))
-      (throw (ex-info (str "Unknown pattern subcommand: " subcommand)
-                      {:subcommand subcommand :allowed ["list" "explain"]})))))
+                    (api/pattern-explain rt (handle-name nm))))))
 
 ;; --- arg-specs --------------------------------------------------------------
 
@@ -371,14 +363,22 @@
 (def ^:private query-arg-spec
   {:op "query"
    :doc "Introspect registered named queries: list all or explain one."
-   :positionals [{:name :subcommand :type :string :required? true :doc "Subcommand: list or explain."}
-                 {:name :name :type :string :doc "Query name (required for explain)."}]})
+   :subcommands {"list" {:doc "List registered named query metadata."}
+                 "explain" {:doc "Explain one registered named query."
+                             :positionals [{:name :name
+                                            :type :string
+                                            :required? true
+                                            :doc "Query name."}]}}})
 
 (def ^:private pattern-arg-spec
   {:op "pattern"
    :doc "Introspect registered weave patterns: list all or explain one."
-   :positionals [{:name :subcommand :type :string :required? true :doc "Subcommand: list or explain."}
-                 {:name :name :type :string :doc "Pattern name (required for explain)."}]})
+   :subcommands {"list" {:doc "List registered weave pattern metadata."}
+                 "explain" {:doc "Explain one registered weave pattern."
+                             :positionals [{:name :name
+                                            :type :string
+                                            :required? true
+                                            :doc "Pattern name."}]}}})
 
 (def ^:private op-registrations
   "Each shipped op: [op-name arg-spec hook-class handler-symbol]."

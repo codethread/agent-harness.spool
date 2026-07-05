@@ -1554,6 +1554,45 @@
                                   :stream? true
                                   :hook-class :read}
                                  'skein.weaver-test/test-op))))
+      (testing "opaque non-subcommand arg-spec metadata remains unvalidated"
+        (is (= {:opts [:limit]}
+               (:arg-spec (api/register-op! rt 'opaque
+                                            {:arg-spec {:opts [:limit]}}
+                                            'skein.weaver-test/test-op)))))
+      (testing "subcommand arg-specs are validated at registration"
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                      #"arg-spec subcommands are invalid"
+                                      (api/register-op! rt 'bad-subcommands
+                                                        {:arg-spec {:op "bad-subcommands"
+                                                                    :flags {:verbose {:type :boolean}}
+                                                                    :subcommands {"run" {:doc "Run"}}}}
+                                                        'skein.weaver-test/test-op)))]
+          (is (= "bad-subcommands" (:operation (ex-data e))))
+          (is (= :invalid-subcommands (:reason (ex-data e))))
+          (is (= :flags (:field (ex-data e))))))
+      (testing "registration preserves structured nested arg-spec validation context"
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                      #"arg-spec subcommands are invalid"
+                                      (api/register-op! rt 'bad-nested-subcommand
+                                                        {:arg-spec {:op "bad-nested-subcommand"
+                                                                    :subcommands {"run" 42}}}
+                                                        'skein.weaver-test/test-op)))]
+          (is (= "bad-nested-subcommand" (:operation (ex-data e))))
+          (is (= :invalid-subcommand-spec (:reason (ex-data e))))
+          (is (= "run" (:subcommand (ex-data e))))
+          (is (= :subcommands (:field (ex-data e))))
+          (is (= 42 (:value (ex-data e))))))
+      (testing "replace-op! also validates subcommand arg-specs before replacing"
+        (api/register-op! rt 'replaceable 'skein.weaver-test/test-op)
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                      #"arg-spec subcommands are invalid"
+                                      (api/replace-op! rt 'replaceable
+                                                       {:arg-spec {:op "replaceable"
+                                                                   :subcommands {"run" {:subcommands {"again" {}}}}}}
+                                                       'skein.weaver-test/context-echo-op)))]
+          (is (= "replaceable" (:operation (ex-data e))))
+          (is (= :invalid-subcommands (:reason (ex-data e))))
+          (is (= 'skein.weaver-test/test-op (:fn (api/resolve-op rt 'replaceable))))))
       (testing "explicit deadline-class overrides the stream default"
         (is (= :standard
                (:deadline-class (api/register-op! rt 'bounded-stream
@@ -1659,6 +1698,29 @@
         (let [ctx (api/op! rt 'payloaded [":stdin"] {:payloads {"stdin" "hello"}})]
           (is (= {:body "hello"} (:op/args ctx)))
           (is (= {"stdin" "hello"} (:op/payloads ctx)))))
+      (testing "subcommand arg-specs route before the handler"
+        (api/register-op! rt 'subbed
+                          {:arg-spec {:op "subbed"
+                                      :subcommands {"add" {:doc "Add an item"
+                                                           :flags {:force {:type :boolean}}
+                                                           :positionals [{:name :title :required? true}]}
+                                                    "list" {:doc "List items"}}}}
+                          'skein.weaver-test/context-echo-op)
+        (let [ctx (api/op! rt 'subbed ["add" "--force" "Widget"])]
+          (is (= {:subcommand "add" :force true :title "Widget"} (:op/args ctx)))
+          (is (= ["add" "--force" "Widget"] (:op/argv ctx)))))
+      (testing "unknown subcommands fail during parse before the handler runs"
+        (api/register-op! rt 'subbed-side-effect
+                          {:arg-spec {:op "subbed-side-effect"
+                                      :subcommands {"ok" {:doc "Run"}}}}
+                          'skein.weaver-test/side-effecting-op)
+        (reset! op-side-effects [])
+        (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                      #"Unknown subcommand"
+                                      (api/op! rt 'subbed-side-effect ["bogus"])))]
+          (is (= :unknown-subcommand (:reason (ex-data e))))
+          (is (= ["ok"] (:available-subcommands (ex-data e))))
+          (is (empty? @op-side-effects))))
       (testing "raw-envelope ops receive no :op/args and keep the raw payloads map"
         (api/register-op! rt 'raw 'skein.weaver-test/context-echo-op)
         (let [ctx (api/op! rt 'raw ["a" "b"] {:payloads {"stdin" "hi"}})]
@@ -1675,10 +1737,19 @@
                                     :flags {:limit {:type :int :doc "Max"}}
                                     :positionals [{:name :name}]}}
                         'skein.weaver-test/test-op)
+      (api/register-op! rt 'subbed
+                        {:doc "Subcommand op"
+                         :arg-spec {:op "subbed"
+                                    :doc "Subcommands"
+                                    :subcommands {"add" {:doc "Add an item"
+                                                         :flags {:force {:type :boolean :doc "Force add"}}
+                                                         :positionals [{:name :title :required? true :doc "Item title"}]}
+                                                  "list" {:doc "List items"}}}}
+                        'skein.weaver-test/context-echo-op)
       (api/register-op! rt 'raw "Raw op" 'skein.weaver-test/context-echo-op)
       (testing "no argv lists every op summary sorted by name"
         (let [{:keys [ops]} (api/op! rt 'help [])]
-          (is (= ["custom" "help" "raw"] (mapv :name ops)))
+          (is (= ["custom" "help" "raw" "subbed"] (mapv :name ops)))
           (let [help-entry (first (filter #(= "help" (:name %)) ops))]
             (is (= :read (:hook-class help-entry)))
             (is (= 'skein.api.weaver.alpha (:provenance help-entry)))
@@ -1693,6 +1764,18 @@
                    :repeat false :parse nil :doc "Max"}]
                  (get-in detail [:arg-spec :flags])))
           (is (not (contains? detail :raw-envelope)))))
+      (testing "subcommand op detail includes parser-rendered subcommands"
+        (let [detail (api/op! rt 'help ["subbed"])]
+          (is (= "Subcommand op" (:doc detail)))
+          (is (= "subbed" (get-in detail [:arg-spec :op])))
+          (is (= ["add" "list"] (mapv :name (get-in detail [:arg-spec :subcommands]))))
+          (is (= {:name "add"
+                  :doc "Add an item"
+                  :flags [{:name "force" :flag "--force" :type "boolean" :required false
+                           :repeat false :parse nil :doc "Force add"}]
+                  :positionals [{:name "title" :type "string" :required true
+                                 :variadic false :parse nil :doc "Item title"}]}
+                 (first (get-in detail [:arg-spec :subcommands]))))))
       (testing "raw-envelope op detail carries a marker instead of an arg-spec"
         (let [detail (api/op! rt 'help ["raw"])]
           (is (true? (:raw-envelope detail)))

@@ -1,0 +1,21 @@
+tasks:
+  - id: 1
+    description: Parser :subcommands in parse/explain with shared validator
+    task_file: tasks/001-parser-subcommands.md
+    status: complete
+    blocked_by: []
+  - id: 2
+    description: Registration-time validation and help detail rendering
+    task_file: tasks/002-registry-validation-help.md
+    status: complete
+    blocked_by: [1]
+  - id: 3
+    description: Migrate batteries query/pattern to declared subcommands
+    task_file: tasks/003-batteries-migration.md
+    status: complete
+    blocked_by: [2]
+  - id: 4
+    description: Full validation sweep and disposable-workspace real-usage smoke
+    task_file: tasks/004-validation-smoke.md
+    status: complete
+    blocked_by: [3]

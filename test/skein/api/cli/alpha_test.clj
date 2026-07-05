@@ -9,6 +9,12 @@
   (try (f) ::no-throw
        (catch clojure.lang.ExceptionInfo e (:reason (ex-data e)))))
 
+(defn- thrown-data
+  "Run `f`, returning thrown ex-data (or ::no-throw)."
+  [f]
+  (try (f) ::no-throw
+       (catch clojure.lang.ExceptionInfo e (ex-data e))))
+
 (def add-spec
   {:op :add
    :doc "Add a strand"
@@ -201,3 +207,173 @@
         data (first (filter #(= "data" (:name %)) (:flags e)))]
     (is (= "json" (:parse data)))
     (is (= "jsonl" (:parse (first (:positionals e)))))))
+
+;; ---------------------------------------------------------------------------
+;; Subcommands
+;; ---------------------------------------------------------------------------
+
+(def subcommand-spec
+  {:op :thing
+   :doc "Manage things"
+   :subcommands {"add" {:doc "Add a thing"
+                         :flags {:force {:type :boolean :doc "Skip checks"}
+                                 :data {:type :string :parse :json :doc "JSON data"}}
+                         :positionals [{:name :title :type :string :required? true :doc "Title"}]}
+                 "list" {:doc "List things"
+                          :flags {:limit {:type :int :doc "Maximum count"}}
+                          :positionals []}
+                 "tag" {:doc "Tag things"
+                         :flags {:attr {:type :map :doc "Metadata"}}
+                         :positionals [{:name :id :type :string :required? true}
+                                       {:name :labels :type :string :variadic? true}]}}})
+
+(deftest subcommand-routes-and-merges-matched-name
+  (is (= {:subcommand "add" :force true :title "hello"}
+         (cli/parse subcommand-spec ["add" "--force" "hello"]))))
+
+(deftest subcommand-supports-each-arg-kind
+  (testing "int flags"
+    (is (= {:subcommand "list" :limit 10}
+           (cli/parse subcommand-spec ["list" "--limit" "10"]))))
+  (testing "map flags and variadic positionals"
+    (is (= {:subcommand "tag" :attr {"k" "v"} :id "abc" :labels ["x" "y"]}
+           (cli/parse subcommand-spec ["tag" "--attr" "k=v" "abc" "x" "y"]))))
+  (testing "nested required args remain local to the routed subcommand"
+    (is (= :missing-required (reason #(cli/parse subcommand-spec ["add"]))))))
+
+(deftest subcommand-missing-and-unknown-errors-carry-available-names
+  (try (cli/parse subcommand-spec [])
+       (is false "expected throw")
+       (catch clojure.lang.ExceptionInfo e
+         (is (= :missing-subcommand (:reason (ex-data e))))
+         (is (= :thing (:op (ex-data e))))
+         (is (= ["add" "list" "tag"] (:available-subcommands (ex-data e))))))
+  (try (cli/parse subcommand-spec ["bogus"])
+       (is false "expected throw")
+       (catch clojure.lang.ExceptionInfo e
+         (is (= :unknown-subcommand (:reason (ex-data e))))
+         (is (= "bogus" (:token (ex-data e))))
+         (is (= ["add" "list" "tag"] (:available-subcommands (ex-data e)))))))
+
+(deftest subcommand-structure-failures-are-loud
+  (testing "top-level flags cannot be mixed with subcommands"
+    (is (= :invalid-subcommands
+           (reason #(cli/validate-subcommands! (assoc subcommand-spec :flags {:verbose {:type :boolean}}))))))
+  (testing "top-level positionals cannot be mixed with subcommands"
+    (is (= :invalid-subcommands
+           (reason #(cli/validate-subcommands! (assoc subcommand-spec :positionals [{:name :id}]))))))
+  (testing "subcommand names must be non-blank strings"
+    (let [data (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"" {:doc "Nope"}}}))]
+      (is (= :invalid-subcommand-name (:reason data)))
+      (is (= :x (:op data)))
+      (is (= "" (:subcommand data)))
+      (is (= :subcommands (:field data)))))
+  (testing "nested subcommand specs must be maps"
+    (let [data (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" 42}}))]
+      (is (= :invalid-subcommand-spec (:reason data)))
+      (is (= :x (:op data)))
+      (is (= "a" (:subcommand data)))
+      (is (= :subcommands (:field data)))
+      (is (= 42 (:value data)))))
+  (testing "nested flags must be a map"
+    (let [data (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:flags []}}}))]
+      (is (= :invalid-subcommand-flags (:reason data)))
+      (is (= :x (:op data)))
+      (is (= "a" (:subcommand data)))
+      (is (= :flags (:field data)))
+      (is (= [] (:value data)))))
+  (testing "nested flag entries must be keyword to map"
+    (let [bad-name (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:flags {"force" {:type :boolean}}}}}))
+          bad-spec (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:flags {:force true}}}}))]
+      (is (= :invalid-subcommand-flag (:reason bad-name)))
+      (is (= :flags (:field bad-name)))
+      (is (= "force" (:arg bad-name)))
+      (is (= :invalid-subcommand-flag (:reason bad-spec)))
+      (is (= :force (:arg bad-spec)))
+      (is (true? (:value bad-spec)))))
+  (testing "nested positionals must be sequential"
+    (let [data (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:positionals {:name :id}}}}))]
+      (is (= :invalid-subcommand-positionals (:reason data)))
+      (is (= :x (:op data)))
+      (is (= "a" (:subcommand data)))
+      (is (= :positionals (:field data)))
+      (is (= {:name :id} (:value data)))))
+  (testing "nested positional entries must be maps with keyword :name"
+    (let [bad-entry (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:positionals ["id"]}}}))
+          bad-name (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:positionals [{:name "id"}]}}}))]
+      (is (= :invalid-subcommand-positional (:reason bad-entry)))
+      (is (= :positionals (:field bad-entry)))
+      (is (= 0 (:index bad-entry)))
+      (is (= "id" (:value bad-entry)))
+      (is (= :invalid-subcommand-positional (:reason bad-name)))
+      (is (= {:name "id"} (:value bad-name)))))
+  (testing "nested flag and positional types must be known"
+    (let [bad-flag (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:flags {:n {:type :strnig}}}}}))
+          bad-pos (thrown-data #(cli/validate-subcommands! {:op :x :subcommands {"a" {:positionals [{:name :id :type :uuid}]}}}))]
+      (is (= :invalid-arg-type (:reason bad-flag)))
+      (is (= :flags (:field bad-flag)))
+      (is (= :n (:arg bad-flag)))
+      (is (= :strnig (:type bad-flag)))
+      (is (= [:boolean :int :map :string] (:supported-types bad-flag)))
+      (is (= :invalid-arg-type (:reason bad-pos)))
+      (is (= :positionals (:field bad-pos)))
+      (is (= :id (:arg bad-pos)))
+      (is (= :uuid (:type bad-pos)))))
+  (testing "nested subcommands are rejected"
+    (is (= :invalid-subcommands
+           (reason #(cli/validate-subcommands!
+                     {:op :x :subcommands {"a" {:subcommands {"b" {}}}}}))))))
+
+(deftest subcommand-reserved-name-failures-are-loud
+  (testing "nested flag named subcommand is reserved"
+    (is (= :reserved-subcommand
+           (reason #(cli/validate-subcommands!
+                     {:op :x :subcommands {"a" {:flags {:subcommand {:type :string}}}}})))))
+  (testing "nested positional named subcommand is reserved"
+    (is (= :reserved-subcommand
+           (reason #(cli/validate-subcommands!
+                     {:op :x :subcommands {"a" {:positionals [{:name :subcommand}]}}}))))))
+
+(deftest subcommand-payload-ref-and-json-parse-use-routed-spec
+  (is (= {:subcommand "add" :title "literal" :data {"ok" true}}
+         (cli/parse subcommand-spec ["add" "literal" "--data" ":payload/body"]
+                    {"body" "{\"ok\":true}"})))
+  (testing "unused payloads are evaluated against routed subcommand consumption"
+    (try (cli/parse subcommand-spec ["list"] {"body" "unused"})
+         (is false "expected throw")
+         (catch clojure.lang.ExceptionInfo e
+           (is (= :unused-payloads (:reason (ex-data e))))
+           (is (= ["body"] (:unused (ex-data e))))))))
+
+(deftest explain-renders-subcommands
+  (let [e (cli/explain subcommand-spec)]
+    (is (= "thing" (:op e)))
+    (is (= "Manage things" (:doc e)))
+    (is (= [] (:flags e)))
+    (is (= [] (:positionals e)))
+    (is (= ["add" "list" "tag"] (mapv :name (:subcommands e))))
+    (let [add (first (:subcommands e))]
+      (is (= "Add a thing" (:doc add)))
+      (is (= [{:name "data" :flag "--data" :type "string" :required false :repeat false :parse "json" :doc "JSON data"}
+              {:name "force" :flag "--force" :type "boolean" :required false :repeat false :parse nil :doc "Skip checks"}]
+             (:flags add)))
+      (is (= [{:name "title" :type "string" :required true :variadic false :parse nil :doc "Title"}]
+             (:positionals add))))))
+
+(deftest flat-spec-parse-and-explain-regression
+  (is (= {:owner "me" :title "title"}
+         (cli/parse add-spec ["--owner" "me" "title"])))
+  (is (= {:op "add"
+          :doc "Add a strand"
+          :flags (mapv (fn [[k v]]
+                         {:name (name k)
+                          :flag (str "--" (name k))
+                          :type (name (:type v :string))
+                          :required (boolean (:required? v))
+                          :repeat (boolean (:repeat? v))
+                          :parse (some-> (:parse v) name)
+                          :doc (:doc v)})
+                       (sort-by key (:flags add-spec)))
+          :positionals [{:name "title" :type "string" :required true :variadic false :parse nil :doc "Title"}
+                        {:name "note" :type "string" :required false :variadic false :parse nil :doc "Optional note"}]}
+         (cli/explain add-spec))))
