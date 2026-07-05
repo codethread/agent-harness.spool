@@ -88,7 +88,11 @@ A consumer pins the exact source content they consent to run:
 ```
 
 - `:git/sha` is the behavior contract: it must be exactly 40 lowercase hex
-  characters, and the weaver caches the fetched tree by sha.
+  characters, and the weaver caches the fetched tree by sha. On a cache miss,
+  the weaver fetches the pinned sha directly; if the remote does not satisfy
+  that direct request, it performs one bounded refetch of advertised tags and
+  branches from the same remote before failing loudly with the remote URL and
+  cache path.
 - `:git/tag` is an optional human-readable label. When a fetch occurs, the tag
   must resolve to the same sha or sync records a `:tag-mismatch` failure. Cache
   hits trust the sha and do not re-check the tag.

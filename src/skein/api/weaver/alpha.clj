@@ -335,14 +335,34 @@
                          :expected (:git/sha entry)
                          :actual actual}))))))
 
-(defn- checkout-git-spool! [entry tmp]
+(defn- git-cache-miss-failure [entry cache-root result]
+  (assoc (fetch-failure result)
+         :remote (:git/url entry)
+         :cache-path (.getPath cache-root)))
+
+(defn- fetch-advertised-refs! [entry tmp cache-root]
+  (let [refetch (run-git tmp
+                         "fetch"
+                         "--tags"
+                         "--prune"
+                         (:git/url entry)
+                         "+refs/heads/*:refs/remotes/origin/*")]
+    (when-not (zero? (:exit refetch))
+      (throw (ex-info "git fetch failed"
+                      (git-cache-miss-failure entry cache-root refetch))))
+    (let [present (run-git tmp "cat-file" "-e" (str (:git/sha entry) "^{commit}"))]
+      (when-not (zero? (:exit present))
+        (throw (ex-info "git pinned sha is unreachable after refetch"
+                        (git-cache-miss-failure entry cache-root present)))))))
+
+(defn- checkout-git-spool! [entry tmp cache-root]
   (checked-git tmp "init")
   (let [shallow (run-git tmp "fetch" "--depth" "1" (:git/url entry) (:git/sha entry))]
     (when-not (zero? (:exit shallow))
       (let [full (run-git tmp "fetch" (:git/url entry) (:git/sha entry))]
         (when-not (zero? (:exit full))
-          (throw (ex-info "git fetch failed" (fetch-failure full)))))))
-  (checked-git tmp "checkout" "--detach" "FETCH_HEAD")
+          (fetch-advertised-refs! entry tmp cache-root)))))
+  (checked-git tmp "checkout" "--detach" (:git/sha entry))
   (delete-tree! (io/file tmp ".git")))
 
 (defn- move-git-spool-to-cache! [tmp cache-root]
@@ -372,7 +392,7 @@
         (try
           (when-let [_ (:git/tag entry)]
             (verify-git-tag! entry))
-          (checkout-git-spool! entry tmp)
+          (checkout-git-spool! entry tmp cache-root)
           (let [outcome (move-git-spool-to-cache! tmp cache-root)]
             (when (= :cached outcome)
               (delete-tree! tmp))
@@ -473,7 +493,11 @@
     (catch clojure.lang.ExceptionInfo e
       (if (= :tag-mismatch (:reason (ex-data e)))
         {:failed (sync-failed lib entry :tag-mismatch (select-keys (ex-data e) [:tag :expected :actual]))}
-        {:failed (sync-failed lib entry :fetch-failed (fetch-failure (ex-data e)))}))
+        (let [data (ex-data e)]
+          {:failed (sync-failed lib entry :fetch-failed
+                                (cond-> (fetch-failure data)
+                                  (:remote data) (assoc :remote (:remote data))
+                                  (:cache-path data) (assoc :cache-path (:cache-path data))))})))
     (catch Throwable t
       {:failed (sync-failed lib entry :fetch-failed {:exit 1
                                                      :stderr (stderr-tail (ex-message t))})})))

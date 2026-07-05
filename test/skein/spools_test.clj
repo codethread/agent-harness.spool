@@ -656,6 +656,63 @@
               (is (= :already-available (:status result)))
               (is (= :cached (:fetch result))))))))))
 
+(deftest sync-refetches-advertised-refs-when-direct-sha-fetch-misses
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            ns-sym (symbol (str "demo.git_refetch_" (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+            _ (init-git-repo! repo ns-sym)
+            _ (spit (io/file repo "after-initial-cache.txt") "fresh")
+            _ (run-git! repo "add" ".")
+            _ (run-git! repo "commit" "-m" "fresh sha")
+            sha (str/trim (run-git! repo "rev-parse" "HEAD"))
+            url (file-url repo)
+            lib 'demo/git-refetch
+            original-run-git @#'api/run-git
+            exact-sha-fetches (atom 0)]
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {lib {:git/url url :git/sha sha}}}))
+            (try
+              (alter-var-root
+               #'api/run-git
+               (constantly
+                (fn [dir & args]
+                  (if (and (= "fetch" (first args))
+                           (= [url sha] (take-last 2 args))
+                           (< (swap! exact-sha-fetches inc) 3))
+                    {:exit 128 :stderr "simulated stale remote cache miss"}
+                    (apply original-run-git dir args)))))
+              (let [result (get-in (runtime-alpha/sync! rt) [:spools lib])]
+                (is (= :loaded (:status result)))
+                (is (= :fetched (:fetch result)))
+                (is (= 2 @exact-sha-fetches))
+                (is (.isFile (io/file cache-dir "skein" "spools" sha "after-initial-cache.txt"))))
+              (finally
+                (alter-var-root #'api/run-git (constantly original-run-git))))))))))
+
+(deftest sync-git-unreachable-sha-names-cache-path-and-remote
+  (with-runtime
+    (fn [rt config-dir]
+      (let [repo (io/file config-dir "repo")
+            cache-dir (io/file config-dir "cache")
+            sha (init-git-repo! repo 'demo.unreachable_sha)
+            unknown (apply str (repeat 40 \a))]
+        (is (not= sha unknown))
+        (with-cache-base
+          cache-dir
+          (fn []
+            (write-spools! config-dir (pr-str {:spools {'demo/unreachable {:git/url (file-url repo) :git/sha unknown}}}))
+            (let [result (get-in (runtime-alpha/sync! rt) [:spools 'demo/unreachable])]
+              (is (= :failed (:status result)))
+              (is (= :fetch-failed (:reason result)))
+              (is (= (file-url repo) (:remote result)))
+              (is (= (.getPath (io/file cache-dir "skein" "spools" unknown)) (:cache-path result)))
+              (is (string? (:stderr result)))
+              (is (not (contains? result :initial-stderr))))))))))
+
 (deftest sync-git-concurrent-cache-publish-race-loads-winner-tree
   (with-runtime
     (fn [rt config-dir]
@@ -674,7 +731,7 @@
                 (alter-var-root
                  #'api/checkout-git-spool!
                  (constantly
-                  (fn [_entry tmp]
+                  (fn [_entry tmp _cache-root]
                     ;; The pre-check in materialize-git-spool! has already
                     ;; missed. Simulate a concurrent winner publishing a valid,
                     ;; non-empty tree immediately before this materializer's
