@@ -978,6 +978,13 @@
      {:alias-of :claude
       :extra-args ["--model" "opus"]
       :doc "Claude Opus: feature building, reviews, and council seats."})
+   ;; oracle is deliberately scarce: single-case briefs with mandatory
+   ;; incremental card notes — a context-overflowed Fable run that wrote
+   ;; nothing costs an order of magnitude more than any other seat.
+   (shuttle/defalias! :oracle
+     {:alias-of :claude
+      :extra-args ["--model" "claude-fable-5"]
+      :doc "Claude Fable oracle: reserved for extreme diagnosis cases only — deep forensics and design diagnosis where cheaper seats have failed or the blast radius justifies it."})
    ;; GPT seats for cross-vendor validation. Routing policy: build (opus) is
    ;; favoured for anything prose/docs-heavy, but never signs off its own
    ;; work — sign-off review of opus-authored output always includes a GPT
