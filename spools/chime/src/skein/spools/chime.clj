@@ -217,11 +217,17 @@
                                            :data (ex-data t)})
                          nil))]
     (if notification
-      (when-not (contains? @(seen-notifications) seen-key)
-        ;; mark seen only when the notifier process actually started, so a
-        ;; missing or failing notifier does not permanently swallow the alert
-        (when (= :started (:status (notify! notification)))
-          (swap! (seen-notifications) conj seen-key)))
+      ;; claim the key atomically before notifying: a plain check-then-act
+      ;; contains? lets a concurrent event-worker scan and an explicit scan!
+      ;; both pass the check and double-notify. Only the thread that finds the
+      ;; key absent in the pre-swap value owns the notification.
+      (let [[old _] (swap-vals! (seen-notifications) conj seen-key)]
+        (when-not (contains? old seen-key)
+          ;; keep the mark only when the notifier process actually started;
+          ;; otherwise release the claim so a missing or failing notifier does
+          ;; not permanently swallow the alert
+          (when-not (= :started (:status (notify! notification)))
+            (swap! (seen-notifications) disj seen-key))))
       ;; the condition no longer holds: re-arm so a later recurrence
       ;; (the rule stops matching, then matches again later) notifies again
       (swap! (seen-notifications) disj seen-key))))

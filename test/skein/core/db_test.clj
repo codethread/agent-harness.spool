@@ -171,6 +171,36 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"same strand"
                               (db/add-edge! ds {:from root :to root :type "related-to" :attributes {}})))))))
 
+(deftest incoming-and-outgoing-edges-resolve-adjacency-without-traversal
+  (with-db
+    (fn [ds]
+      (let [a (:id (db/add-strand! ds {:title "A"}))
+            b (:id (db/add-strand! ds {:title "B"}))
+            c (:id (db/add-strand! ds {:title "C"}))]
+        (db/add-edge! ds {:from a :to c :type "parent-of" :attributes {}})
+        (db/add-edge! ds {:from b :to c :type "parent-of" :attributes {}})
+        (db/add-edge! ds {:from a :to b :type "related-to" :attributes {}})
+        (testing "incoming-edges returns sources for a target by edge type"
+          (is (= #{[a c] [b c]}
+                 (set (mapv (juxt :from_strand_id :to_strand_id)
+                            (db/incoming-edges ds [c] "parent-of")))))
+          (is (empty? (db/incoming-edges ds [a] "parent-of"))))
+        (testing "outgoing-edges returns targets for a source by edge type"
+          (is (= #{[a c]}
+                 (set (mapv (juxt :from_strand_id :to_strand_id)
+                            (db/outgoing-edges ds [a] "parent-of")))))
+          (is (= #{[a b]}
+                 (set (mapv (juxt :from_strand_id :to_strand_id)
+                            (db/outgoing-edges ds [a] "related-to"))))))
+        (testing "an empty id set short-circuits without a query"
+          (is (= [] (db/incoming-edges ds [] "parent-of")))
+          (is (= [] (db/outgoing-edges ds [] "parent-of"))))
+        (testing "adjacency is lenient: an absent id yields no rows, not an error"
+          ;; documented contract (SPEC-004.C55a) — unlike subgraph/ancestor-root-ids
+          ;; seeds, these edge-projection primitives do not validate id existence
+          (is (= [] (db/incoming-edges ds ["nope-missing"] "parent-of")))
+          (is (= [] (db/outgoing-edges ds ["nope-missing"] "parent-of"))))))))
+
 (deftest relation-declarations-and-scoped-cycle-checks
   (with-db
     (fn [ds]

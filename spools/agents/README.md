@@ -295,6 +295,7 @@ Injected automatically into every delegated run's preamble (shown here for refer
 - **Record progress as you go:** `strand update <task-id> --attr progress=...`.
 - **Set `--attr status=implemented` only when your validation gate is green.**
 - **Never close your assigned strand. Never mutate sibling or parent strands. Never commit unless your contract says so.**
+- **Kill processes by PID only — never `pkill -f`/pattern kills.** The shipped `claude`/`pi` harnesses now deliver the worker prompt on stdin, but other/custom harnesses may still pass it in argv (`:prompt-via :arg`, the default), so a pattern kill aimed at a stuck JVM can still strafe sibling agents whose prompt quotes the same text (a `pkill -f "clojure -M:test"` murdered two delegated runs on 2026-07-05). Find the pid and kill it.
 - **Spawn read-only helpers freely:** `agent spawn --harness explore --prompt "..." --spawned-by <your-run-id>`; then `agent await <helper-run-id>` — the findings are in the returned `result`.
 - **Leave durable findings** for the coordinator and successors: `agent note <task-id> "..." --by <your-run-id>`.
 - **Keep delegation shallow;** never spawn a second mutator inside your own file scope.

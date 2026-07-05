@@ -65,6 +65,17 @@
 (defn- file-contains? [file text]
   (and (.exists file) (str/includes? (slurp file) text)))
 
+(defn- await-notifier-threads!
+  "Join every live chime notifier dispatch thread. `notify!` starts one daemon
+  thread per dispatch synchronously, so once the scans that claim notifications
+  have returned the full set of dispatch threads exists; joining them observes
+  every subprocess write — a deterministic replacement for waiting a fixed
+  interval to see whether a second (buggy) notification lands."
+  []
+  (doseq [^Thread t (keys (Thread/getAllStackTraces))
+          :when (str/starts-with? (.getName t) "chime-notify-")]
+    (.join t 5000)))
+
 (defn- bind-file-notifier! [dir]
   (let [out-file (io/file dir "notifications.txt")
         script (write-notifier! dir out-file)]
@@ -248,6 +259,38 @@
           (is (= {:seen 0} (chime/reset-seen!)))
           (chime/scan! {:strand/id (:id run)})
           (eventually #(> (count (re-seq #"flaky run" (slurp out-file))) 1)))))))
+
+(deftest concurrent-scans-notify-once
+  ;; regression: dedup was check-then-act on the seen atom, so an event-worker
+  ;; scan racing an explicit scan! could both pass the contains? check and
+  ;; double-notify. The atomic swap-vals! claim must let only one thread win.
+  (with-chime
+    (fn [rt config-dir]
+      (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
+      (let [out-file (bind-file-notifier! config-dir)
+            run (api/add rt {:title "raced run"
+                             :attributes {"phase" "failed"
+                                          "error" "boom"}})
+            threads 12
+            ;; a shared latch fires every scan at once to maximise contention
+            start (java.util.concurrent.CountDownLatch. 1)
+            done (java.util.concurrent.CountDownLatch. threads)]
+        (dotimes [_ threads]
+          (.start (Thread. (fn []
+                             (.await start)
+                             (try
+                               ;; the runtime is thread-local, so each worker
+                               ;; must carry it into its own scan
+                               (binding [chime/*runtime* rt]
+                                 (chime/scan! {:strand/id (:id run)}))
+                               (finally (.countDown done)))))))
+        (.countDown start)
+        (.await done)
+        ;; every claim has resolved; join the notifier dispatch threads so all
+        ;; subprocess writes (including a buggy second one) have landed before
+        ;; asserting exactly one notification fired
+        (await-notifier-threads!)
+        (is (= 1 (count (re-seq #"raced run" (slurp out-file)))))))))
 
 (deftest dedup-rearms-when-rule-stops-matching
   (with-chime

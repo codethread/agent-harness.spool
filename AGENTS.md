@@ -67,6 +67,8 @@ make dash                     # code-owner TUI over the live coordination world:
 
 Agents must prefer explicit disposable `--workspace` workspaces. Never use or mutate the user's default config/data/state workspaces unless explicitly asked.
 
+Kill processes by PID only. Never `pkill -f <pattern>`, `pkill clojure`, or any command-line/argv match to clean up a stuck process. The shipped `claude` and `pi` harnesses now deliver their worker prompt on stdin, so it no longer rides in argv — but other and custom harnesses may still pass the prompt as an argument (`:prompt-via :arg`, the default for any harness that doesn't opt into `:stdin`), and that prompt quotes the very commands you are trying to clean up (the test gate, a build step), so a pattern kill aimed at one stuck JVM can still strafe unrelated sibling agents whose argv happens to mention the same text. On 2026-07-05 a `pkill -f "clojure -M:test"` meant to clear stuck test JVMs killed two healthy delegated build runs within a second. Find the specific PID (`jps`, `ps`, or the run's recorded pid) and `kill <pid>`.
+
 ```sh
 make install
 workspace=$(mktemp -d)
@@ -242,6 +244,18 @@ PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 ```
 
 The smoke demo builds temporary `strand` and `mill` CLIs, `mill init`s a disposable `--workspace` workspace, starts a disposable mill and weaver, exercises the strand dispatcher's batteries ops (`add`/`update`/`list`/`ready`/`show`/`weave`, payload-ref flags, `--dry-run`, `strand help`, unknown-op failure, and a streaming op) plus direct live `mill weaver repl --stdin`, exercises REPL helpers against a real weaver, then removes generated state, data, config, socket, metadata, and built CLI artifacts.
+
+### Cooperative swarm validation gate
+
+When several agents run the full suite concurrently on one machine (delegated swarms, parallel worktrees), the suite's fixed timing budgets execute under CPU and fork-pressure starvation that a solo run never sees — three concurrent suites put ~40 runnable threads and a dozen JVMs on a 10-core box — and the flakes that follow are load artefacts, not real failures. In agent/swarm contexts, serialize the suite behind a machine-wide advisory lock so only one full run holds the CPU at a time:
+
+```sh
+flock -w 3600 /tmp/skein-test.lock clojure -M:test
+```
+
+This is a cooperative queue at the gate, not code-level locking, and it is deliberately **not** baked into the `:test` alias: a solo interactive run must not pay the mutex cost, and the lock only means something when siblings honour the same convention. Reach for it whenever you know other agents may be testing at the same time. The queue also protects unrelated interactive sessions on the machine, since the fork-pressure starvation it prevents is machine-global.
+
+`flock` is a util-linux tool and is not shipped with macOS — on this host install it with `brew install util-linux` (it lands at `/opt/homebrew/opt/util-linux/bin/flock`, so add that to `PATH` or symlink it). Any equivalent whole-run mutex on the same well-known lock path serves the same purpose.
 
 Tests and smoke workflows must isolate weaver workspaces with temporary workspaces. Do not start test weavers through implicit repo discovery or any user-owned workspace.
 

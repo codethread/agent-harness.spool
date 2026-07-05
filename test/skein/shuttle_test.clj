@@ -95,7 +95,11 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unknown keys"
                               (shuttle/defharness! :bad {:argv ["x"] :nope 1})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"parse"
-                              (shuttle/defharness! :bad {:argv ["x"] :parse :yaml}))))
+                              (shuttle/defharness! :bad {:argv ["x"] :parse :yaml})))
+        ;; an invalid :prompt-via must fail at registration, not silently fall
+        ;; back to argv delivery and re-expose the prompt on the command line
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"prompt-via"
+                              (shuttle/defharness! :bad {:argv ["x"] :prompt-via :std-in}))))
       (testing "alias layering flattens onto the base harness"
         (shuttle/defharness! :base {:argv ["tool" "-p"] :parse :raw})
         (shuttle/defalias! :fast {:alias-of :base :extra-args ["--model" "fast"]})
@@ -125,6 +129,29 @@
         (is (= "hello-shuttle" (get-in done [:attributes :shuttle/result])))
         (is (= 1 (get-in done [:attributes :shuttle/attempt])))
         (is (some? (get-in done [:attributes :shuttle/pid])))))))
+
+(deftest stdin-prompt-stays-off-argv
+  (with-shuttle
+    (fn [rt]
+      (shuttle/register-default-harnesses!)
+      (testing "the shipped headless agent harnesses deliver the prompt on stdin"
+        (is (= :stdin (:prompt-via (shuttle/resolve-harness :claude))))
+        (is (= :stdin (:prompt-via (shuttle/resolve-harness :pi)))))
+      (testing "build-argv omits the prompt for a :prompt-via :stdin harness"
+        ;; the whole point of item 9: the worker prompt never lands in argv, so
+        ;; it stays out of `ps` and clear of any `pkill -f` pattern kill.
+        (let [harness (shuttle/resolve-harness :claude)
+              argv (#'shuttle/build-argv harness nil "SECRET-WORKER-PROMPT")]
+          (is (= (:argv harness) argv))
+          (is (not-any? #(str/includes? % "SECRET-WORKER-PROMPT") argv))))
+      (testing "a :prompt-via :stdin run pipes the prompt to the process and completes"
+        ;; `sh` with no args reads its script from stdin, so the prompt is
+        ;; delivered entirely off-argv while still driving the process.
+        (shuttle/defharness! :sh-stdin {:argv ["sh"] :prompt-via :stdin :preamble? false})
+        (let [run (shuttle/spawn-run! {:harness :sh-stdin :prompt "echo hello-stdin"})
+              done (await-phase rt (:id run) #{"done"} 10000)]
+          (is (= "closed" (:state done)))
+          (is (= "hello-stdin" (get-in done [:attributes :shuttle/result]))))))))
 
 (deftest failing-run-stays-active-and-loud
   (with-shuttle
@@ -199,6 +226,53 @@
                                      :attrs {"treadle/gate" (:id gate)}})]
         (is (= (:id gate) (:for (shuttle/run-summary (api/show rt (:id run))))))
         (await-phase rt (:id run) #{"done"})))))
+
+(deftest runs-for-filter-includes-treadle-gate-provenance
+  ;; regression: the --for prefilter narrowed candidates to parent-of children
+  ;; of the target before summaries were built, but treadle-delegated runs record
+  ;; provenance in the treadle/gate attr with no parent-of edge from the gate, so
+  ;; a valid gate-owned run vanished from `runs {:for gate-id}` / `agent ps --for`.
+  (with-shuttle
+    (fn [rt]
+      (let [gate (api/add rt {:title "gate"})
+            run (shuttle/spawn-run! {:harness :sh
+                                     :prompt "echo delegated"
+                                     :attrs {"treadle/gate" (:id gate)}})]
+        (await-phase rt (:id run) #{"done"} 10000)
+        (is (= [(:id run)]
+               (mapv :id (shuttle/runs {:for (:id gate)})))
+            "the gate-delegated run must survive the --for prefilter")))))
+
+(deftest ps-summary-building-does-not-scale-graph-scans-with-strand-count
+  ;; regression: ps once issued one subgraph per strand to find each run's
+  ;; parents, so summary cost scaled with total strand count (~440k queries
+  ;; live at 371 runs). Summary building must be a bounded set of indexed
+  ;; fetches, independent of how many unrelated strands exist.
+  (with-shuttle
+    (fn [rt]
+      (let [target (api/add rt {:title "delegated target"})
+            run (shuttle/spawn-run! {:harness :sh :prompt "echo work"
+                                     :parent (:id target)})]
+        (await-phase rt (:id run) #{"done"} 10000)
+        ;; unrelated strands the summary path must never touch per-strand
+        (dotimes [i 150] (api/add rt {:title (str "noise-" i)}))
+        (let [subgraph-calls (atom 0)
+              incoming-calls (atom 0)
+              real-subgraph api/subgraph
+              real-incoming api/incoming-edges]
+          (with-redefs [api/subgraph (fn [& args]
+                                       (swap! subgraph-calls inc)
+                                       (apply real-subgraph args))
+                        api/incoming-edges (fn [& args]
+                                             (swap! incoming-calls inc)
+                                             (apply real-incoming args))]
+            (let [summaries (shuttle/runs)]
+              (is (= (:id target)
+                     (:for (first (filter #(= (:id run) (:id %)) summaries)))))
+              ;; never a per-strand subgraph fan-out
+              (is (zero? @subgraph-calls))
+              ;; one bulk incoming-edge fetch resolves every run's parents
+              (is (= 1 @incoming-calls)))))))))
 
 (deftest notes-are-append-only-memory-with-rounds
   (with-shuttle

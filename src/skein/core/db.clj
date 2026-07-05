@@ -908,6 +908,55 @@
             :strands rows
             :edges edges}))))))
 
+(defn incoming-edges
+  "Return edges of `edge-type` whose target is one of `to-ids`.
+
+  Backed by the (to_strand_id, edge_type) index, so a strand's parents or
+  annotators resolve in one bounded query rather than a graph scan. Unlike
+  subgraph this does not traverse, so the relation need not be acyclic.
+
+  Adjacency is lenient by design (contrast subgraph/ancestor-root-ids/
+  strands-by-ids, which validate seed ids and fail loudly on a missing one):
+  an id absent from `strands` is indistinguishable from one with no matching
+  edges — both contribute no rows. These are edge-projection primitives, not
+  traversal seeds; the hot-path caller passes ids it already loaded, so an
+  existence guard would only add a query. Callers that need a missing-id error
+  must validate ids at their own boundary."
+  [ds to-ids edge-type]
+  (require-valid-relation-name! edge-type)
+  (let [to-ids (ordered-distinct to-ids)]
+    (if (empty? to-ids)
+      []
+      (execute! ds (into [(str "SELECT from_strand_id, to_strand_id, edge_type, attributes
+                                FROM strand_edges
+                                WHERE edge_type = ?
+                                  AND to_strand_id IN (" (placeholders to-ids) ")
+                                ORDER BY to_strand_id, from_strand_id")
+                          edge-type]
+                         to-ids)))))
+
+(defn outgoing-edges
+  "Return edges of `edge-type` whose source is one of `from-ids`.
+
+  Backed by the strand_edges primary key (from_strand_id prefix), so a
+  strand's children resolve in one bounded query without a graph scan.
+
+  Lenient adjacency, same contract as `incoming-edges`: an absent id yields no
+  rows rather than an error, so callers wanting a missing-id error validate at
+  their own boundary."
+  [ds from-ids edge-type]
+  (require-valid-relation-name! edge-type)
+  (let [from-ids (ordered-distinct from-ids)]
+    (if (empty? from-ids)
+      []
+      (execute! ds (into [(str "SELECT from_strand_id, to_strand_id, edge_type, attributes
+                                FROM strand_edges
+                                WHERE edge_type = ?
+                                  AND from_strand_id IN (" (placeholders from-ids) ")
+                                ORDER BY from_strand_id, to_strand_id")
+                          edge-type]
+                         from-ids)))))
+
 (defn all-strands
   "Return all strand rows, or rows matching query-def and optional params."
   ([ds]

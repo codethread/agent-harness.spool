@@ -1198,6 +1198,23 @@
             :strands (normalize strands)
             :edges (normalize edges)))))
 
+(defn incoming-edges
+  "Return normalized `edge-type` edges whose target is one of `to-ids`.
+
+  One indexed lookup for a strand's parents/annotators; no graph traversal.
+  Adjacency is lenient: an id absent from storage yields no rows rather than a
+  missing-id error (unlike subgraph/ancestor-root-ids seeds)."
+  [runtime to-ids edge-type]
+  (normalize (db/incoming-edges (ds runtime) to-ids edge-type)))
+
+(defn outgoing-edges
+  "Return normalized `edge-type` edges whose source is one of `from-ids`.
+
+  One indexed lookup for a strand's children; no graph traversal. Lenient
+  adjacency: an absent id yields no rows rather than a missing-id error."
+  [runtime from-ids edge-type]
+  (normalize (db/outgoing-edges (ds runtime) from-ids edge-type)))
+
 (defn- canonical-view-name [view-name]
   (query/canonical-query-name view-name))
 

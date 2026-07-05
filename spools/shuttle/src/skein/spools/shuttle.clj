@@ -126,6 +126,7 @@
 (def ^:private harness-def-keys #{:argv :parse :prompt-via :preamble? :env :cwd :doc :capture :resume})
 (def ^:private alias-def-keys #{:alias-of :extra-args :prompt-prefix :doc})
 (def ^:private parse-strategies #{:raw :claude-json :pi-json})
+(def ^:private prompt-via-strategies #{:arg :stdin})
 
 ;; A harness :resume splice is literal argv strings interleaved with placeholder
 ;; keywords, each resolving from the predecessor run's captured attribute of the
@@ -229,6 +230,9 @@
     (when-let [parse (:parse def)]
       (when-not (parse-strategies parse)
         (fail! "Unknown harness :parse strategy" {:harness key :parse parse :supported parse-strategies})))
+    (when (contains? def :prompt-via)
+      (when-not (prompt-via-strategies (:prompt-via def))
+        (fail! "Unknown harness :prompt-via strategy" {:harness key :prompt-via (:prompt-via def) :supported prompt-via-strategies})))
     (when (contains? def :capture)
       (validate-op-argv! key :capture (:capture def)))
     (when (contains? def :resume)
@@ -293,12 +297,14 @@
   (let [defaults
         {:claude {:argv ["claude" "-p" "--output-format" "json" "--dangerously-skip-permissions"]
                   :parse :claude-json
+                  :prompt-via :stdin
                   :resume ["--resume" :shuttle/session-id]
-                  :doc "Claude Code headless. Skips permission prompts so the run can drive the strand CLI; redefine with your own argv to tighten. :claude-json captures shuttle/session-id and :resume continues that session with `--resume <session-id>`."}
+                  :doc "Claude Code headless. The worker prompt rides on stdin (`claude -p` reads it) so it never lands in the process argv, keeping prompts out of `ps` and out of the blast radius of any `pkill -f` pattern kill. Skips permission prompts so the run can drive the strand CLI; redefine with your own argv to tighten. :claude-json captures shuttle/session-id and :resume continues that session with `--resume <session-id>`."}
          :pi {:argv ["pi" "-p" "--mode" "json"]
               :parse :pi-json
+              :prompt-via :stdin
               :resume ["--session" :shuttle/session-id]
-              :doc "pi headless in JSON event mode: :pi-json captures shuttle/session-id and :resume continues that specific session with `--session <session-id>` (an existing session, not the create-if-missing --session-id)."}
+              :doc "pi headless in JSON event mode. The worker prompt rides on stdin (`pi -p` reads it) so it stays out of the process argv, `ps`, and any `pkill -f` blast radius. :pi-json captures shuttle/session-id and :resume continues that specific session with `--session <session-id>` (an existing session, not the create-if-missing --session-id)."}
          :sh {:argv ["sh" "-c"]
               :parse :raw
               :preamble? false
@@ -1341,23 +1347,29 @@
       run)))
 
 (defn- parent-of-sources
-  "Return strand ids with a parent-of edge to `run-id`."
+  "Return strand ids with a parent-of edge to `run-id`, via one indexed fetch."
   [run-id]
-  (->> (api/list (rt))
-       (mapcat (fn [strand]
-                 (for [edge (:edges (api/subgraph (rt) [(:id strand)]))
-                       :when (and (= "parent-of" (:edge_type edge))
-                                  (= run-id (:to_strand_id edge)))]
-                   (:from_strand_id edge))))
+  (->> (api/incoming-edges (rt) [run-id] "parent-of")
+       (map :from_strand_id)
        distinct
        vec))
 
+(defn- parents-by-run
+  "Map run-id -> its parent-of source ids from one bulk incoming-edge fetch,
+  so summarising many runs costs a single query instead of one per run."
+  [run-ids]
+  (reduce (fn [m {:keys [from_strand_id to_strand_id]}]
+            (update m to_strand_id (fnil conj []) from_strand_id))
+          {}
+          (api/incoming-edges (rt) (vec run-ids) "parent-of")))
+
 (defn- run-for-target
-  "Return the delegated target for `run`, excluding spawned-by provenance."
-  [run]
+  "Return the delegated target for `run` given its parent-of source ids,
+  excluding spawned-by provenance."
+  [run parents]
   (or (attr run :treadle/gate)
       (let [spawned-by (sattr run "spawned-by")]
-        (first (remove #(= spawned-by %) (parent-of-sources (:id run)))))))
+        (first (remove #(= spawned-by %) parents)))))
 
 (defn- attach-hint
   "Render the backend :attach op over the run's stored handle as the human
@@ -1375,31 +1387,36 @@
     (catch Exception _ nil)))
 
 (defn run-summary
-  "Project a run strand into the compact summary shape the op surface returns."
-  [run]
-  (let [base (cond-> {:id (:id run)
-                      :title (:title run)
-                      :state (:state run)
-                      :phase (sattr run "phase")
-                      :harness (sattr run "harness")}
-               (run-for-target run) (assoc :for (run-for-target run))
-               (sattr run "result") (assoc :result (sattr run "result"))
-               (sattr run "error") (assoc :error (sattr run "error"))
-               (sattr run "session-id") (assoc :session-id (sattr run "session-id"))
-               (sattr run "spawned-by") (assoc :spawned-by (sattr run "spawned-by"))
-               (sattr run "resumes") (assoc :resumes (sattr run "resumes"))
-               (sattr run "error-class") (assoc :error-class (sattr run "error-class"))
-               (sattr run "attempt") (assoc :attempt (sattr run "attempt")))]
-    (if (interactive? run)
-      (let [attach (attach-hint run)]
-        (cond-> (assoc base
-                       :mode "interactive"
-                       :backend (sattr run "backend")
-                       :completion (sattr run "completion"))
-          (sattr run "reap") (assoc :reap (sattr run "reap"))
-          (get (run-handle run) "session") (assoc :session (get (run-handle run) "session"))
-          attach (assoc :attach attach)))
-      base)))
+  "Project a run strand into the compact summary shape the op surface returns.
+
+  Pass `parents` (the run's parent-of source ids) to reuse a bulk fetch; when
+  omitted a single indexed lookup resolves them."
+  ([run] (run-summary run (parent-of-sources (:id run))))
+  ([run parents]
+   (let [target (run-for-target run parents)
+         base (cond-> {:id (:id run)
+                       :title (:title run)
+                       :state (:state run)
+                       :phase (sattr run "phase")
+                       :harness (sattr run "harness")}
+                target (assoc :for target)
+                (sattr run "result") (assoc :result (sattr run "result"))
+                (sattr run "error") (assoc :error (sattr run "error"))
+                (sattr run "session-id") (assoc :session-id (sattr run "session-id"))
+                (sattr run "spawned-by") (assoc :spawned-by (sattr run "spawned-by"))
+                (sattr run "resumes") (assoc :resumes (sattr run "resumes"))
+                (sattr run "error-class") (assoc :error-class (sattr run "error-class"))
+                (sattr run "attempt") (assoc :attempt (sattr run "attempt")))]
+     (if (interactive? run)
+       (let [attach (attach-hint run)]
+         (cond-> (assoc base
+                        :mode "interactive"
+                        :backend (sattr run "backend")
+                        :completion (sattr run "completion"))
+           (sattr run "reap") (assoc :reap (sattr run "reap"))
+           (get (run-handle run) "session") (assoc :session (get (run-handle run) "session"))
+           attach (assoc :attach attach)))
+       base))))
 
 (defn runs
   "Return summaries of shuttle runs; opts may filter to `:active` or `:for`.
@@ -1408,10 +1425,24 @@
   ([] (runs {}))
   ([{:keys [active for]}]
    (try (supervise!) (catch Exception _ nil))
-   (let [summaries (mapv run-summary
-                         (api/list (rt)
-                                   (if active [:and [:= :state "active"] run-query] run-query)
-                                   {}))]
+   (let [run-strands (api/list (rt)
+                               (if active [:and [:= :state "active"] run-query] run-query)
+                               {})
+         ;; A run satisfies a --for filter two ways: a structural parent-of edge
+         ;; from the target, or treadle/gate provenance stamped on the run itself
+         ;; (treadle-delegated runs carry no parent-of edge — treadle.md §2). Narrow
+         ;; to both up front (one indexed edge lookup plus a bulk attr check on the
+         ;; already-loaded run strands) rather than summarising every run.
+         run-strands (if for
+                       (let [children (set (map :to_strand_id
+                                                (api/outgoing-edges (rt) [for] "parent-of")))]
+                         (filterv (fn [run]
+                                    (or (children (:id run))
+                                        (= for (attr run :treadle/gate))))
+                                  run-strands))
+                       run-strands)
+         parents (parents-by-run (mapv :id run-strands))
+         summaries (mapv #(run-summary % (get parents (:id %) [])) run-strands)]
      (if for
        (filterv #(= for (:for %)) summaries)
        summaries))))
