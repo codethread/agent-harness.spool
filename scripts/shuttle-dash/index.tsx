@@ -9,8 +9,9 @@
 // esc/h goes back, g/G jump, a toggles all/active (where the tab's current view
 // supports it), r forces a refresh, q quits. On AGENTS, v toggles the flat runs
 // table ⇄ the plans delegation tree, and d graphs the selected plans node's
-// delegation subtree as boxart (esc/h returns). Non-TTY (and --once) prints the
-// first tab's flat runs frame.
+// delegation subtree as boxart; on DEVFLOW, d graphs the selected feature's
+// workflow DAG (esc/h returns). Non-TTY (and --once) prints the first tab's flat
+// runs frame.
 //
 // Adding a tab is a local change: write a module under ./tabs that exports a
 // Tab — listDetailTab(...) for a plain list+detail (row type, fetch, and list

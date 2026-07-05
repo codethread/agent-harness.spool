@@ -20,7 +20,6 @@
 // axis honour the active view's detail uniformly with every other tab.
 
 import { Box, Text } from "ink";
-import stringWidth from "string-width";
 import {
   branchFor,
   detailRowFrom,
@@ -40,8 +39,6 @@ import {
   detailPage,
   Failure,
   fitCol,
-  graphPage,
-  graphViewport,
   listPage,
   ListFooter,
   oneLine,
@@ -58,6 +55,16 @@ import {
   reduceScrollKeys,
   type ListState,
 } from "../app";
+import {
+  buildGraphDot,
+  emptyGraph,
+  fetchDepEdges,
+  GraphPane,
+  reduceGraphKeys,
+  type Edge,
+  type GraphNode,
+  type GraphState,
+} from "../graph";
 
 // ── runs view types ────────────────────────────────────────────────────────
 
@@ -140,23 +147,6 @@ type PlanDetail = { id: string; phase?: string; loading: boolean; row: DetailRow
 
 type RunsView = { rows: Row[]; loaded: boolean; failure: string | null; s: ListState };
 type PlansView = { rows: TreeRow[]; loaded: boolean; failure: string | null; s: ListState; detail: PlanDetail | null };
-
-// The boxart graph for one delegation subtree. `dot` is the last DOT we handed
-// graph-easy: an unchanged DOT whose last render succeeded skips a redundant
-// (and possibly slow) re-render. `art` is the rendered boxart, null whenever the
-// last render failed so the pane falls back to the `error` banner over the
-// indented-tree `fallback`. Scroll is 2-D because a wide LR graph overflows
-// horizontally.
-type GraphState = {
-  root: string;
-  dot: string | null;
-  art: string[] | null;
-  error: string | null;
-  fallback: string[];
-  loaded: boolean;
-  scrollY: number;
-  scrollX: number;
-};
 
 type AgentsView = {
   mode: "runs" | "plans" | "graph";
@@ -286,133 +276,26 @@ async function openPlanDetail(id: string, phase: string | undefined, setV: (next
 }
 
 // ── graph build ────────────────────────────────────────────────────────────
-// Mirrors devflow's show.nu: a task DAG → Graphviz DOT → graph-easy boxart, with
-// direction and label wrap inferred from terminal width. Node labels carry the
-// strand id, kind, joined status, and a word-wrapped title; edges are the
-// parent-of tree (solid) plus depends-on blockers (dashed) between tree nodes.
+// Adapt the delegation tree to the shared graph pipeline: flatten to generic
+// nodes (id, kind, joined status, title) in pre-order, and collect the parent-of
+// edges straight off the tree walk. depends-on blockers between tasks are fetched
+// separately and passed alongside into the shared DOT assembler.
 
-const GRAPH_PADDING = 16;
-
-// LR reads best on a wide terminal; a narrow one has to stack ranks top-to-bottom
-// or every box is shaved to nothing (show.nu's 120-column pivot).
-function graphDirection(cols: number): "LR" | "TB" {
-  return Math.max(20, cols - GRAPH_PADDING) < 120 ? "TB" : "LR";
-}
-
-// Infer a per-label wrap width from how many boxes share a rank, clamped so a
-// label is neither a sliver nor a wall of text.
-function graphWrap(cols: number, nodeCount: number, direction: "LR" | "TB"): number {
-  const usable = Math.max(20, cols - GRAPH_PADDING);
-  const rankNodes = direction === "TB" ? 3 : Math.min(Math.max(1, nodeCount), 6);
-  return Math.min(24, Math.max(8, Math.floor(usable / rankNodes) - 5));
-}
-
-// Greedy word wrap; an over-long single word is kept whole rather than split.
-function wrapWords(text: string, width: number): string[] {
-  const words = oneLine(text).split(" ").filter(Boolean);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const cand = cur ? `${cur} ${w}` : w;
-    if (cand.length <= width) cur = cand;
-    else if (cur === "") lines.push(w);
-    else {
-      lines.push(cur);
-      cur = w;
-    }
-  }
-  if (cur) lines.push(cur);
-  return lines;
-}
-
-// DOT string literals only need backslash and quote escaped; embedded newlines
-// are collapsed by oneLine before wrapping, so none survive into a segment.
-const dotEscape = (s: string): string => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-
-type SubgraphEdge = { from_strand_id: string; to_strand_id: string; edge_type: string };
-type SubgraphPayload = { edges?: SubgraphEdge[] };
-
-// depends-on reads "from depends-on to", so `to` is the prerequisite. Draw the
-// arrow prerequisite→dependent so blockers point at the work they gate, matching
-// the parent-of flow. A `subgraph <root> --relation depends-on` only walks
-// depends-on outward from the root, so a plan root (whose children hang off
-// parent-of) yields nothing — the blockers live between the task nodes. Query
-// depends-on from each task in the subtree instead and union the results.
-// Best-effort: a failed query drops that node's edges rather than the render.
-async function fetchDepEdges(taskIds: string[]): Promise<[string, string][]> {
-  const perTask = await Promise.all(
-    taskIds.map((id) =>
-      (strandJson(["subgraph", id, "--relation", "depends-on"]) as Promise<SubgraphPayload>)
-        .then((sg) => sg.edges ?? [])
-        .catch(() => [] as SubgraphEdge[]),
-    ),
-  );
-  const seen = new Set<string>();
-  const out: [string, string][] = [];
-  for (const edges of perTask)
-    for (const e of edges) {
-      if (e.edge_type !== "depends-on") continue;
-      const key = `${e.to_strand_id} ${e.from_strand_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push([e.to_strand_id, e.from_strand_id]);
-    }
-  return out;
-}
-
-function buildGraphDot(payload: StatusPayload, depEdges: [string, string][], cols: number): { dot: string; fallback: string[] } {
-  const rows = flattenTree(payload);
-  // A strand id is not unique in the tree (a run appears under its task and its
-  // spawner), so declare each node once, keyed by id, from its first occurrence.
-  const meta = new Map<string, TreeRow>();
-  for (const r of rows) if (!meta.has(r.id)) meta.set(r.id, r);
-
-  // parent-of edges straight off the tree walk, deduped, self-edges dropped.
-  const parentEdges = new Set<string>();
+function statusToGraph(payload: StatusPayload): { nodes: GraphNode[]; parentEdges: Edge[] } {
+  const nodes: GraphNode[] = flattenTree(payload).map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    status: r.status.text,
+    title: r.title,
+    depth: r.depth,
+  }));
+  const parentEdges: Edge[] = [];
   const walk = (node: TreeNode, parentId: string | null) => {
-    if (parentId && parentId !== node.id) parentEdges.add(`${parentId} ${node.id}`);
+    if (parentId && parentId !== node.id) parentEdges.push([parentId, node.id]);
     for (const c of node.children ?? []) walk(c, node.id);
   };
   for (const root of payload.tree ?? []) walk(root, null);
-
-  const direction = graphDirection(cols);
-  const wrap = graphWrap(cols, meta.size, direction);
-
-  const nodeLines = [...meta.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, r]) => {
-      const label = [`${id} ${r.kind}`, r.status.text, ...wrapWords(r.title, wrap)].map(dotEscape).join("\\n");
-      return `  "${dotEscape(id)}" [label = "${label}"];`;
-    });
-
-  const edgeLines: string[] = [];
-  for (const key of parentEdges) {
-    const [from, to] = key.split(" ") as [string, string];
-    edgeLines.push(`  "${dotEscape(from)}" -> "${dotEscape(to)}";`);
-  }
-  // depends-on edges only between nodes actually in this subtree — the subgraph
-  // relation can reach siblings outside the delegation the user is graphing.
-  const depSeen = new Set<string>();
-  for (const [from, to] of depEdges) {
-    if (from === to || !meta.has(from) || !meta.has(to)) continue;
-    const k = `${from} ${to}`;
-    if (depSeen.has(k)) continue;
-    depSeen.add(k);
-    edgeLines.push(`  "${dotEscape(from)}" -> "${dotEscape(to)}" [style = dashed];`);
-  }
-
-  const body = [nodeLines.join("\n"), edgeLines.join("\n")].filter(Boolean).join("\n\n");
-  const dot = `digraph delegation {\n  rankdir = ${direction};\n  node [shape = box];\n\n${body}\n}\n`;
-  const fallback = rows.map((r) => `${"  ".repeat(r.depth)}${r.id} [${r.kind}] ${r.status.text} — ${oneLine(r.title)}`);
-  return { dot, fallback };
-}
-
-// The lines the graph pane scrolls: the boxart when present, else the loud error
-// banner over the indented-tree fallback so the pane is never blank.
-function graphLines(g: GraphState): string[] {
-  if (g.art) return g.art;
-  const banner = g.error ? [`graph-easy unavailable: ${g.error}`, ""] : [];
-  return [...banner, ...g.fallback];
+  return { nodes, parentEdges };
 }
 
 // ── runs view ──────────────────────────────────────────────────────────────
@@ -546,56 +429,7 @@ function PlansTree({
   );
 }
 
-// ── graph view ─────────────────────────────────────────────────────────────
-
-const GRAPH_PAN = 8;
-
-// Codepoint slice for the horizontal pan: boxart is single-column box-drawing
-// characters, so dropping N codepoints drops N columns.
-const sliceCols = (s: string, n: number): string => (n <= 0 ? s : [...s].slice(n).join(""));
-
-function GraphPane({ g, cols, termRows }: { g: GraphState; cols: number; termRows: number }) {
-  const lines = graphLines(g);
-  if (!g.loaded && lines.length === 0) {
-    return <Text dimColor>{clip(`rendering graph for ${g.root}…`, cols)}</Text>;
-  }
-  const viewport = graphViewport(termRows);
-  const maxY = Math.max(0, lines.length - viewport);
-  const fromY = Math.min(g.scrollY, maxY);
-  const visible = lines.slice(fromY, fromY + viewport);
-  const legend = g.art ? "──▶ parent-of · ╴╴▶ depends-on" : "tree fallback (graph-easy unavailable)";
-  const scrollInfo =
-    maxY > 0 || g.scrollX > 0 ? ` · ${fromY}↑ ${maxY - fromY}↓${g.scrollX > 0 ? ` · ${g.scrollX}→` : ""}` : "";
-
-  return (
-    <Box flexDirection="column">
-      <Text dimColor>{clip(legend, cols)}</Text>
-      <Box flexDirection="column">
-        {visible.map((l, i) => (
-          <Text key={fromY + i}>{clip(sliceCols(l, g.scrollX), cols)}</Text>
-        ))}
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>
-          {clip(`[graph ${g.root}] ↑↓/jk scroll · ⌃d/⌃u page · <> pan · g/G ends · esc back · r refresh · ⇥ tab · q quit${scrollInfo}`, cols)}
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
 // ── the tab ──────────────────────────────────────────────────────────────────
-
-const emptyGraph = (root: string): GraphState => ({
-  root,
-  dot: null,
-  art: null,
-  error: null,
-  fallback: [],
-  loaded: false,
-  scrollY: 0,
-  scrollX: 0,
-});
 
 export const agentsTab = defineTab<AgentsView>({
   id: "agents",
@@ -663,9 +497,10 @@ export const agentsTab = defineTab<AgentsView>({
       // Dep edges need the subtree's task ids, so status is fetched first; its
       // per-task subgraph queries then fan out in parallel inside fetchDepEdges.
       const statusPayload = (await strandJson(["agent", "status", root])) as StatusPayload;
-      const taskIds = [...new Set(flattenTree(statusPayload).filter((r) => r.kind === "task").map((r) => r.id))];
-      const depEdges = await fetchDepEdges(taskIds).catch(() => [] as [string, string][]);
-      const { dot, fallback } = buildGraphDot(statusPayload, depEdges, process.stdout.columns || 120);
+      const { nodes, parentEdges } = statusToGraph(statusPayload);
+      const taskIds = [...new Set(nodes.filter((n) => n.kind === "task").map((n) => n.id))];
+      const depEdges = await fetchDepEdges(taskIds).catch(() => [] as Edge[]);
+      const { dot, fallback } = buildGraphDot(nodes, parentEdges, depEdges, process.stdout.columns || 120);
       // Skip the re-render only when the last one succeeded on this same DOT (art
       // present ⇒ no error): an errored render leaves art null so it retries here.
       if (g.dot === dot && g.art) {
@@ -716,24 +551,13 @@ export const agentsTab = defineTab<AgentsView>({
     if (v.mode === "graph") {
       const g = v.graph;
       if (!g) return { ...v, mode: "plans" };
-      if (key.escape || key.leftArrow || input === "h") return { ...v, mode: "plans" };
       if (input === "r") {
         ctx.refresh();
         return v;
       }
-      const lines = graphLines(g);
-      const maxY = Math.max(0, lines.length - graphViewport(ctx.termRows));
-      const maxX = Math.max(0, Math.max(0, ...lines.map((l) => stringWidth(l))) - ctx.cols);
-      const gp = graphPage(ctx.termRows);
-      if (key.ctrl && input === "u") return { ...v, graph: { ...g, scrollY: Math.max(0, g.scrollY - gp) } };
-      if (key.ctrl && input === "d") return { ...v, graph: { ...g, scrollY: Math.min(maxY, g.scrollY + gp) } };
-      if (key.upArrow || input === "k") return { ...v, graph: { ...g, scrollY: Math.max(0, g.scrollY - 1) } };
-      if (key.downArrow || input === "j") return { ...v, graph: { ...g, scrollY: Math.min(maxY, g.scrollY + 1) } };
-      if (input === "g") return { ...v, graph: { ...g, scrollY: 0 } };
-      if (input === "G") return { ...v, graph: { ...g, scrollY: maxY } };
-      if (input === "<") return { ...v, graph: { ...g, scrollX: Math.max(0, g.scrollX - GRAPH_PAN) } };
-      if (input === ">") return { ...v, graph: { ...g, scrollX: Math.min(maxX, g.scrollX + GRAPH_PAN) } };
-      return v;
+      const next = reduceGraphKeys(g, input, key, ctx.cols, ctx.termRows);
+      if (next === "back") return { ...v, mode: "plans" };
+      return next ? { ...v, graph: next } : v;
     }
 
     const ps = v.plans;
@@ -780,7 +604,11 @@ export const agentsTab = defineTab<AgentsView>({
       return <RunsTable rows={rs.rows} selected={rs.s.selected} interactive cols={cols} termRows={termRows} all={all} loaded={rs.loaded} />;
     }
     if (v.mode === "graph") {
-      return v.graph ? <GraphPane g={v.graph} cols={cols} termRows={termRows} /> : <Text dimColor>{clip("no graph selected", cols)}</Text>;
+      return v.graph ? (
+        <GraphPane g={v.graph} cols={cols} termRows={termRows} label={`graph ${v.graph.root}`} />
+      ) : (
+        <Text dimColor>{clip("no graph selected", cols)}</Text>
+      );
     }
     const ps = v.plans;
     if (ps.detail) {
