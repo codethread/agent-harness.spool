@@ -116,6 +116,36 @@
 
    :synthesizer {:harness :review-gpt}})
 
+(def complex-patch-review
+  "Roster for GPT-authored implementation changes — the refactor/complex-patch
+  flow (patch-gpt/hard-gpt author; see the flow comment in config.clj). Two
+  deep cross-vendor seats instead of the single-concern fan-out: opus for
+  holistic architecture/idiom judgment (it never authored the patch, so no
+  self-sign-off), and GPT-5.4 high for the exhaustive line-level pass.
+  Synthesized by hard-gpt so synthesis comes from neither reviewing seat.
+  Compose with change-review when a change also wants the cheap
+  single-concern sweeps (test-sleeps, docs-drift, ...)."
+  {:reviewers
+   [{:name "opus-design"
+     :harness :build
+     :contract (str "Deep architecture and idiom review of a GPT-authored patch. Judge: does "
+                    "the change respect the repo's namespace tiers, runtime-publication "
+                    "discipline, and implementation boundaries (CLAUDE.md); is complexity "
+                    "placed in the right module (deep-module: core absorbs storage/semantics "
+                    "burden, contracts stay thin); do abstractions, naming, and comment "
+                    "density match the surrounding code; which decisions will age badly. "
+                    "Read the diff first, then only the surrounding context it touches. "
+                    "Judgment over nitpicks - style detail belongs to the fmt/lint gates.")}
+    {:name "gpt-thorough"
+     :harness :review-gpt
+     :contract (str "Exhaustive line-level correctness pass over the diff: logic errors, "
+                    "boundary conditions, transaction and locking mistakes, error-path gaps "
+                    "(TEN-003 fail-loudly), test assertions that do not test what they claim, "
+                    "and divergence between the change and the spec/plan clauses it cites. "
+                    "Work the diff hunk by hunk; verify claims against source with ranged "
+                    "reads, never whole-namespace reads.")}]
+   :synthesizer {:harness :hard-gpt}})
+
 (def docs-review
   "Roster fanned out over human-facing prose changes: READMEs, docs/, spool
   contract docs and cookbooks, release notes. Distilled from the five-seat
@@ -180,4 +210,5 @@
   "Register this repository's reviewer rosters with the agents spool."
   []
   {:rosters [(agents/defroster! :change-review change-review)
+             (agents/defroster! :complex-patch-review complex-patch-review)
              (agents/defroster! :docs-review docs-review)]})

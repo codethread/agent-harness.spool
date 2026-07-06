@@ -1332,7 +1332,19 @@
    (shuttle/defalias! :hard-gpt
      {:alias-of :codex
       :extra-args ["-m" "gpt-5.5" "-c" "model_reasoning_effort=medium"]
-      :doc "GPT-5.5 medium reasoning via codex exec: occasional difficult implementation tasks needing a second frontier model."})])
+      :doc "GPT-5.5 medium reasoning via codex exec: occasional difficult implementation tasks needing a second frontier model."})
+   ;; The refactor/complex-patch flow: for patch-based work over existing code
+   ;; (refactors, storage rewrites, mechanical-but-delicate migrations) codex
+   ;; GPT seats author and Claude reviews — the inverse of the docs routing.
+   ;; codex is heavily tuned for git-diff-shaped work; opus is stronger
+   ;; greenfield, so it takes the review eye instead. patch-gpt (low) is the
+   ;; default implementer; escalate the hardest slices to hard-gpt (medium);
+   ;; review with the complex-patch-review roster (.skein/reviewers.clj:
+   ;; opus design seat + gpt-5.4-high thorough seat).
+   (shuttle/defalias! :patch-gpt
+     {:alias-of :codex
+      :extra-args ["-m" "gpt-5.5" "-c" "model_reasoning_effort=low"]
+      :doc "GPT-5.5 low reasoning via codex exec: default implementer seat for the refactor/complex-patch flow — precise diff-based edits over existing code; escalate the hardest slices to hard-gpt."})])
 
 ;; ---------------------------------------------------------------------------
 ;; Scheduled NVD deep scan (skein.spools.cron job :nvd-scan)
