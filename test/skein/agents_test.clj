@@ -796,6 +796,56 @@
                      [(:id done-task) "already-succeeded"]}
                    (set (map (juxt :task :reason) (:skipped ready)))))))))))
 
+(deftest delegate-ready-classifies-each-task-once
+  ;; Regression (card 0nd97): op-delegate classifies every task against
+  ;; pre-spawn state, so a task delegated this pass — which mints a fresh
+  ;; pending run — is never ALSO reported in :skipped as has-active-run.
+  (with-agents
+    (fn [rt]
+      (let [plan (api/add rt {:title "plan"})
+            tasks (mapv (fn [n] (api/add rt {:title (str "task " n)
+                                             :attributes {:body "body" :harness "sh"}}))
+                        (range 3))]
+        (api/update rt (:id plan) {:edges (mapv (fn [t] {:type "parent-of" :to (:id t)}) tasks)})
+        (let [ready (agents/agent-op {:op/argv ["delegate" "--ready" (:id plan)]})]
+          (is (= (set (map :id tasks)) (set (map :task (:delegated ready))))
+              "every ready task is delegated exactly once")
+          (is (apply distinct? (map :task (:delegated ready)))
+              "no task appears twice in :delegated")
+          (is (empty? (:skipped ready))
+              "a task delegated this pass is never re-reported as skipped"))))))
+
+(deftest non-serving-helpers-do-not-gate-delegation
+  ;; Regression (card b4nml): recon spawns and review runs are non-serving
+  ;; (shuttle/serves=false), so a read-only helper run hanging under a task
+  ;; must never block a later delegate of it, nor make delegate --ready skip it
+  ;; as has-active-run.
+  (with-agents
+    (fn [rt]
+      (let [spawn-task (api/add rt {:title "recon then delegate" :attributes {:body "body" :harness "sh"}})
+            review-task (api/add rt {:title "review then delegate" :attributes {:body "body" :harness "sh"}})
+            plan (api/add rt {:title "plan"})]
+        (api/update rt (:id plan) {:edges [{:type "parent-of" :to (:id spawn-task)}
+                                           {:type "parent-of" :to (:id review-task)}]})
+        (testing "a spawn --for helper is stamped non-serving and does not block delegate"
+          (let [helper (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo recon" "--for" (:id spawn-task)]})]
+            (is (= "false" (get-in (api/show rt (:id helper)) [:attributes :shuttle/serves]))
+                "spawn stamps its run non-serving")
+            (let [delegated (agents/agent-op {:op/argv ["delegate" (:id spawn-task)]})]
+              (is (= (:id spawn-task) (:task delegated))
+                  "the recon helper does not block delegating the task")
+              (is (nil? (get-in (api/show rt (get-in delegated [:run :id])) [:attributes :shuttle/serves]))
+                  "the delegation run itself serves the task (no non-serving marker)"))))
+        (testing "review runs are non-serving, so delegate --ready still delegates the reviewed task"
+          (let [review (agents/review! (:id review-task) {:reviewers [{:harness :sh :focus "recon"}]})]
+            (is (every? #(= "false" (get-in (api/show rt %) [:attributes :shuttle/serves]))
+                        (:reviewers review))
+                "reviewer runs are stamped non-serving")
+            (let [ready (agents/agent-op {:op/argv ["delegate" "--ready" (:id plan)]})]
+              (is (some #{(:id review-task)} (map :task (:delegated ready)))
+                  "the reviewed task is delegated, not skipped as has-active-run")
+              (is (not-any? #{(:id review-task)} (map :task (:skipped ready)))))))))))
+
 (deftest retry-run-id-preserves-provenance-and-dependencies
   (with-agents
     (fn [rt]
@@ -821,6 +871,38 @@
           (is (= "/tmp/retry-cwd" (get-in new-run [:attributes :shuttle/cwd])))
           (is (= 5 (get-in new-run [:attributes :shuttle/max-attempts])))
           (is (some #(= (:id blocker) (:to_strand_id %)) dep-edges)))))))
+
+(deftest retry-by-task-targets-serving-run-not-helper
+  ;; Regression (card 0nd97): retry <task-id> means "retry the task's own work",
+  ;; so it resolves against the failed SERVING run and never lets a failed
+  ;; read-only helper (recon/review, shuttle/serves=false) shadow it.
+  (with-agents
+    (fn [rt]
+      (let [task (api/add rt {:title "served + reconned" :attributes {:body "body" :harness "sh"}})
+            helper (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task)
+                                        :attrs {"shuttle/serves" "false"}})
+            serving (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task)})]
+        (await-phase rt (:id helper) #{"failed"})
+        (await-phase rt (:id serving) #{"failed"})
+        (let [retried (agents/agent-op {:op/argv ["retry" (:id task)]})]
+          (is (= (:id serving) (:superseded retried))
+              "retry-by-task supersedes the failed serving run, not the helper")
+          (is (= "superseded" (get-in (api/show rt (:id serving)) [:attributes :shuttle/phase])))
+          (is (= "failed" (get-in (api/show rt (:id helper)) [:attributes :shuttle/phase]))
+              "the failed non-serving helper is left untouched"))))))
+
+(deftest malformed-serves-value-fails-loudly
+  ;; Regression (card b4nml): shuttle/serves is a closed stamp — absent/"true"
+  ;; serves, "false" does not, and any other value is malformed and must fail
+  ;; loudly rather than silently reclassifying a helper as serving.
+  (with-agents
+    (fn [rt]
+      (let [task (api/add rt {:title "malformed helper" :attributes {:body "body" :harness "sh"}})
+            bad (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task)
+                                     :attrs {"shuttle/serves" "maybe"}})]
+        (await-phase rt (:id bad) #{"failed"})
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid shuttle/serves value"
+                              (agents/agent-op {:op/argv ["retry" (:id task)]})))))))
 
 (deftest retry-continuity-preserves-severs-and-guards-resume
   ;; resuming runs are hand-built so the matrix is deterministic and sleep-free:
@@ -890,6 +972,8 @@
                                                   "shuttle/review-focus" "skeptic"
                                                   "shuttle/panel-seat" "skeptic"
                                                   "shuttle/panel-turn" "2"
+                                                  ;; a non-serving helper stays non-serving across retry
+                                                  "shuttle/serves" "false"
                                                   ;; a lifecycle attr the engine re-derives; it must NOT ride along
                                                   "shuttle/result" "stale old result"}}))
             retried (agents/agent-op {:op/argv ["retry" failed]})
@@ -900,6 +984,8 @@
         (is (= "skeptic" (:shuttle/review-focus attrs)))
         (is (= "skeptic" (:shuttle/panel-seat attrs)))
         (is (= "2" (:shuttle/panel-turn attrs)))
+        (is (= "false" (:shuttle/serves attrs))
+            "a retried non-serving helper stays non-serving")
         (is (not= "stale old result" (:shuttle/result attrs))
             "engine lifecycle attrs are re-stamped, not carried from the superseded run")))))
 

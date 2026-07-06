@@ -75,7 +75,7 @@
                    :usage "agent spawn --harness <name> --prompt ... [--title t] [--depends-on <strand-id>]... [--for <strand-id>] [--spawned-by <run-id>] [--cwd <dir>] [--max-attempts n] [--interactive --backend <name> [--reap auto|manual]]"
                    :takes "No positional args; raw run creation, no task contract."
                    :semantics ["Async; the run starts when ready."
-                               "--for is the strand this run serves and creates the parent-of edge."
+                               "--for attaches the run under a strand (parent-of edge). spawn is the raw helper verb: its runs are stamped non-serving (shuttle/serves=false), so a spawn --for a task is a recon/one-off helper and never gates that task's later delegation. Delegation of a task's own work is delegate's job, not spawn's."
                                "--spawned-by is the caller's run id for helper provenance only. Helpers usually pass only --spawned-by."
                                "--interactive launches the harness into a multiplexer session via --backend instead of exec-and-wait. With --for the run completes when that strand closes; without it, when the run strand itself is closed. --reap manual leaves the session open for the human after completion (default auto tears it down)."]
                    :fails ["missing --harness" "missing --prompt" "unknown flag" "malformed --max-attempts" "--interactive without --backend" "--backend/--reap without --interactive"]
@@ -119,14 +119,15 @@
                                   "Injects the worker contract and spawns a run attached --for the task."
                                   "Harness resolution is --harness flag > task harness attribute > loud failure; there is no default."
                                   "cwd resolution is --cwd flag > task cwd attribute > workspace root."
-                                  "A task with any non-superseded run is not delegable: pending/running is active, failed/exhausted wants retry, done must be verified and closed."
+                                  "A task with any non-superseded SERVING run is not delegable: pending/running is active, failed/exhausted wants retry, done must be verified and closed. Read-only helper runs (recon spawns, reviewers, panel/council seats — stamped shuttle/serves=false) never count, so reviewing or reconning a task never blocks delegating it."
                                   "--interactive opens a live multiplexer session for the task instead of a headless run — this is how hitl=true tasks are delegated. Backend resolution is --backend flag > task backend attribute > loud failure. The session is torn down when the task closes (the agent closes it once the human agrees the work is done)."]
                       :fails ["task not found" "task not active" "task not ready" "missing body and --prompt" "missing harness" "hitl=true without --interactive" "missing backend with --interactive" "--backend/--reap without --interactive" "has active run" "failed/exhausted run wants retry" "successful run awaits verification"]
                       :returns {"task" "task id" "run" {"id" "run id" "phase" "pending" "harness" "string" "attach" "optional string"}}}
            :delegate-ready {:group "delegation"
                             :usage "agent delegate --ready <plan-id> [--cwd dir]"
                             :takes "A plan/root strand."
-                            :semantics ["Fan out every ready, non-hitl task under the plan that has no active, failed/exhausted, or successful non-superseded run."
+                            :semantics ["Fan out every ready, non-hitl task under the plan that has no active, failed/exhausted, or successful non-superseded SERVING run. Read-only helper runs (shuttle/serves=false) are ignored, so a reconned or reviewed task is still delegated."
+                                        "Every task is classified exactly once against pre-spawn state, so a task delegated this pass is never also reported in skipped."
                                         "Harness comes from each task's harness attribute; mixed-harness fan-out is expected."
                                         "Fails loudly up front, delegating nothing, if any selected ready task lacks harness."
                                         "Idempotent: re-invoke after verifying and closing finished tasks to pick up newly unblocked work."]
@@ -135,13 +136,13 @@
                             :returns {"plan" "plan id" "delegated" [{"task" "task id" "run" {"id" "run id" "phase" "pending" "harness" "string"}}] "skipped" [{"task" "task id" "reason" "hitl|has-active-run|failed-needs-retry|already-succeeded"}]}}
            :retry {:group "delegation"
                    :usage "agent retry <task-or-run-id> [--fresh] [--harness h] [--cwd dir] [--prompt extra]"
-                   :semantics ["The recovery verb. Given a task id, find its failed/exhausted run, close it with phase superseded, rebuild the prompt from the task's current body, and spawn fresh."
+                   :semantics ["The recovery verb. Given a task id, find its failed/exhausted SERVING run (read-only helpers — recon spawns, reviewers, seats — are ignored so a failed helper never shadows the real delegation failure), close it with phase superseded, rebuild the prompt from the task's current body, and spawn fresh. Retry a failed helper by passing its run id directly."
                                "When the contract was wrong, edit the task body first with `strand update <task-id> --attr body=:payload/<name> --payload <name>=<path>` or `--attr body=:stdin`."
                                "Given a raw run id, supersede and respawn from the original prompt while preserving served target, spawned-by provenance, depends-on edges, cwd, and max-attempts."
                                "A resumed run (one continuing a predecessor's session) re-resumes that same session by default. --fresh severs the linkage and respawns cold on the run's full-brief prompt, since a fresh process can never take the short continuation form."
                                "A plain retry of a run whose failure is resume-classed (the session was lost) fails loudly instructing --fresh, never looping against a dead session."
                                "A failed interactive run retries as a fresh session preserving mode, backend, and reap policy; there are deliberately no retry flags to change them — respawn with spawn/delegate if the backend itself was the problem."]
-                   :fails ["target not found" "nothing failed/exhausted to supersede" "resume-classed failure retried without --fresh"]
+                   :fails ["target not found" "nothing failed/exhausted to supersede" "multiple failed serving runs under the task (retry a specific run id)" "resume-classed failure retried without --fresh"]
                    :returns {"superseded" "old run id" "task" "optional task id" "run" {"id" "new run id" "phase" "pending" "harness" "string"}}}
            :status {:group "delegation"
                     :usage "agent status [root-id]"
@@ -168,6 +169,7 @@
            :review {:group "memory-review"
                     :usage "agent review <target-id> [--roster name | --members n --harness a,b --contract text] [--cwd dir] [--commit-range range] [--changed-files a,b] [--spawned-by run] [--synthesize]"
                     :semantics ["Spawn independent read-only reviewers of the target strand and its subtree; reviewing a plan root reviews the whole feature."
+                                "Reviewer and synthesizer runs are non-serving helpers (shuttle/serves=false): they hang under the target but never gate a later delegate of it, so a target can be reviewed before or after it is delegated."
                                 "Each reviewer reads strand contracts plus repository state at --cwd. Pass the worktree where the diff lives."
                                 "Findings are appended as notes on the target. --synthesize adds a run depending on all reviewers; await it for the verdict."
                                 "--roster fans out a named declarative roster (see rosters): one run per entry with its own precise contract and scope, always synthesized. The roster is the one authoritative source of reviewer count, harnesses, and contracts, so --members/--harness/--contract are rejected with it."
@@ -245,6 +247,34 @@
 (defn- task-runs [task-id]
   (->> (children-ids task-id) (map #(api/show (rt) %)) (filter run?) vec))
 
+(defn- serving-run?
+  "True unless the run is a stamped read-only helper. A run serves its --for
+  target — counts as a delegation of that task's work — by default; recon
+  spawns, reviewers, and panel/council seats stamp shuttle/serves=false so they
+  never gate delegation of the task they hang under. The stamp is closed: absent
+  or \"true\" serves, \"false\" does not, and any other value fails loudly rather
+  than silently reclassifying a malformed helper as serving."
+  [s]
+  (case (sattr s "serves")
+    (nil "true") true
+    "false" false
+    (fail! "run has an invalid shuttle/serves value" {:run (:id s) :serves (sattr s "serves")})))
+
+;; Attrs stamped on a spawned run to mark it a non-serving read-only helper.
+;; Merged into every recon/review/panel run's :attrs so the delegation seam can
+;; distinguish helpers from delegations of the task's own work.
+(def ^:private non-serving-attrs {"shuttle/serves" "false"})
+
+(defn- serving-runs
+  "Serving, non-superseded runs hanging under a task: the runs that gate
+  delegation. Non-serving helper runs (shuttle/serves=false) and superseded
+  runs never count, so a recon or review run under a task never blocks its
+  later delegation."
+  [task-id]
+  (->> (task-runs task-id)
+       (filter serving-run?)
+       (remove #(= "superseded" (sattr % "phase")))))
+
 (defn- prompt-for-task
   ([task extra] (prompt-for-task task extra false))
   ([task extra interactive?]
@@ -280,12 +310,13 @@
     (when-not (ready? (:id task)) (fail! "task is not ready" {:task (:id task)}))
     (when (and (hitl? task) (not interactive?))
       (fail! "task is hitl: delegate it with --interactive" {:task (:id task)}))
-    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (active-run-phases (sattr % "phase"))) (task-runs (:id task))))]
-      (fail! "task has an ACTIVE run" {:task (:id task) :run (:id r)}))
-    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (failed-phases (sattr % "phase"))) (task-runs (:id task))))]
-      (fail! "task wants retry" {:task (:id task) :run (:id r)}))
-    (when-let [r (first (filter #(and (not= "superseded" (sattr % "phase")) (success-phases (sattr % "phase"))) (task-runs (:id task))))]
-      (fail! "task already has a successful run (verify + close it)" {:task (:id task) :run (:id r)}))
+    (let [runs (serving-runs (:id task))]
+      (when-let [r (first (filter #(active-run-phases (sattr % "phase")) runs))]
+        (fail! "task has an ACTIVE run" {:task (:id task) :run (:id r)}))
+      (when-let [r (first (filter #(failed-phases (sattr % "phase")) runs))]
+        (fail! "task wants retry" {:task (:id task) :run (:id r)}))
+      (when-let [r (first (filter #(success-phases (sattr % "phase")) runs))]
+        (fail! "task already has a successful run (verify + close it)" {:task (:id task) :run (:id r)})))
     (let [harness (harness-for task flags)
           run (shuttle/spawn-run! (cond-> {:harness harness
                                            :prompt (prompt-for-task task (get flags "--prompt") interactive?)
@@ -303,12 +334,18 @@
                                     (attr task :max-attempts) (assoc :max-attempts (attr task :max-attempts))))]
       {:task (:id task) :run (select-keys (shuttle/run-summary run) [:id :phase :harness :attach])})))
 
-(defn- skip-reason [task]
-  (cond
-    (hitl? task) "hitl"
-    (some #(and (not= "superseded" (sattr % "phase")) (active-run-phases (sattr % "phase"))) (task-runs (:id task))) "has-active-run"
-    (some #(and (not= "superseded" (sattr % "phase")) (failed-phases (sattr % "phase"))) (task-runs (:id task))) "failed-needs-retry"
-    (some #(and (not= "superseded" (sattr % "phase")) (success-phases (sattr % "phase"))) (task-runs (:id task))) "already-succeeded"))
+(defn- skip-reason
+  "Skip reason for a ready task in `delegate --ready` fan-out, or nil to
+  delegate. Pure over current graph state: only serving, non-superseded runs
+  count, so a read-only helper never masquerades as the task being served."
+  [task]
+  (let [runs (serving-runs (:id task))
+        any-phase (fn [phases] (some #(phases (sattr % "phase")) runs))]
+    (cond
+      (hitl? task) "hitl"
+      (any-phase active-run-phases) "has-active-run"
+      (any-phase failed-phases) "failed-needs-retry"
+      (any-phase success-phases) "already-succeeded")))
 
 (defn- op-delegate [argv]
   (let [{:keys [positional flags]} (parse-argv argv {"--ready" :single "--harness" :single "--cwd" :single "--prompt" :single "--spawned-by" :single
@@ -317,12 +354,19 @@
       (do (when (seq positional) (fail! "delegate --ready takes no task positional" {:got positional}))
           (when (or (get flags "--interactive") (get flags "--backend") (get flags "--reap"))
             (fail! "delegate --ready is headless fan-out; interactive flags are per-task so live sessions never swamp the human" {:plan plan}))
+          ;; Classify every task exactly once, up front, before any spawn: a task
+          ;; delegated this pass mints a pending run, so re-reading skip reasons
+          ;; after delegation would list it in BOTH :delegated and :skipped
+          ;; (has-active-run). The partition is frozen against pre-spawn state.
           (let [tasks (filter #(and (= "active" (:state %)) (not (run? %)) (ready? (:id %))) (parent-descendants plan))
-                missing (filter #(and (nil? (skip-reason %)) (not (non-blank? (attr % :harness)))) tasks)]
+                classified (mapv (juxt identity skip-reason) tasks)
+                to-delegate (mapv first (remove second classified))
+                missing (remove #(non-blank? (attr % :harness)) to-delegate)]
             (when (seq missing) (fail! "ready tasks missing harness" {:tasks (mapv :id missing)}))
             {:plan plan
-             :delegated (mapv #(delegate-task % flags) (remove skip-reason tasks))
-             :skipped (mapv (fn [t] {:task (:id t) :reason (skip-reason t)}) (filter skip-reason tasks))}))
+             :delegated (mapv #(delegate-task % flags) to-delegate)
+             :skipped (mapv (fn [[t reason]] {:task (:id t) :reason reason})
+                            (filter second classified))}))
       (let [[task-id] positional]
         (when-not (= 1 (count positional)) (fail! "delegate requires <task-id> or --ready <plan-id>" {:got positional}))
         (delegate-task (active-task! task-id) flags)))))
@@ -331,6 +375,10 @@
   (let [{:keys [positional flags]} (parse-argv argv {"--harness" :single "--prompt" :single "--title" :single "--depends-on" :multi "--for" :single "--spawned-by" :single "--cwd" :single "--max-attempts" :single
                                                      "--interactive" :bool "--backend" :single "--reap" :single})]
     (when (seq positional) (fail! "spawn takes only flags" {:unexpected positional}))
+    ;; spawn is the raw helper/escape-hatch verb — recon reads, review helpers,
+    ;; and one-off runs. It never delegates a task's own work (delegate does),
+    ;; so a spawn --for a task is a non-serving helper and must not gate that
+    ;; task's later delegation.
     (shuttle/run-summary (shuttle/spawn-run! {:harness (or (get flags "--harness") (fail! "spawn requires --harness" {}))
                                              :prompt (or (get flags "--prompt") (fail! "spawn requires --prompt" {}))
                                              :title (get flags "--title")
@@ -339,6 +387,7 @@
                                              :spawned-by (get flags "--spawned-by")
                                              :cwd (get flags "--cwd")
                                              :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))
+                                             :attrs non-serving-attrs
                                              :mode (when (get flags "--interactive") :interactive)
                                              :backend (get flags "--backend")
                                              :reap (get flags "--reap")}))))
@@ -1042,7 +1091,12 @@
                           ;; shuttle/fresh-prompt so `retry --fresh` has a
                           ;; durable cold-start prompt (a fresh process must
                           ;; never be handed the continuation, PLAN-Pnl-001.A6)
-                          attrs (cond-> (into {} (map (fn [[k v]] [k (resolve-board v)])) (:attrs spec))
+                          ;; panel seats and synthesis are read-only deliberators
+                          ;; of the board; a :target-board panel hangs them under
+                          ;; the target task, so mark them non-serving too
+                          attrs (cond-> (into non-serving-attrs
+                                              (map (fn [[k v]] [k (resolve-board v)]))
+                                              (:attrs spec))
                                   resume-run (assoc "shuttle/fresh-prompt" (resolve-board (:prompt spec))))]
                       (shuttle/spawn-run!
                        (cond-> (merge {:harness (:harness spec)
@@ -1152,6 +1206,8 @@
                                "shuttle/review-focus" (or focus "")}})
                     reviewers)))
         synthesize? (or synthesize? (some? roster-specs))
+        ;; reviewers and the synthesizer are read-only helpers of the target:
+        ;; they must never gate a later delegation of the target task
         spawn-spec! (fn [spec extra]
                       (shuttle/spawn-run!
                        (merge {:harness (:harness spec)
@@ -1159,7 +1215,7 @@
                                :parent target-id
                                :spawned-by spawned-by
                                :cwd cwd
-                               :attrs (:attrs spec)}
+                               :attrs (merge (:attrs spec) non-serving-attrs)}
                               extra)))
         review-runs (mapv (fn [{spec-name :name :as spec}]
                             (spawn-spec! spec {:title (truncate (str "Review " target-id
@@ -1356,7 +1412,10 @@
 ;; spawn-run!, so only these spool-owned structural attrs are carried.
 (def ^:private preserved-run-attr-names
   ["review-target" "review-pass" "review-roster" "review-focus"
-   "review-synthesis" "panel-seat" "panel-turn"])
+   "review-synthesis" "panel-seat" "panel-turn"
+   ;; a retried non-serving helper stays non-serving, so its retry never gates
+   ;; delegation of the target it was only reviewing
+   "serves"])
 
 (defn- op-retry [argv]
   (let [{:keys [positional flags]} (parse-argv argv {"--harness" :single "--cwd" :single "--prompt" :single "--fresh" :bool})
@@ -1364,8 +1423,19 @@
         fresh? (boolean (get flags "--fresh"))]
     (when-not (= 1 (count positional)) (fail! "retry requires <task-or-run-id>" {:got positional}))
     (let [strand (or (api/show (rt) id) (fail! "retry target not found" {:id id}))
-          run (if (run? strand) strand (first (filter #(failed-phases (sattr % "phase")) (task-runs id))))
-          task-id (when-not (run? strand) id)]
+          task-id (when-not (run? strand) id)
+          ;; retry-by-task means "retry the task's own work", so resolve against
+          ;; serving runs only — a failed reviewer/recon helper hanging under the
+          ;; task must not shadow the real delegation failure. Retrying a helper
+          ;; stays possible by passing its run id directly. Two failed serving
+          ;; runs is ambiguous: name the candidates rather than pick one.
+          run (if (run? strand)
+                strand
+                (let [failed (filter #(failed-phases (sattr % "phase")) (serving-runs id))]
+                  (when (> (count failed) 1)
+                    (fail! "task has multiple failed serving runs; retry a specific run id"
+                           {:task id :runs (mapv :id failed)}))
+                  (first failed)))]
       (when-not (and run (failed-phases (sattr run "phase"))) (fail! "nothing to supersede" {:id id}))
       (let [resumes (sattr run "resumes")
             ;; A3 continuity: a plain retry re-resumes the predecessor session;
