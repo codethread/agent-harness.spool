@@ -471,7 +471,8 @@
          {:name "carder-report" :usage "strand carder-report [--days <n>] [--include-plumbing true|false]"}
          {:name "agent" :usage "strand agent about — the delegation manual (spawn/delegate/retry/status/ps/await/logs/kill/note/notes/council/review); shipped by skein.spools.agents"}
          {:name "flow-await" :usage "strand flow-await <workflow-run-id> [--timeout-secs <n>]"}
-         {:name "flow-status" :usage "strand flow-status <workflow-run-id>"}]
+         {:name "flow-status" :usage "strand flow-status <workflow-run-id>"}
+         {:name "hitl" :usage "strand hitl <parent-id> <title> --context <text> [--cwd <dir>] [--harness <name>] [--backend <name>] — interactive user+agent session with a self-terminating tracking strand"}]
    :patterns [{:name "agent-plan"
                :purpose "Create a feature strand plus task/review children for agent work; now shipped by skein.spools.agents, not this config."}
               {:name "delegate-pipeline"
@@ -553,6 +554,75 @@
   (let [{run-id :workflow-run-id} (:op/args ctx)]
     (merge {:operation "flow-status"}
            (loom/flow-status (current/runtime) run-id))))
+
+;; ---------------------------------------------------------------------------
+;; hitl: interactive human-in-the-loop working sessions
+;; ---------------------------------------------------------------------------
+
+(defn- hitl-prompt
+  "Compose the session prompt: coordinator-supplied context plus the tracking
+  contract that makes the session self-terminating (the session agent records
+  notes and an outcome on the tracking strand, then closes it, which completes
+  the run and tears down the multiplexer session)."
+  [tracking-id context]
+  (str "You are an INTERACTIVE HITL session: the user is attached to this"
+       " terminal and you work through the task together, at their direction."
+       " This is a working session, not a headless task — converse, propose,"
+       " and act when they agree.\n\n"
+       context
+       "\n\n## Tracking contract (important)\n"
+       "Your tracking strand is " tracking-id ". A coordinator agent reads it"
+       " after this session to learn what happened — the user will not relay"
+       " details.\n"
+       "- Record each significant decision as a closed note child as you go:"
+       " `strand add \"note: <decision>\" --state closed` then"
+       " `strand update " tracking-id " --edge parent-of:<note-id>`.\n"
+       "- When the user says you are done: write the outcome —"
+       " `strand update " tracking-id " --attr outcome=\"<2-5 sentence summary:"
+       " decisions, commits (shas), open questions>\"` — then close the strand:"
+       " `strand update " tracking-id " --state closed`.\n"
+       "- Closing " tracking-id " completes your run and tears down this"
+       " session — make it your very last act, after the outcome attr is"
+       " written and any final commit is made.\n"))
+
+(defn hitl-op
+  "Open an interactive HITL working session for a human + agent pair.
+
+  Usage: `strand hitl <parent-id> <title> --context <text> [--cwd <dir>]
+  [--harness <name>] [--backend <name>]`. Creates a tracking strand under
+  `parent-id` (a kanban card, plan, or work root), composes the required
+  `--context` brief with the tracking contract, and spawns an interactive
+  multiplexer run serving the tracking strand (default harness `hitl-build`,
+  backend `tmux`). The session ends when the session agent closes the tracking
+  strand after writing its outcome; the coordinator then reads the tracking
+  strand for notes and outcome. Returns the tracking id and pending run
+  summary — `strand agent ps` carries the session name and attach command once
+  the session is live."
+  [ctx]
+  (let [{:keys [parent-id title context cwd harness backend]} (:op/args ctx)
+        rt (current/runtime)]
+    (require-non-blank! :context context)
+    (when-not (api/show rt parent-id)
+      (throw (ex-info "hitl parent strand not found" {:parent parent-id})))
+    (let [tracking (api/add rt {:title (str "HITL: " title)
+                                :attributes {"hitl" "true"
+                                             "body" (str "Tracking strand for the interactive HITL session \"" title "\"."
+                                                         " The session agent appends closed note children for decisions,"
+                                                         " writes a final outcome attr, then closes this strand to end its"
+                                                         " run and tear down the session.")}})]
+      (api/update rt parent-id {:edges [{:type "parent-of" :to (:id tracking)}]})
+      (let [run (shuttle/spawn-run! {:harness (or harness "hitl-build")
+                                     :prompt (hitl-prompt (:id tracking) context)
+                                     :title (str "HITL: " title)
+                                     :parent (:id tracking)
+                                     :cwd cwd
+                                     :mode :interactive
+                                     :backend (or backend "tmux")})]
+        {:operation "hitl"
+         :tracking (:id tracking)
+         :parent parent-id
+         :run (shuttle/run-summary run)
+         :next "strand agent ps shows the attach command once the session is live; the session ends when the tracking strand closes."}))))
 
 ;; ---------------------------------------------------------------------------
 ;; branches: branch-visibility projection over work-root strands (loom)
@@ -790,6 +860,26 @@
                   :required? true
                   :doc "Workflow run id."}]})
 
+(def ^:private hitl-arg-spec
+  {:op "hitl"
+   :doc "Open an interactive HITL session: tracking strand + multiplexer run."
+   :positionals [{:name :parent-id
+                  :type :string
+                  :required? true
+                  :doc "Strand to hang the tracking strand under (kanban card, plan, or work root)."}
+                 {:name :title
+                  :type :string
+                  :required? true
+                  :doc "Short session title."}]
+   :flags {:context {:type :string
+                     :doc "Required session brief: the situation, artifacts, findings, and what to work through together."}
+           :cwd {:type :string
+                 :doc "Working directory for the session (defaults to the workspace root)."}
+           :harness {:type :string
+                     :doc "Interactive-capable harness (prompt-via :arg TUI, e.g. hitl-build — the default). Headless harnesses like build/pi-main die in a pane."}
+           :backend {:type :string
+                     :doc "Multiplexer backend (default tmux)."}}})
+
 (def ^:private flow-status-arg-spec
   {:op "flow-status"
    :doc "Show workflow flow status for renderer consumption."
@@ -864,6 +954,14 @@
      {:alias-of :claude
       :extra-args ["--model" "opus"]
       :doc "Claude Opus: feature building, reviews, and council seats."})
+   ;; Interactive TUI seat for `strand hitl` sessions. This cannot alias
+   ;; :claude: the shipped harness is headless (`claude -p`, prompt on stdin)
+   ;; and exits immediately inside a multiplexer pane — an interactive launch
+   ;; requires the prompt as the initial argv message (the session owns stdin).
+   (shuttle/defharness! :hitl-build
+     {:argv ["claude" "--model" "opus" "--dangerously-skip-permissions"]
+      :parse :raw
+      :doc "Claude Opus interactive TUI for hitl multiplexer sessions; prompt rides as the initial argv message."})
    ;; oracle is deliberately scarce: single-case briefs with mandatory
    ;; incremental card notes — a context-overflowed Fable run that wrote
    ;; nothing costs an order of magnitude more than any other seat.
@@ -988,4 +1086,9 @@
             runtime
             'flow-status
             (op-metadata flow-status-arg-spec)
-            'config/flow-status-op)]}))
+            'config/flow-status-op)
+           (api/register-op!
+            runtime
+            'hitl
+            (op-metadata hitl-arg-spec)
+            'config/hitl-op)]}))
