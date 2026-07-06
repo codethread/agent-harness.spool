@@ -16,7 +16,7 @@ Canonical shipped contracts live in root specs:
 - [Weaver Runtime](./devflow/specs/daemon-runtime.md)
 - [Alpha Surface](./devflow/specs/alpha-surface.md) (the contract index: in-contract tiers vs explicitly internal surface)
 
-Userland reference spools are indexed in [`spools/`](./spools/README.md), with classpath-shipped sources under `spools/src`, externally git-distributed spools consumed by coordinate, and contract docs beside them:
+Userland reference spools are indexed in [`spools/`](./spools/README.md), with classpath-shipped sources under `spools/src`, externally git-distributed spools consumed by coordinate, and contract docs beside them (each spool also carries a `<spool>.cookbook.md` of worked composition recipes, indexed in the spools README):
 
 - [Batteries](./spools/batteries.md) (classpath-shipped spool: the shipped `strand <op>` command surface — `add`/`update`/`show`/`supersede`/`burn`/`list`/`ready`/`subgraph`/`weave`/`query`/`pattern`)
 - [Workflow Engine](./spools/workflow.md)
