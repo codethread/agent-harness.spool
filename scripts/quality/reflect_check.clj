@@ -31,7 +31,8 @@
                "spools/shuttle/src" "skein/spools"
                "spools/agents/src" "skein/spools"
                "spools/chime/src" "skein/spools"
-               "spools/kanban/src" "skein/spools"}
+               "spools/kanban/src" "skein/spools"
+               "spools/cron/src" "skein/spools"}
         namespaces (sort (mapcat (fn [[root subdir]]
                                    (namespaces-under root subdir))
                                  roots))

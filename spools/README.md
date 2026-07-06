@@ -74,6 +74,7 @@ dependencies, and local development overrides, see [Writing shared spools](../do
 | `skein.spools.treadle` | [shuttle/treadle.md](./shuttle/treadle.md) | Workflow gate bridge: fulfills ready `:subagent` gates by spawning shuttle runs and delivering successful results through `workflow/complete!`. |
 | `skein.spools.chime` | [chime/README.md](./chime/README.md) | Notification engine: watches graph mutations, evaluates user-registered rules, and sends matches through a user-bound local notifier command. |
 | `skein.spools.kanban` | [kanban.md](./kanban.md) | User-facing kanban board: feature/epic cards, refinement/pending/claimed lanes, notes and handovers via `strand kanban`. |
+| `skein.spools.cron` | [cron/README.md](./cron/README.md) | Generic weaver timer engine: registers named jobs that fire on a fixed interval with uniform jitter on a spool-owned scheduled executor, with last-outcome/next-fire status and a loud inspectable failure log. Ships no jobs. |
 
 ## Reference examples
 

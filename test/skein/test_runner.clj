@@ -43,7 +43,10 @@
    ;; dispatches graph mutations on the shared lane; same real-timer reasoning.
    'skein.scheduler-e2e-test
    ;; notifier binding and process-output assertions mutate runtime-owned chime state but are flaky under parent parallel load.
-   'skein.chime-test])
+   'skein.chime-test
+   ;; arms real cron executor timers and polls for async job fires; same
+   ;; real-timer reasoning as the scheduler suites above.
+   'skein.cron-test])
 
 (def add-libs-shards
   "Subprocess JVM shard groups for tests that mutate JVM-global tools.deps state."
@@ -52,7 +55,9 @@
    ;; Shuttle-first within this JVM; runtime-deps intentionally poisons the basis, so it is last.
    "B" ['skein.shuttle-test 'skein.chime-sync-test 'skein.runtime-deps-test]
    ;; Medium add-libs suites share one JVM to amortize boot without exceeding shard A.
-   "C" ['skein.config-test 'skein.kanban-test]})
+   ;; nvd-scan-test load-files .skein/config.clj (the full devflow/spool stack)
+   ;; just as config-test does, so it shares this shard's boot.
+   "C" ['skein.config-test 'skein.kanban-test 'skein.nvd-scan-test]})
 
 (def shard-timeout-minutes 5)
 

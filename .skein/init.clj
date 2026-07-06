@@ -74,11 +74,26 @@
                      :spools ['skein.spools/kanban]
                      :call 'skein.spools.kanban/install!
                      :required? true})
+;; Cron is a generic weaver timer engine; install! only creates its scheduled
+;; executor. config.clj requires it (for the nvd-scan job's seed/jitter fns),
+;; so it must be synced before config loads.
+(runtime-alpha/use! runtime :skein/spools-cron
+                    {:ns 'skein.spools.cron
+                     :spools ['skein.spools/cron]
+                     :call 'skein.spools.cron/install!
+                     :required? true})
 (runtime-alpha/use! runtime :config
                     {:file "config.clj"
                      :after [:skein/spools-ephemeral :skein/spools-workflow :skein/spools-devflow
-                             :skein/spools-loom :skein/spools-shuttle :skein/spools-agents :skein/spools-chime]
+                             :skein/spools-loom :skein/spools-shuttle :skein/spools-agents :skein/spools-chime
+                             :skein/spools-cron]
                      :call 'config/install!})
+;; Register the scheduled NVD deep-scan cron job here rather than in
+;; config/install! so config_test (which loads config.clj and calls install!
+;; directly) never triggers the job's startup gh seed against the real repo.
+;; The job's run!/seed fns live in config.clj beside the other repo policy;
+;; re-run on reload it re-seeds and re-registers idempotently.
+((requiring-resolve 'config/register-nvd-scan-job!))
 ;; Treadle installs last: its install! runs an initial gate scan, so every
 ;; harness alias config.clj registers (e.g. pi-main) must already exist or a
 ;; durable ready gate would be stamped treadle/error on every cold start.

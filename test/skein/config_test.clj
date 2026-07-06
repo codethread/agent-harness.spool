@@ -69,6 +69,8 @@
                           {:local/root (.getCanonicalPath (io/file "spools/chime"))}
                           'skein.spools/kanban
                           {:local/root (.getCanonicalPath (io/file "spools/kanban"))}
+                          'skein.spools/cron
+                          {:local/root (.getCanonicalPath (io/file "spools/cron"))}
                           ;; init.clj requires this spool; the omission used to be
                           ;; masked by fail-quiet required use!, which now throws.
                           ;; Its root lives inside the workspace (.skein/spools/macros),
