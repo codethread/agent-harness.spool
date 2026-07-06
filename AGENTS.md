@@ -311,3 +311,12 @@ sqlite3 smoke-cli.sqlite.workspace/data/skein.sqlite 'select from_strand_id, to_
 - Runtime publication discipline: a real weaver process publishes exactly one ambient runtime (atomic, double-publish fails loudly). Everything else — tests, fixtures, embedded/tooling runtimes — starts with `:publish? false` and passes the runtime explicitly or runs under `skein.core.weaver.runtime/with-runtime-binding`. Never reach for the published singleton outside daemon startup/REPL ergonomics paths.
 - Spool state is runtime-owned via `skein.api.runtime.alpha/spool-state`; no module-level atoms in spools.
 - Never `:keys`-destructure `:fn` (or any clojure.core macro name) into a local: a local named `fn` silently shadows the `fn` macro and turns later thunks into eager calls. Rename on destructure instead: `{fn-sym :fn}`.
+
+<!-- mill:skein-prime -->
+## Skein / strand
+
+This repo uses Skein strands to track work. Orientation ships in the `mill` CLI:
+
+- `mill skein prime` — where the Skein source and docs live, and how to extend this repo's `.skein/` config.
+- `mill strand prime` — the strand planning/tracking workflow; run it before multi-step work.
+<!-- /mill:skein-prime -->
