@@ -1,4 +1,4 @@
-.PHONY: install dash fmt fmt-check lint lint-go lint-clj lint-splint reflect-check deps-report security-report
+.PHONY: build install dash fmt fmt-check lint lint-go lint-clj lint-splint reflect-check deps-report security-report
 
 GO_CLI := ./cli/cmd/strand
 MILL_CLI := ./cli/cmd/mill
@@ -6,6 +6,13 @@ SOURCE_LDFLAGS := -X skein-strand-cli/internal/config.InstalledSource=$(CURDIR)
 GOFUMPT_VERSION := v0.8.0
 GOLANGCI_LINT_VERSION := v2.1.6
 GOVULNCHECK_VERSION := v1.1.4
+
+# repo-local build for agents/worktrees validating CLI changes without touching
+# the user's global install; run the resulting ./bin/strand and ./bin/mill directly
+build:
+	mkdir -p ./bin
+	go build -ldflags "$(SOURCE_LDFLAGS)" -o ./bin/strand $(GO_CLI)
+	go build -ldflags "$(SOURCE_LDFLAGS)" -o ./bin/mill $(MILL_CLI)
 
 install:
 	go install -ldflags "$(SOURCE_LDFLAGS)" $(GO_CLI)

@@ -52,7 +52,7 @@ PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:smoke
 Common commands:
 
 ```sh
-make install
+make build                    # repo-local ./bin/strand, ./bin/mill — use these for CLI changes; see below
 mill start                    # run in a durable terminal
 mill init                     # creates/completes canonical repo .skein
 
@@ -70,10 +70,13 @@ make dash                     # code-owner TUI over the live coordination world:
 
 Agents must prefer explicit disposable `--workspace` workspaces. Never use or mutate the user's default config/data/state workspaces unless explicitly asked.
 
+Agents never run `make install` — it go-installs `strand`/`mill` over the user's global on-PATH binaries and repoints them at whatever checkout ran it, which is wrong from a worktree. Use `make build` and run the repo-local `./bin/strand` / `./bin/mill` (or PATH-prefix `./bin`) for all CLI validation. `make install` is for the user themselves, or explicit main-branch smoke testing when the user asks for it.
+
 Kill processes by PID only. Never `pkill -f <pattern>`, `pkill clojure`, or any command-line/argv match to clean up a stuck process. The shipped `claude` and `pi` harnesses now deliver their worker prompt on stdin, so it no longer rides in argv — but other and custom harnesses may still pass the prompt as an argument (`:prompt-via :arg`, the default for any harness that doesn't opt into `:stdin`), and that prompt quotes the very commands you are trying to clean up (the test gate, a build step), so a pattern kill aimed at one stuck JVM can still strafe unrelated sibling agents whose argv happens to mention the same text. On 2026-07-05 a `pkill -f "clojure -M:test"` meant to clear stuck test JVMs killed two healthy delegated build runs within a second. Find the specific PID (`jps`, `ps`, or the run's recorded pid) and `kill <pid>`.
 
 ```sh
-make install
+make build
+PATH="$PWD/bin:$PATH"
 workspace=$(mktemp -d)
 xdg=$(mktemp -d)
 export XDG_STATE_HOME="$xdg"
@@ -227,7 +230,7 @@ printf "(do (require '[skein.api.current.alpha :as current] '[skein.api.runtime.
 
 Never restart a running weaver (`mill weaver stop`/`start`) just to pick up code or config changes — a restart tears down live shuttle runs and weaver-lifetime registries other agents depend on. Restarting the canonical weaver requires explicit user sign-off. Match the change to the lightest pickup path:
 
-- Go CLI changes (`cli/`): `make install` only; no weaver action at all.
+- Go CLI changes (`cli/`): `make build` (or `make install` if you are the user on main) only; no weaver action at all.
 - Selected-workspace config/startup file changes: `runtime-alpha/reload!` (above) — it clears registries, reinstalls built-ins, and re-runs startup files. Spool state under `skein.api.runtime.alpha/spool-state` (including shuttle run supervision) survives reload.
 - Changes to already-loaded Clojure namespaces (core `src/skein/**` or spool sources): `reload!` alone is NOT enough — startup files re-run but `require`/sync skip namespaces already loaded in the JVM. Send a targeted `(require 'the.changed.ns :reload)` via `mill weaver repl --stdin` first, then `reload!` if the namespace registers ops/queries/patterns.
 - Restart is genuinely needed only when the JVM itself must change: classpath/deps.edn edits, weaver launch/transport/socket changes, or an unhealthy JVM.

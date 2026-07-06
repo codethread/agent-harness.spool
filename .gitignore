@@ -5,6 +5,7 @@
 .nrepl-port
 
 cli/bin/
+/bin/
 
 scripts/shuttle-dash/node_modules/
 
