@@ -1153,6 +1153,20 @@
                      :explain (s/explain-str ::specs/attribute-storage-migration-result result)})))
   result)
 
+(defn- require-omitted-attribute-descriptor! [descriptor]
+  (when-not (s/valid? ::specs/omitted-attribute-descriptor descriptor)
+    (throw (ex-info "Omitted attribute descriptor is invalid"
+                    {:descriptor descriptor
+                     :explain (s/explain-str ::specs/omitted-attribute-descriptor descriptor)})))
+  descriptor)
+
+(defn- require-lean-result! [result]
+  (doseq [strand result
+          [_ value] (:attributes strand)
+          :when (:skein/omitted value)]
+    (require-omitted-attribute-descriptor! value))
+  result)
+
 (defn archive!
   "Archive all attributes, or an explicit non-empty key set, for one strand.
 
@@ -1219,6 +1233,13 @@
   ([runtime query-def params]
    (normalize (db/all-strands (ds runtime) query-def params))))
 
+(defn list-lean
+  "Return strands with oversized attributes replaced by descriptors."
+  ([runtime lean-byte-floor]
+   (require-lean-result! (normalize (db/all-strands-lean (ds runtime) lean-byte-floor))))
+  ([runtime lean-byte-floor query-def params]
+   (require-lean-result! (normalize (db/all-strands-lean (ds runtime) lean-byte-floor query-def params)))))
+
 (defn list-query
   "Return strands matching a registered query definition."
   [runtime query-name params]
@@ -1234,9 +1255,9 @@
 (defn ready-lean
   "Return ready strands with oversized attributes replaced by descriptors."
   ([runtime lean-byte-floor]
-   (normalize (db/ready-strands-lean (ds runtime) lean-byte-floor)))
+   (require-lean-result! (normalize (db/ready-strands-lean (ds runtime) lean-byte-floor))))
   ([runtime lean-byte-floor query-def params]
-   (normalize (db/ready-strands-lean (ds runtime) lean-byte-floor query-def params))))
+   (require-lean-result! (normalize (db/ready-strands-lean (ds runtime) lean-byte-floor query-def params)))))
 
 (defn ready-query
   "Return ready strands from the result set of a registered query definition."

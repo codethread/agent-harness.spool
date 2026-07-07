@@ -185,21 +185,29 @@
                                       :where [:= [:attr :owner] [:param :who]]})
       (let [at-floor (str/join (repeat 1022 "a"))
             over-floor (str/join (repeat 1023 "b"))
+            non-ascii-at-floor (str/join (repeat 511 "é"))
             strand (api/add rt {:title "Payload"
                                 :attributes {:owner "agent"
                                              :at-floor at-floor
-                                             :over-floor over-floor}})
+                                             :over-floor over-floor
+                                             :non-ascii-at-floor non-ascii-at-floor}})
             lean-list (first (filter #(= (:id strand) (:id %)) (api/op! rt 'list [])))
             lean-ready (first (filter #(= (:id strand) (:id %)) (api/op! rt 'ready [])))
             lean-query (first (api/op! rt 'list ["--query" "owned" "--param" "who=agent"]))
+            lean-ready-query (first (api/op! rt 'ready ["--query" "owned" "--param" "who=agent"]))
             full-show (api/op! rt 'show [(:id strand)])
             full-api-list (first (filter #(= (:id strand) (:id %)) (api/list rt)))]
         (testing "list/ready/query preserve values at the fixed 1 KiB floor"
-          (doseq [row [lean-list lean-ready lean-query]]
+          (doseq [row [lean-list lean-ready lean-query lean-ready-query]]
             (is (= "agent" (get-in row [:attributes :owner])))
             (is (= at-floor (get-in row [:attributes :at-floor])))))
+        (testing "list and ready use the same stored-byte floor for non-ASCII values"
+          (let [projections (mapv #(get-in % [:attributes :non-ascii-at-floor])
+                                  [lean-list lean-ready lean-query lean-ready-query])]
+            (is (= 1 (count (set projections))))
+            (is (specs/omitted-attribute-descriptor? (first projections)))))
         (testing "list/ready/query replace values above the floor with the descriptor"
-          (doseq [row [lean-list lean-ready lean-query]]
+          (doseq [row [lean-list lean-ready lean-query lean-ready-query]]
             (let [descriptor (get-in row [:attributes :over-floor])]
               (is (specs/omitted-attribute-descriptor? descriptor))
               (is (= {:skein/omitted true :bytes 1025} descriptor)))))

@@ -1376,6 +1376,28 @@
   ([ds query-def params]
    (query-strands ds query-def params)))
 
+(defn all-strands-lean
+  "Return all strand rows with oversized hot attributes replaced by descriptors."
+  ([ds lean-byte-floor]
+   (attach-batched-attributes
+    ds
+    (execute! ds [(str "SELECT " (strand-columns-sql "t")
+                       " FROM strands t ORDER BY t.id")])
+    true
+    lean-byte-floor))
+  ([ds lean-byte-floor query-def params]
+   (let [{query-sql :sql query-params :params} (compile-query-for-ds ds query-def params)]
+     (attach-batched-attributes
+      ds
+      (execute! ds
+                (into [(str "SELECT " (strand-columns-sql "t") "
+                             FROM strands t
+                             WHERE " query-sql "
+                             ORDER BY t.id")]
+                      query-params))
+      true
+      lean-byte-floor))))
+
 (defn ready-strands
   "Return active strands with no active depends-on blockers.
 
