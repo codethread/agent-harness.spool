@@ -13,3 +13,15 @@ Design implications:
 - Prefer daemon-owned in-memory runtime state over ad hoc per-client state when multiple clients need to share behavior during one daemon lifetime.
 - Do not persist runtime behavior unless the feature explicitly calls for durable storage.
 - Keep user-authored behavior data-first where possible, and fail loudly when a CLI worker references daemon state that has not been loaded.
+
+## The work record is not the source of truth
+
+The code and its documentation are the durable record of a project. Skein's strands are a working memory beside them: they let a returning human or a cold agent pick up where work stopped. Some trackers (beads, for example) treat their own database as the project's truth; skein does not.
+
+Skein therefore aims at resumability, never replayability. Resuming means reading the handover and moving forward from the current state of the code. Replaying, in the sense of rolling back a change and re-deriving it from recorded events, assumes an event log that agent work cannot honestly provide: an agent hands over a finished change, and while file edits could in principle be traced, one shell command breaks the chain. Recording a history that pretends otherwise would be a false promise.
+
+Design implications:
+
+- Handover quality matters more than history depth: notes exist for the next reader, not for a permanent record.
+- Old strands and archived attributes are memory and teaching material, not authority. When the record disagrees with the code, the code wins.
+- Core owes no replay, audit, or event-sourcing features. Anything that reads history that way is userland, and should say so.
