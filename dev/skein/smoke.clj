@@ -559,13 +559,6 @@
               {:strand_id strand-id :key "payload" :value {:nested true} :archived 0}]
              rows
              "row-backed attribute storage stores one JSON value row per attribute")
-    (let [migration (weaver-api/migrate-attribute-storage! runtime)]
-      (assert= :already-current (:status migration)
-               "attribute storage migration recognizes current row-backed storage")
-      (assert (<= 1 (:strands migration))
-              (str "attribute storage migration reports current strand count\n" (pr-str migration)))
-      (assert (<= 2 (:attributes migration))
-              (str "attribute storage migration reports current attribute count\n" (pr-str migration))))
     (assert= {:strand-id strand-id
               :keys ["owner"]
               :archived? true

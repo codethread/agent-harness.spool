@@ -84,5 +84,5 @@ Plan-level mechanics, not contract questions; none block sign-off.
 
 - **EAS-DELTA-001.Q1:** The exact secondary-index set beyond `(key, value) WHERE archived = 0` (e.g. whether a `(strand_id) WHERE archived = 0` assembly-path partial index earns its keep), finalized by the benchmark gate.
 - **EAS-DELTA-001.Q2:** The internal SQL shape for archive/unarchive remains an implementation mechanic. The trusted-surface tier, semantic inputs, result shape, and fail-loud behavior for `archive!` / `unarchive!` are specified in `EAS-DELTA-003.CC4`.
-- **EAS-DELTA-001.Q3:** The migrate op's implementation mechanics remain open, but its name (`migrate-attribute-storage!`), trusted invocation tier, result shape, idempotency behavior, and parity-mismatch failure contract are specified in `EAS-DELTA-003.CC4`.
+- **EAS-DELTA-001.Q3:** The migrate op's implementation mechanics shipped as `migrate-attribute-storage!` for the document→rows cutover, then were struck from main after the recorded real-world worlds were migrated; see `EAS-DELTA-003.CC4`.
 - **EAS-DELTA-001.Q4:** The precise self-join SQL shape for cross-key predicates and the assembly query shape, validated for plan-parity by the benchmark gate and the uniform-capability regression tests.

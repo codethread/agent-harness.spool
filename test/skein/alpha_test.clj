@@ -59,8 +59,6 @@
       (api/init rt)
       (let [feature (api/add rt {:title "Feature" :attributes {:kind "feature"}})
             task (api/add rt {:title "Task" :attributes {:owner "agent"}})]
-        (is (= {:status :already-current :strands 2 :attributes 2}
-               (api/migrate-attribute-storage! rt)))
         (api/update rt (:id feature) {:edges [{:type "parent-of" :to (:id task)}]})
         (api/register-query rt 'agent-owned [:= [:attr :owner] "agent"])
         (is (= [(:id task)] (graph/query-ids! rt 'agent-owned {})))

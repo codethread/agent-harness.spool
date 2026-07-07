@@ -2,7 +2,6 @@
   "SQLite persistence for strands, edges, relation metadata, graph queries, and
   weaver-owned scheduler wakes."
   (:import [java.security SecureRandom]
-           [java.sql Connection]
            [java.time Instant]
            [java.util UUID]
            [org.sqlite SQLiteConfig SQLiteConfig$JournalMode SQLiteConfig$Pragma SQLiteConfig$TransactionMode SQLiteDataSource])
@@ -213,7 +212,6 @@
 
 (def ^:private required-strand-columns #{"id" "title" "state" "created_at" "updated_at"})
 (def ^:private forbidden-strand-columns #{"attributes"})
-(def ^:private legacy-strand-columns (conj required-strand-columns "attributes"))
 (def ^:private required-attribute-columns #{"strand_id" "key" "value" "archived"})
 (def ^:private required-edge-columns #{"from_strand_id" "to_strand_id" "edge_type" "attributes"})
 (def ^:private shipped-acyclic-relations #{"depends-on" "parent-of" "supersedes"})
@@ -235,21 +233,6 @@
        (empty? (missing-columns ds "attributes" required-attribute-columns))
        (not (contains? (table-columns ds "strands") "attributes"))))
 
-(defn- legacy-document-schema? [ds]
-  (and (table-exists? ds "strands")
-       (not (table-exists? ds "attributes"))
-       (empty? (missing-columns ds "strands" legacy-strand-columns))))
-
-(defn- classify-attribute-storage-schema [ds]
-  (let [strand-columns (when (table-exists? ds "strands") (table-columns ds "strands"))
-        has-document-column? (contains? strand-columns "attributes")
-        has-attributes-table? (table-exists? ds "attributes")]
-    (cond
-      (current-row-schema? ds) :current
-      (legacy-document-schema? ds) :legacy-document
-      (and has-document-column? has-attributes-table?) :mixed
-      :else :unknown)))
-
 (defn- ensure-current-schema! [ds]
   (when-let [missing (missing-columns ds "strands" required-strand-columns)]
     (throw (ex-info "Existing strands table is not compatible with the current schema; use a new database or migrate it explicitly."
@@ -261,6 +244,9 @@
   (when-let [missing (missing-columns ds "attributes" required-attribute-columns)]
     (throw (ex-info "Existing attributes table is not compatible with the current schema; use a new database or migrate it explicitly."
                     {:missing-columns (vec missing)})))
+  (when-not (current-row-schema? ds)
+    (throw (ex-info "Existing attribute storage is not compatible with the current schema; use a new database."
+                    {})))
   (let [edge-schema (:sql (execute-one! ds ["SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'strand_edges'"]))]
     (when (or (missing-columns ds "strand_edges" required-edge-columns)
               (str/includes? edge-schema "CHECK (edge_type IN"))
@@ -897,135 +883,6 @@
    (run-owned-transaction
     ds
     #(archive-attributes-in-transaction! % strand-id keys false))))
-
-(defn- migration-error [reason data]
-  (merge {:reason reason} data))
-
-(defn- current-storage-counts [ds status]
-  {:status status
-   :strands (:c (execute-one! ds ["SELECT count(*) AS c FROM strands"]))
-   :attributes (:c (execute-one! ds ["SELECT count(*) AS c FROM attributes"]))})
-
-(defn- parse-legacy-attributes! [{:keys [id attributes]}]
-  (let [parsed (try
-                 (json/read-str attributes :key-fn keyword)
-                 (catch Exception e
-                   (throw (ex-info "Legacy strand attributes are malformed JSON"
-                                   (migration-error :malformed-json
-                                                    {:strand-id id
-                                                     :attributes attributes})
-                                   e))))]
-    (when-not (s/valid? ::specs/attributes parsed)
-      (throw (ex-info "Legacy strand attributes do not conform to the attribute map contract"
-                      (migration-error :shape-invalid
-                                       {:strand-id id
-                                        :attributes parsed
-                                        :explain (s/explain-str ::specs/attributes parsed)}))))
-    (assoc parsed ::strand-id id)))
-
-(defn- legacy-attribute-documents! [ds]
-  (mapv parse-legacy-attributes!
-        (execute! ds ["SELECT id, attributes FROM strands ORDER BY id"])))
-
-(defn- legacy-attribute-count [documents]
-  (reduce + (map #(count (dissoc % ::strand-id)) documents)))
-
-(defn- row-attributes-map [ds strand-id]
-  (<-json (:attributes (strand-row-by-id ds strand-id false))))
-
-(defn- verify-migrated-rows! [ds documents]
-  (doseq [document documents]
-    (let [strand-id (::strand-id document)
-          expected (dissoc document ::strand-id)
-          actual (row-attributes-map ds strand-id)]
-      (when-not (= expected actual)
-        (throw (ex-info "Migrated attribute rows do not match the legacy document"
-                        (migration-error :parity-mismatch
-                                         {:strand-id strand-id
-                                          :expected expected
-                                          :actual actual}))))))
-  true)
-
-(defn- create-attributes-storage! [ds]
-  (execute! ds ["CREATE TABLE attributes (
-                  strand_id TEXT NOT NULL REFERENCES strands(id) ON DELETE CASCADE,
-                  key TEXT NOT NULL,
-                  value TEXT NOT NULL CHECK (json_valid(value)),
-                  archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
-                  PRIMARY KEY (strand_id, key)
-                )"])
-  (execute! ds ["CREATE INDEX idx_attributes_key_value_hot ON attributes(key, value) WHERE archived = 0"])
-  (execute! ds ["CREATE INDEX idx_attributes_strand_hot ON attributes(strand_id) WHERE archived = 0"]))
-
-(defn- rebuild-strands-without-attribute-document! [ds]
-  (execute! ds ["CREATE TABLE strands_new (
-                  id TEXT PRIMARY KEY,
-                  title TEXT NOT NULL,
-                  state TEXT NOT NULL DEFAULT 'active',
-                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                  CHECK (state IN ('active', 'closed', 'replaced'))
-                )"])
-  (execute! ds ["INSERT INTO strands_new (id, title, state, created_at, updated_at)
-                 SELECT id, title, state, created_at, updated_at FROM strands"])
-  (execute! ds ["DROP TABLE strands"])
-  (execute! ds ["ALTER TABLE strands_new RENAME TO strands"]))
-
-(defn- with-migration-connection [connectable f]
-  (if (instance? Connection connectable)
-    (f connectable)
-    (with-open [conn (jdbc/get-connection connectable)]
-      (f conn))))
-
-(defn- migrate-legacy-attribute-storage! [connectable]
-  (with-migration-connection
-    connectable
-    (fn [conn]
-      (let [documents (legacy-attribute-documents! conn)
-            strand-count (count documents)
-            attribute-count (legacy-attribute-count documents)]
-        (execute! conn ["PRAGMA foreign_keys = OFF"])
-        (try
-          (jdbc/with-transaction [tx conn]
-            (create-attributes-storage! tx)
-            (doseq [document documents]
-              (write-attribute-rows! tx (::strand-id document) (dissoc document ::strand-id)))
-            (verify-migrated-rows! tx documents)
-            (rebuild-strands-without-attribute-document! tx)
-            (when-let [violations (seq (execute! tx ["PRAGMA foreign_key_check"]))]
-              (throw (ex-info "Migrated attribute storage failed foreign-key validation"
-                              (migration-error :foreign-key-mismatch
-                                               {:violations violations}))))
-            (ensure-current-schema! tx))
-          (execute! conn ["PRAGMA foreign_keys = ON"])
-          (execute! conn ["PRAGMA optimize"])
-          {:status :migrated
-           :strands strand-count
-           :attributes attribute-count}
-          (finally
-            (execute! conn ["PRAGMA foreign_keys = ON"])))))))
-
-(defn migrate-attribute-storage!
-  "Explicitly migrate a legacy document-column world to row-backed attributes.
-
-  Current row-backed worlds return `:already-current`. Mixed or unknown schemas,
-  malformed JSON, shape-invalid source documents, and parity mismatches fail
-  loudly with diagnostic ex-data. This function is never called by `init!`."
-  [ds]
-  (case (classify-attribute-storage-schema ds)
-    :current (current-storage-counts ds :already-current)
-    :legacy-document (migrate-legacy-attribute-storage! ds)
-    :mixed (throw (ex-info "Attribute storage schema is partially migrated"
-                           (migration-error :mixed-schema
-                                            {:strand-columns (vec (sort (table-columns ds "strands")))
-                                             :attributes-table? (table-exists? ds "attributes")})))
-    :unknown (throw (ex-info "Attribute storage schema is not recognized"
-                             (migration-error :unknown-schema
-                                              {:tables (mapv :name (execute! ds ["SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"]))
-                                               :strand-columns (when (table-exists? ds "strands")
-                                                                 (vec (sort (table-columns ds "strands"))))
-                                               :attributes-columns (when (table-exists? ds "attributes")
-                                                                     (vec (sort (table-columns ds "attributes"))))})))))
 
 (defn- delete-strands! [ds ids]
   (doseq [id ids]

@@ -1146,13 +1146,6 @@
                      :explain (s/explain-str ::specs/attribute-archive-result result)})))
   result)
 
-(defn- require-migration-result! [result]
-  (when-not (s/valid? ::specs/attribute-storage-migration-result result)
-    (throw (ex-info "Attribute storage migration result is invalid"
-                    {:result result
-                     :explain (s/explain-str ::specs/attribute-storage-migration-result result)})))
-  result)
-
 (defn- require-omitted-attribute-descriptor! [descriptor]
   (when-not (s/valid? ::specs/omitted-attribute-descriptor descriptor)
     (throw (ex-info "Omitted attribute descriptor is invalid"
@@ -1190,13 +1183,6 @@
    (require-archive-result! (db/unarchive-attributes! (ds runtime) strand-id)))
   ([runtime strand-id keys]
    (require-archive-result! (db/unarchive-attributes! (ds runtime) strand-id keys))))
-
-(defn migrate-attribute-storage!
-  "Explicitly migrate a legacy document-column world to row-backed attributes.
-
-  This is a trusted in-process primitive only; it has no socket or CLI surface."
-  [runtime]
-  (require-migration-result! (db/migrate-attribute-storage! (ds runtime))))
 
 (defn show
   "Return one normalized strand by id, or nil when absent."

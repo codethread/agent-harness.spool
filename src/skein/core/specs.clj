@@ -62,11 +62,6 @@
 (s/def :skein.attribute-archive/keys (s/coll-of string? :kind vector?))
 (s/def ::attribute-archive-result
   (s/keys :req-un [::strand-id ::archived? ::changed :skein.attribute-archive/keys]))
-(s/def ::status #{:migrated :already-current})
-(s/def ::strands nat-int?)
-(s/def :skein.attribute-storage/attributes nat-int?)
-(s/def ::attribute-storage-migration-result
-  (s/keys :req-un [::status ::strands :skein.attribute-storage/attributes]))
 (s/def :skein/omitted #{true})
 (s/def ::bytes nat-int?)
 (s/def ::omitted-attribute-descriptor

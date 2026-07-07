@@ -16,16 +16,6 @@
                   {:strand-id "abc123" :archived? true :changed 2}]]
     (is (not (s/valid? ::specs/attribute-archive-result result)) (pr-str result))))
 
-(deftest attribute-storage-migration-result-spec-pins-cutover-shape
-  (is (s/valid? ::specs/attribute-storage-migration-result
-                {:status :migrated :strands 2 :attributes 5}))
-  (is (s/valid? ::specs/attribute-storage-migration-result
-                {:status :already-current :strands 2 :attributes 5}))
-  (doseq [result [{:status :done :strands 2 :attributes 5}
-                  {:status :migrated :strands -1 :attributes 5}
-                  {:status :migrated :strands 2 :attribute-count 5}]]
-    (is (not (s/valid? ::specs/attribute-storage-migration-result result)) (pr-str result))))
-
 (deftest omitted-attribute-descriptor-discriminates-typed-descriptor
   (testing "the descriptor shape conforms"
     (is (specs/omitted-attribute-descriptor? {:skein/omitted true :bytes 1025})))
