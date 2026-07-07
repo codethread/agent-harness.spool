@@ -17,3 +17,6 @@
   - The scripted CLI should expose simple commands, string flags, JSON machine output, and named handles to daemon-owned behavior. It should not parse, author, or debug rich Clojure/EDN userland structures.
   - Complex query definitions, runtime customization, inspection, and debugging belong in trusted daemon config and REPL workflows. The CLI can invoke those capabilities by stable names and simple JSON-shaped params.
   - The engine may translate between JSON wire data and Clojure-native/EDN data internally, but that translation is hidden behind daemon APIs.
+- **TEN-007**: Storage complexity is the core's burden; the attribute map is the contract.
+  - A strand *has* an attribute map. How those attributes are physically stored is an implementation detail owned entirely by `skein.core.*`. No consumer above `skein.core.*` — `skein.api.*`, spool authors, the CLI JSON wire format, the query language, events, or views — may depend on the physical shape of attribute storage.
+  - This is deliberate deep-module discipline: a simple interface (a map) over an implementation free to absorb whatever complexity scale and performance demand. Keeping the storage representation hidden is what lets it change under a stable contract (TEN-000).

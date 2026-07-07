@@ -21,10 +21,8 @@
             [clojure.walk :as walk]
             [skein.api.current.alpha :as current]
             [skein.api.weaver.alpha :as api]
-            [skein.core.query :as query]
-            [skein.core.specs :as specs])
-  (:import [java.io PushbackReader StringReader]
-           [java.nio.charset StandardCharsets]))
+            [skein.core.query :as query])
+  (:import [java.io PushbackReader StringReader]))
 
 (def ^:private generic-states #{"active" "closed"})
 (def ^:private lean-attribute-byte-floor 1024)
@@ -135,28 +133,6 @@
   [query-name]
   (symbol (query/query-lookup-name query-name)))
 
-(defn- json-byte-count [value]
-  (alength (.getBytes (json/write-str value) StandardCharsets/UTF_8)))
-
-(defn- omitted-attribute-descriptor [bytes]
-  (let [descriptor {:skein/omitted true :bytes bytes}]
-    (when-not (specs/omitted-attribute-descriptor? descriptor)
-      (throw (ex-info "Internal omission descriptor did not conform to spec"
-                      {:descriptor descriptor})))
-    descriptor))
-
-(defn- lean-attribute-value [value]
-  (let [bytes (json-byte-count value)]
-    (if (> bytes lean-attribute-byte-floor)
-      (omitted-attribute-descriptor bytes)
-      value)))
-
-(defn- lean-strand [strand]
-  (update strand :attributes #(into {} (map (fn [[k v]] [k (lean-attribute-value v)])) %)))
-
-(defn- lean-strands [strands]
-  (mapv lean-strand strands))
-
 (defn- validate-query-params
   "Restrict provided string params to a query's declared keyword names, failing
   loudly on unknown params (mirrors the JSON socket dispatch contract)."
@@ -180,7 +156,12 @@
         query-def (if state
                     [:and (query/query-expr query-def params) [:= :state state]]
                     query-def)]
-    (lean-strands (query-fn rt query-def params))))
+    (query-fn rt lean-attribute-byte-floor query-def params)))
+
+(defn- run-named-ready-query-lean [rt query-name raw-params]
+  (let [query-def (api/resolve-query rt (handle-name query-name))
+        params (validate-query-params query-def raw-params)]
+    (api/ready-lean rt lean-attribute-byte-floor query-def params)))
 
 ;; --- op handlers ------------------------------------------------------------
 
@@ -239,12 +220,12 @@
     (if query
       (do (when (str/blank? query)
             (throw (ex-info "--query requires a non-empty name" {})))
-          (run-named-query rt api/list query params state))
+          (run-named-query rt api/list-lean query params state))
       (do (when (seq params)
             (throw (ex-info "--param requires --query" {})))
-          (lean-strands (if state
-                          (api/list rt [:= :state state] {})
-                          (api/list rt)))))))
+          (if state
+            (api/list-lean rt lean-attribute-byte-floor [:= :state state] {})
+            (api/list-lean rt lean-attribute-byte-floor))))))
 
 (defn ready-op
   "List lean-projected ready strands, optionally from the result set of a named query."
@@ -255,10 +236,10 @@
     (if query
       (do (when (str/blank? query)
             (throw (ex-info "--query requires a non-empty name" {})))
-          (run-named-query rt api/ready query params nil))
+          (run-named-ready-query-lean rt query params))
       (do (when (seq params)
             (throw (ex-info "--param requires --query" {})))
-          (lean-strands (api/ready rt))))))
+          (api/ready-lean rt lean-attribute-byte-floor)))))
 
 (defn subgraph-op
   "Return a relation-scoped subgraph rooted at one strand."
