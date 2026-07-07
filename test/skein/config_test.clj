@@ -304,15 +304,21 @@
                             ["Step" "step"]
                             ["Checkpoint" "checkpoint"]
                             ["Run record" nil]
-                            ["Plain task" nil]]]
+                            ["Plain task" nil]
+                            ["Pending card" nil]
+                            ["Refinement card" nil]]]
         (api/add rt {:title title
                      :state "active"
                      :attributes (cond-> {:feature "work-query"}
                                    role (assoc :workflow/role role)
-                                   (= title "Run record") (assoc :shuttle/run "true"))}))
-      (is (= #{"Step" "Checkpoint" "Plain task"}
+                                   (= title "Run record") (assoc :shuttle/run "true")
+                                   (= title "Pending card") (assoc :kanban/card "true"
+                                                                   :kanban/status "pending")
+                                   (= title "Refinement card") (assoc :kanban/card "true"
+                                                                      :kanban/status "refinement"))}))
+      (is (= #{"Step" "Checkpoint" "Plain task" "Pending card"}
              (set (map :title (api/list rt (var-get (requiring-resolve 'config/work-query)) {})))))
-      (is (= #{"Step" "Checkpoint" "Plain task"}
+      (is (= #{"Step" "Checkpoint" "Plain task" "Pending card"}
              (set (map :title (api/ready rt (var-get (requiring-resolve 'config/work-query)) {}))))))))
 
 (deftest reviewers-file-registers-declarative-roster

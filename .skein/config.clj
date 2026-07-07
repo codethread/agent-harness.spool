@@ -186,11 +186,13 @@
            [:= [:attr "workflow/run-id"] [:param :feature]]]})
 
 (def work-query
-  "Query for active actionable work, excluding workflow plumbing and shuttle run records."
+  "Query for active actionable work, excluding workflow plumbing, shuttle run records, and inert kanban refinement cards."
   [:and
    [:= :state "active"]
    [:or [:missing [:attr "shuttle/run"]]
     [:not [:= [:attr "shuttle/run"] "true"]]]
+   [:or [:missing [:attr "kanban/status"]]
+    [:not [:= [:attr "kanban/status"] "refinement"]]]
    [:or
     [:missing [:attr "workflow/role"]]
     [:not [:in [:attr "workflow/role"] ["molecule" "digest" "procedure"]]]]])
