@@ -67,10 +67,12 @@
             ;; Wait for the terminal treadle signal, not just run close: delivery
             ;; (gate outcome, notes, the :treadle/delivered stamp, unblocking the
             ;; next step) runs asynchronously after the run's state flips to
-            ;; closed, so keying on close alone races that propagation.
+            ;; closed, so keying on close alone races that propagation. Accept any
+            ;; delivered value here — the assertion below reports a wrong terminal
+            ;; state (e.g. "gate-closed", "error: ...") instead of timing out.
             run (await-eventually #(some-> (run-for-gate rt gate-id)
                                            ((fn [r] (let [s (api/show rt (:id r))]
-                                                      (when (= "true" (attr s :treadle/delivered)) s))))))
+                                                      (when (some? (attr s :treadle/delivered)) s))))))
             gate (api/show rt (attr run :treadle/gate))
             after (first (workflow/next-steps "happy"))]
         (is (= "true" (attr (api/show rt (:id run)) :treadle/delivered)))

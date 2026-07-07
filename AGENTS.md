@@ -288,6 +288,8 @@ This is a cooperative queue at the gate, not code-level locking, and it is delib
 
 `flock` is util-linux: `brew install util-linux`, then symlink `flock` into a directory on `PATH`. Any equivalent whole-run mutex on the same well-known lock path serves the same purpose.
 
+For slow or contended environments the suite also has a single timing knob: the `SKEIN_TEST_AWAIT_SCALE` env var multiplies every await budget in test support (CI sets it to `3` in `quality.yml` for the ~2-core hosted runners; unset means scale 1.0 locally).
+
 Tests and smoke workflows must isolate weaver workspaces with temporary workspaces. Do not start test weavers through implicit repo discovery or any user-owned workspace.
 
 After validation, `git status --short` should not show generated SQLite or runtime metadata artifacts.
