@@ -251,7 +251,7 @@ Use `strand flow-await <workflow-run-id> [--timeout-secs n]` to block until a wo
 
 ## Validation and smoke testing
 
-Primary validation:
+Primary validation (also blocking in CI via `.github/workflows/quality.yml`):
 
 ```sh
 PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test
