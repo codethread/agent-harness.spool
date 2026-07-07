@@ -660,8 +660,10 @@
      :session-id (get data "session_id")}))
 
 (defn- parse-pi-json
-  "Parse pi --mode json output: a stream of JSON event lines; the assistant
-  text is accumulated from message events, and the last line may be a summary."
+  "Parse pi --mode json output: a stream of JSON event lines; the run result is
+  the last assistant message carrying text. `:result` is always a string:
+  tool_execution_end events also carry a top-level \"result\" holding a tool
+  output object, so the bare result-key fallback accepts strings only."
   [stdout]
   (let [lines (->> (str/split-lines stdout)
                    (map str/trim)
@@ -677,10 +679,13 @@
                        (filter #(= "text" (get % "type")))
                        (map #(get % "text"))
                        (str/join "\n")))
-        assistant-messages (filter #(= "assistant" (get-in % ["message" "role"])) events)]
+        assistant-text (->> events
+                            (filter #(= "assistant" (get-in % ["message" "role"])))
+                            (keep #(not-empty (text-of (get % "message"))))
+                            last)]
     (if (seq events)
-      {:result (or (some-> (last assistant-messages) (get "message") text-of not-empty)
-                   (some #(get % "result") (reverse events))
+      {:result (or assistant-text
+                   (some #(let [r (get % "result")] (when (string? r) r)) (reverse events))
                    (str/trim stdout))
        :session-id (some #(or (when (= "session" (get % "type")) (get % "id"))
                               (get % "session_id")

@@ -965,3 +965,23 @@
           (is (= "preserved preamble" @(:preamble-extension reinit)))
           ;; and the fail-loud getters now resolve real executors
           (is (some? (#'shuttle/worker-executor))))))))
+
+(deftest parse-pi-json-result-is-always-a-string
+  ;; pi tool_execution_end events carry a top-level "result" holding a tool
+  ;; output object, and a run can end on a tool-call-only assistant message
+  ;; (live failure: run qehav, 2026-07-07); neither may leak a map into :result.
+  (testing "trailing tool-call-only message resolves to the last assistant text"
+    (let [stdout (str/join "\n"
+                           ["{\"type\":\"session\",\"id\":\"sess-1\"}"
+                            "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"final summary\"}]}}"
+                            "{\"type\":\"tool_execution_end\",\"toolCallId\":\"t1\",\"result\":{\"output\":\"tool payload object\"}}"
+                            "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolcall\",\"id\":\"t2\"}]}}"])
+          parsed (#'shuttle/parse-pi-json stdout)]
+      (is (= "final summary" (:result parsed)))
+      (is (= "sess-1" (:session-id parsed)))))
+  (testing "streams with no assistant text never surface an object result"
+    (let [stdout (str/join "\n"
+                           ["{\"type\":\"session\",\"id\":\"sess-2\"}"
+                            "{\"type\":\"tool_execution_end\",\"toolCallId\":\"t1\",\"result\":{\"output\":\"obj\"}}"])
+          parsed (#'shuttle/parse-pi-json stdout)]
+      (is (string? (:result parsed))))))
