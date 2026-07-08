@@ -440,7 +440,14 @@
                       {:step 6 :action "For failed runs: logs, diagnose, fix task body/environment, then agent retry <task-id>."}
                       {:step 7 :action "Repeat until status shows nothing ready, running, or failed; then fan in and close the plan root."}]
    :policy {:siblings "Sibling tasks own disjoint files; never two mutators in one file scope."
-            :delegation-depth "Keep delegation shallow: workers spawn read-only helpers, not sub-plans, unless their contract says otherwise."}
+            :delegation-depth "Keep delegation shallow: workers spawn read-only helpers, not sub-plans, unless their contract says otherwise."
+            :task-sizing (fmt/reflow "
+                           |Size every task to finish well inside one worker context
+                           |window: prefer more, smaller tasks over one broad one, and
+                           |split a large file by section with sequential depends-on
+                           |links rather than handing it to a single seat whole. A
+                           |worker that exhausts its context dies mid-task and loses
+                           |its handover even when its edits survive.")}
    :worker-contract worker-contract})
 
 (defn- parse-argv [argv flag-spec]
