@@ -71,6 +71,8 @@
                           {:local/root (.getCanonicalPath (io/file "spools/kanban"))}
                           'skein.spools/cron
                           {:local/root (.getCanonicalPath (io/file "spools/cron"))}
+                          'skein.spools/bench
+                          {:local/root (.getCanonicalPath (io/file "spools/bench"))}
                           ;; init.clj requires this spool; the omission used to be
                           ;; masked by fail-quiet required use!, which now throws.
                           ;; Its root lives inside the workspace (.skein/spools/macros),
@@ -113,11 +115,12 @@
   (doseq [query-name ["kanban-cards" "kanban-unstarted" "feature-active" "feature-work"
                       "feature-owner-work" "feature-run" "workflow-runs" "devflow-runs" "work"]]
     (is (contains? (api/queries rt) query-name)))
+  (is (contains? (api/queries rt) "bench-runs"))
   (doseq [op-name ["kanban" "branches" "current-dags" "devflow-start" "devflow-next" "devflow-choices"
                    "devflow-choose" "devflow-complete" "devflow-advance"
                    "devflow-describe" "devflow-history" "devflow-archive"
                    "devflow-status" "workflow-runs" "devflow-conventions"
-                   "flow-await" "flow-status" "hitl" "land" "agent"]]
+                   "flow-await" "flow-status" "hitl" "land" "agent" "bench"]]
     (is (some #(= op-name (:name %)) (api/ops rt))))
   (is (some #(= "delegate-pipeline" (:name %)) (api/patterns rt)))
   ;; agent-plan is spool-owned now; a real startup wires the agents spool in

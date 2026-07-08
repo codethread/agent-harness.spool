@@ -120,3 +120,6 @@ nav:
           - Contract: spools/cron/README.md
           - Cookbook: spools/cron.cookbook.md
           - API: spools/cron.api.md
+      - Bench Harness Benchmarks:
+          - Contract: spools/bench/README.md
+          - API: spools/bench.api.md

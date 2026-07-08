@@ -20,7 +20,8 @@
    {:name "treadle" :source "spools/shuttle/src/skein/spools/treadle.clj" :outfile "spools/treadle.api.md"}
    {:name "chime" :source "spools/chime/src/skein/spools/chime.clj" :outfile "spools/chime.api.md"}
    {:name "kanban" :source "spools/kanban/src/skein/spools/kanban.clj" :outfile "spools/kanban.api.md"}
-   {:name "cron" :source "spools/cron/src/skein/spools/cron.clj" :outfile "spools/cron.api.md"}])
+   {:name "cron" :source "spools/cron/src/skein/spools/cron.clj" :outfile "spools/cron.api.md"}
+   {:name "bench" :source "spools/bench/src/skein/spools/bench.clj" :outfile "spools/bench.api.md"}])
 
 (doseq [{:keys [source outfile]} spool-docs]
   (quickdoc/quickdoc

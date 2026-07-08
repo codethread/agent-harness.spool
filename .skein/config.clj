@@ -1346,7 +1346,18 @@
    (shuttle/defalias! :patch-gpt
      {:alias-of :codex
       :extra-args ["-m" "gpt-5.5" "-c" "model_reasoning_effort=low"]
-      :doc "GPT-5.5 low reasoning via codex exec: default implementer seat for the refactor/complex-patch flow — precise diff-based edits over existing code; escalate the hardest slices to hard-gpt."})])
+      :doc "GPT-5.5 low reasoning via codex exec: default implementer seat for the refactor/complex-patch flow — precise diff-based edits over existing code; escalate the hardest slices to hard-gpt."})
+   ;; Cheap GPT-5.4-mini seats verified by the bench spool smoke run. Keep them
+   ;; scoped to low-stakes, single-concern review/recon/validation work unless a
+   ;; larger run proves they hold up on broader tasks.
+   (shuttle/defalias! :mini-gpt-codex
+     {:alias-of :codex
+      :extra-args ["-m" "gpt-5.4-mini" "-c" "model_reasoning_effort=medium"]
+      :doc "GPT-5.4-mini via codex exec: cheap seat for single-concern review, recon, and validation tasks."})
+   (shuttle/defalias! :mini-gpt-pi
+     {:alias-of :pi
+      :extra-args ["--provider" "openai" "--model" "gpt-5.4-mini" "--thinking" "low"]
+      :doc "GPT-5.4-mini via pi: cheap seat for single-concern review, recon, and validation tasks."})])
 
 ;; ---------------------------------------------------------------------------
 ;; Scheduled NVD deep scan (skein.spools.cron job :nvd-scan)

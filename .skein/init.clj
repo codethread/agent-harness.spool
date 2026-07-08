@@ -65,6 +65,12 @@
                      :after [:skein/spools-shuttle]
                      :call 'skein.spools.agents/install!
                      :required? true})
+(runtime-alpha/use! runtime :skein/spools-bench
+                    {:ns 'skein.spools.bench
+                     :spools ['skein.spools/bench]
+                     :after [:skein/spools-shuttle]
+                     :call 'skein.spools.bench/install!
+                     :required? true})
 ;; The declarative reviewer roster lives in its own file so the "who reviews
 ;; a change here" policy stays a small git-reviewable data document. Roster
 ;; harness aliases resolve at review time, not registration time, so loading
@@ -100,8 +106,8 @@
 (runtime-alpha/use! runtime :config
                     {:file "config.clj"
                      :after [:skein/spools-ephemeral :skein/spools-workflow :skein/spools-devflow
-                             :skein/spools-loom :skein/spools-shuttle :skein/spools-agents :skein/spools-chime
-                             :skein/spools-cron]
+                             :skein/spools-loom :skein/spools-shuttle :skein/spools-agents :skein/spools-bench
+                             :skein/spools-chime :skein/spools-cron]
                      :call 'config/install!})
 ;; Register the scheduled NVD deep-scan cron job here rather than in
 ;; config/install! so config_test (which loads config.clj and calls install!

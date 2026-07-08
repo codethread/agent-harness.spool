@@ -13,7 +13,10 @@
   ['skein.core.db-test 'skein.core.query-compile-test 'skein.core.contract-props-test 'skein.core.specs-test 'skein.core.scheduler-test 'skein.plugin-test 'skein.relations-test
    'skein.spools.bobbin-test 'skein.spools.carder-test 'skein.spools.loom-test 'skein.spools.selvage-test 'skein.spools.text-search-test
    'skein.guild-test 'skein.agents-test 'skein.test.alpha-test 'skein.api.cli.alpha-test
-   'skein.spools.batteries-test 'skein.roster-test 'skein.spools.util-test])
+   'skein.spools.batteries-test 'skein.roster-test 'skein.spools.util-test
+   ;; pure extractor unit tests over fixture files plus one unpublished
+   ;; thread-bound runtime; no JVM-global or real-process state.
+   'skein.bench-metrics-test])
 
 (def serial-namespaces
   "JVM-global namespaces the parent still runs serially outside add-libs shards."
@@ -52,7 +55,11 @@
    'skein.treadle-test
    ;; Reed runs :shell gate commands off the event thread and delivers async gate
    ;; outcomes through runtime event workers; same hard-sleep reasoning as treadle.
-   'skein.spools.reed-test])
+   'skein.spools.reed-test
+   ;; publishes an ambient runtime for the judge shuttle run and spawns real
+   ;; container-engine subprocesses on a spool executor; same real-process,
+   ;; published-singleton reasoning as the suites above.
+   'skein.bench-test])
 
 (def add-libs-shards
   "Subprocess JVM shard groups for tests that mutate JVM-global tools.deps state."
