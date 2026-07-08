@@ -4,3 +4,6 @@
 
 # Codebase-wide cljfmt + gofumpt pass (card 2xpnh, epic 3g5q2)
 eed10f5e1cade55d81d4c2e7e57e46cba6955650
+
+# Markdown prose unwrap pass
+2fa1dc19f4ce88b11f572ec3563409c3db248f3f
