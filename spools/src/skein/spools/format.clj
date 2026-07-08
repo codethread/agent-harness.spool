@@ -6,15 +6,9 @@
   trailing-space bookkeeping. These helpers let a block be authored as one
   readable `|`-margin string: the bar marks column 0, plain newlines soft-wrap,
   a bare `|` line separates items, and indentation past the bar is preserved
-  verbatim for command samples and other intentional layout."
-  (:require [clojure.string :as str]))
-
-(defn- bar-content
-  "Return a `|`-margin line's content (everything after the first bar), or nil
-  when the line carries no bar (leading/trailing structural source whitespace)."
-  [line]
-  (when-let [i (str/index-of line \|)]
-    (subs line (inc i))))
+  verbatim for command samples and other intentional layout. The names here are
+  the documented spool-authoring surface over `skein.api.format.alpha`."
+  (:require [skein.api.format.alpha :as format-alpha]))
 
 (defn fill
   "Reflow a `|`-margin doc block into a vector of item strings.
@@ -24,25 +18,16 @@
   separates items. Within an item, flush-left lines are prose soft-wrapped into
   a single line; if any line is indented past the bar the whole item is kept
   verbatim, so command samples and other intentional layout survive. Prose is
-  the zero-marker default; indentation is what supplies structure."
+  the zero-marker default; indentation is what supplies structure. Throws when
+  no line carries a bar — a bar-less block is an authoring error."
   [block]
-  (->> (str/split-lines block)
-       (keep bar-content)
-       (partition-by str/blank?)
-       (remove #(every? str/blank? %))
-       (mapv (fn [lines]
-               (if (some #(re-find #"^[ \t]+\S" %) lines)
-                 (str/join "\n" lines)
-                 (str/join " " (map str/trim lines)))))))
+  (format-alpha/fill block))
 
 (defn reflow
   "Soft-wrap a single-paragraph `|`-margin block into one string.
 
   The single-item companion to `fill` for a lone prose value; item and verbatim
-  semantics do not apply — every barred line is trimmed and space-joined."
+  semantics do not apply — every barred line is trimmed and space-joined.
+  Throws when no line carries a bar, like `fill`."
   [block]
-  (->> (str/split-lines block)
-       (keep bar-content)
-       (remove str/blank?)
-       (map str/trim)
-       (str/join " ")))
+  (format-alpha/reflow block))
