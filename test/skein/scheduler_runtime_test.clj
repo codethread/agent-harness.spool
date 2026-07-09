@@ -9,14 +9,16 @@
   real weaver runtime and its shared event worker."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [skein.api.events.alpha :as events]
             [skein.api.runtime.alpha :as runtime-alpha]
             [skein.core.db :as db]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.runtime :as runtime]
             [skein.core.weaver.scheduler :as scheduler]
             [skein.spools.test-support :as test-support]
+            [skein.test.alpha :as test-alpha]
             [skein.weaver-test :as wt])
-  (:import [java.time Instant]
+  (:import [java.time Duration Instant]
            [java.util.concurrent ArrayBlockingQueue]))
 
 ;; Handlers are resolved by fully qualified symbol, so their capture state is
@@ -51,6 +53,8 @@
   [ds queue-capacity]
   {:datasource ds
    :spool-state (atom {})
+   :clock (atom (fn [] (Instant/now)))
+   :clock-pumps (atom {})
    :event-system {:queue (ArrayBlockingQueue. (int queue-capacity))}})
 
 (defn- with-scheduler
@@ -59,7 +63,7 @@
   [ds queue-capacity clock-seconds f]
   (let [rt (fake-runtime ds queue-capacity)
         st (scheduler/state rt)]
-    (scheduler/set-clock! rt (constantly (instant clock-seconds)))
+    (test-alpha/set-clock! rt (constantly (instant clock-seconds)))
     (try
       (f rt st)
       (finally
@@ -166,7 +170,7 @@
             ;; by run-fire-skips-cancelled-and-rescheduled-wakes). Now deliver gen B.
             (.poll queue)
             (swap! (:in-flight st) disj "resched")
-            (scheduler/set-clock! rt (constantly (instant 200)))
+            (test-alpha/set-clock! rt (constantly (instant 200)))
             (let [result (scheduler/dispatch-due! rt)]
               (is (= 1 (:dispatched result)))
               (is (= 1 (:scheduler/attempt (.poll queue)))
@@ -322,15 +326,15 @@
   (wt/with-runtime
     (fn [rt _db-file]
       (reset! fire-count 0)
-      (reset! fired (promise))
+      (test-alpha/set-clock! rt (constantly (instant 0)))
       (db/schedule-wake! (:datasource rt)
-                         {:key "soon" :wake-at (.plusMillis (Instant/now) 250)
+                         {:key "soon" :wake-at (instant 1)
                           :handler 'skein.scheduler-runtime-test/counting-handler})
       (scheduler/rearm! rt)
       (scheduler/rearm! rt)
       (scheduler/rearm! rt)
-      (is (await-fire) "the future wake fires after repeated re-arm")
-      (is (await-completed (:datasource rt) "soon"))
+      (test-alpha/advance! rt (Duration/ofSeconds 2))
+      (events/await-quiescent! rt)
       (is (= 1 @fire-count) "repeated re-arm must not double-arm the same wake"))))
 
 (deftest reload-rearm-does-not-refire-completed-wake
