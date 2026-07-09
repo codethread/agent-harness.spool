@@ -153,6 +153,36 @@
    :scheduler/wake-at-millis (:wake_at wake)
    :scheduler/attempt attempt})
 
+(defn- dispatch-due!*
+  [runtime due-wakes-fn]
+  (let [ds (:datasource runtime)
+        st (state runtime)
+        ^ArrayBlockingQueue queue (get-in runtime [:event-system :queue])
+        due (due-wakes-fn ds (now-instant st))]
+    (reduce
+     (fn [acc wake]
+       (let [key (:key wake)]
+         (if (contains? @(:in-flight st) key)
+           acc
+           (do
+             (swap! (:in-flight st) conj key)
+             (let [attempt (inc (:attempts wake))]
+               (if (.offer queue (fire-envelope wake attempt))
+                 (do
+                    ;; Persist the delivery only after a successful enqueue, and
+                    ;; claim the exact generation we selected (key + wake_at). A row
+                    ;; cancelled or rescheduled in the race window returns nil here
+                    ;; (no throw, and the replacement generation is never
+                    ;; incremented); the enqueued envelope is discarded by run-fire!.
+                   (db/mark-wake-attempt! ds key (:wake_at wake))
+                   (update acc :dispatched inc))
+                 (do
+                   (swap! (:in-flight st) disj key)
+                   (record-dispatch-failure! st key "event queue saturated; wake left pending")
+                   (assoc acc :transient? true))))))))
+     {:dispatched 0 :transient? false}
+     due)))
+
 (defn dispatch-due!
   "Enqueue a fire envelope for every due, not-in-flight wake at the current clock.
 
@@ -170,33 +200,7 @@
   attempt 1; the stale envelope is dropped by run-fire!'s generation guard.
   Returns {:dispatched n :transient? bool}."
   [runtime]
-  (let [ds (:datasource runtime)
-        st (state runtime)
-        ^ArrayBlockingQueue queue (get-in runtime [:event-system :queue])
-        due (db/due-wakes ds (now-instant st))]
-    (reduce
-     (fn [acc wake]
-       (let [key (:key wake)]
-         (if (contains? @(:in-flight st) key)
-           acc
-           (do
-             (swap! (:in-flight st) conj key)
-             (let [attempt (inc (:attempts wake))]
-               (if (.offer queue (fire-envelope wake attempt))
-                 (do
-                   ;; Persist the delivery only after a successful enqueue, and
-                   ;; claim the exact generation we selected (key + wake_at). A row
-                   ;; cancelled or rescheduled in the race window returns nil here
-                   ;; (no throw, and the replacement generation is never
-                   ;; incremented); the enqueued envelope is discarded by run-fire!.
-                   (db/mark-wake-attempt! ds key (:wake_at wake))
-                   (update acc :dispatched inc))
-                 (do
-                   (swap! (:in-flight st) disj key)
-                   (record-dispatch-failure! st key "event queue saturated; wake left pending")
-                   (assoc acc :transient? true))))))))
-     {:dispatched 0 :transient? false}
-     due)))
+  (dispatch-due!* runtime db/due-wakes))
 
 (defn- schedule-tick!
   "Schedule the next timer tick after delay-ms, replacing any current timer.
@@ -253,16 +257,19 @@
   until the next reload/restart (TEN-003). Ordinary cancel/reschedule races no
   longer throw here — `dispatch-due!` treats a vanished row as a no-op — but the
   guard remains the last-resort net for anything else."
-  [runtime]
-  (try
-    (if (:transient? (dispatch-due! runtime))
-      (schedule-tick! runtime transient-retry-ms)
-      (arm! runtime))
-    (catch Throwable t
-      (record-dispatch-failure! (state runtime) nil (or (ex-message t) (str (class t))))
-      (try
-        (schedule-tick! runtime transient-retry-ms)
-        (catch Throwable _ nil)))))
+  ([runtime]
+   (dispatch-and-rearm! runtime {}))
+  ([runtime {:keys [dispatch-due-fn]
+             :or {dispatch-due-fn dispatch-due!}}]
+   (try
+     (if (:transient? (dispatch-due-fn runtime))
+       (schedule-tick! runtime transient-retry-ms)
+       (arm! runtime))
+     (catch Throwable t
+       (record-dispatch-failure! (state runtime) nil (or (ex-message t) (str (class t))))
+       (try
+         (schedule-tick! runtime transient-retry-ms)
+         (catch Throwable _ nil))))))
 
 (defn rearm!
   "Rebuild scheduler timers from durable pending rows after config load.

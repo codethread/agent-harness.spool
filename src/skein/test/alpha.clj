@@ -114,22 +114,28 @@
   loudly when the resource is not on the test classpath, is jar-backed, or does
   not come from a directory checkout with the expected layout. This is for tests
   that must approve the real dependency checkout as a `:local/root` in generated
-  `spools.edn` data."
-  [resource-path]
-  (let [resource (io/resource resource-path)]
-    (when-not resource
-      (throw (ex-info "Spool source not on the test classpath"
-                      {:resource resource-path})))
-    (when-not (= "file" (.getProtocol resource))
-      (throw (ex-info "Spool source is not a directory checkout"
-                      {:resource resource-path
-                       :url (str resource)})))
-    (let [resource-file (io/file (.toURI resource))
-          classpath-root (classpath-root-for-resource resource-file resource-path)]
-      (or (matching-deps-checkout-root classpath-root)
-          (throw (ex-info "Spool source is not a directory checkout with a deps.edn :paths entry"
-                          {:resource resource-path
-                           :classpath-root (.getPath classpath-root)}))))))
+  `spools.edn` data.
+
+  The one-argument form resolves `resource-path` with `clojure.java.io/resource`.
+  The two-argument form accepts `resource-loader`, a function from resource path
+  string to `java.net.URL` or nil, for deterministic tests of this resolver."
+  ([resource-path]
+   (spool-checkout-root resource-path io/resource))
+  ([resource-path resource-loader]
+   (let [^java.net.URL resource (resource-loader resource-path)]
+     (when-not resource
+       (throw (ex-info "Spool source not on the test classpath"
+                       {:resource resource-path})))
+     (when-not (= "file" (.getProtocol resource))
+       (throw (ex-info "Spool source is not a directory checkout"
+                       {:resource resource-path
+                        :url (str resource)})))
+     (let [resource-file (io/file (.toURI resource))
+           classpath-root (classpath-root-for-resource resource-file resource-path)]
+       (or (matching-deps-checkout-root classpath-root)
+           (throw (ex-info "Spool source is not a directory checkout with a deps.edn :paths entry"
+                           {:resource resource-path
+                            :classpath-root (.getPath classpath-root)})))))))
 
 (defn- source-checkout
   "Best-effort path of the Skein source checkout on this test JVM's classpath."
