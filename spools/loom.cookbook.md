@@ -34,7 +34,7 @@ Each recipe cites the honest source it was distilled from — the spool itself, 
 **Composition.** `branch-views` splits cleanly into **policy** (yours) and **projection** (loom's). You pass two policy knobs — `:branch-attr`, the attribute that names a branch, and `:ready-query`, an inline query whose ready frontier defines "pickable" — and loom groups the active branch-stamped roots, hangs each root's active `parent-of` descendants beneath it, and marks the ones on your ready frontier.
 
 ```clojure
-;; the repo's own "ready work" definition: active work, minus shuttle run records
+;; the repo's own "ready work" definition: active work, minus agent-run run records
 ;; and the bookkeeping strands (workflow/role molecule / digest / procedure) that
 ;; would clutter a human's frontier.
 ;; Query forms are data: [:and ...] requires all clauses, [:or ...] any, [:= a b]
@@ -43,8 +43,8 @@ Each recipe cites the honest source it was distilled from — the spool itself, 
 ;; ../devflow/specs/repl-api.md, SPEC-003.C13a.
 (def work-query
   [:and [:= :state "active"]
-   [:or [:missing [:attr "shuttle/run"]]
-    [:not [:= [:attr "shuttle/run"] "true"]]]
+   [:or [:missing [:attr "agent-run/run"]]
+    [:not [:= [:attr "agent-run/run"] "true"]]]
    [:or [:missing [:attr "workflow/role"]]
     [:not [:in [:attr "workflow/role"] ["molecule" "digest" "procedure"]]]]])
 
@@ -152,20 +152,20 @@ const stateLabel = status.done ? "done"
 
 - **One join, not five polls.** History, frontier, done-ness, gate/run state,
   and stalls arrive together in one payload, so a renderer makes a single call
-  per run per tick instead of stitching the workflow, shuttle, and treadle
+  per run per tick instead of stitching the workflow, agent-run, and subagent-executor
   surfaces itself.
 - **Failures are scoped to the run.** `:stalled-gates` and `:agent-failures`
   cover only this run's gates and the runs they delegated — records from other
   workflows never leak in. A per-run row can trust the counts it renders.
 - **Read-only means safe to poll hard.** `flow-status` mutates no workflow,
-  shuttle, or treadle state, so a dashboard can refresh it every couple of
-  seconds with no coordination risk — the reason the shuttle dashboard leans on
+  agent-run, or subagent-executor state, so a dashboard can refresh it every couple of
+  seconds with no coordination risk — the reason the agent dashboard leans on
   it as its devflow feed.
 - **The error path is a first-class state.** Because the enrichment call *can*
   fail (an unknown run-id throws), the honest renderer catches it into a visible
   "error" row. A zero frontier and a failed call must not look the same.
 
-Honest source: the shuttle dashboard's devflow tab [`scripts/shuttle-dash/tabs/devflow.tsx`](../scripts/shuttle-dash/tabs/devflow.tsx) (`fetchDevflow` enriches each active run via `flow-status`, derives the error/attention/active/done state, and renders a loud error row on failure), and the `flow-status` payload contract in [`loom.md`](./loom.md).
+Honest source: the agent dashboard's devflow tab [`scripts/agent-dash/tabs/devflow.tsx`](../scripts/agent-dash/tabs/devflow.tsx) (`fetchDevflow` enriches each active run via `flow-status`, derives the error/attention/active/done state, and renders a loud error row on failure), and the `flow-status` payload contract in [`loom.md`](./loom.md).
 
 ---
 

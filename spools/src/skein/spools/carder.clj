@@ -20,7 +20,7 @@
   14)
 
 (def ^:private excluded-workflow-roles #{"molecule" "procedure" "digest"})
-(def ^:private failed-shuttle-phases #{"failed" "exhausted"})
+(def ^:private failed-run-phases #{"failed" "exhausted"})
 
 (defn- require-map! [opts context]
   (when-not (map? opts)
@@ -52,13 +52,13 @@
 (defn- workflow-plumbing? [strand]
   (contains? excluded-workflow-roles (attr strand :workflow/role)))
 
-(defn- shuttle-run? [strand]
-  (= "true" (attr strand :shuttle/run)))
+(defn- agent-run? [strand]
+  (= "true" (attr strand :agent-run/run)))
 
 (defn- excluded? [opts strand]
   (and (not (:include-plumbing? opts))
        (or (workflow-plumbing? strand)
-           (shuttle-run? strand))))
+           (agent-run? strand))))
 
 (defn- summary [strand]
   (select-keys strand [:id :title :state :attributes :updated_at]))
@@ -88,7 +88,7 @@
   "Return active strands older than the configured age threshold.
 
   Options: `:days` positive integer threshold (default `default-days`) and
-  `:include-plumbing? true` to include workflow plumbing and shuttle run records.
+  `:include-plumbing? true` to include workflow plumbing and agent-run run records.
   Each row is a compact strand summary plus `:days-stale`."
   ([]
    (stale {}))
@@ -142,12 +142,12 @@
           vec))))
 
 (defn- failed-blocker? [strand]
-  (contains? failed-shuttle-phases (attr strand :shuttle/phase)))
+  (contains? failed-run-phases (attr strand :agent-run/phase)))
 
 (defn- blocker-detail [strand]
   (cond-> (summary strand)
-    (attr strand :shuttle/phase) (assoc :shuttle/phase (attr strand :shuttle/phase))
-    (attr strand :shuttle/error) (assoc :shuttle/error (attr strand :shuttle/error))))
+    (attr strand :agent-run/phase) (assoc :agent-run/phase (attr strand :agent-run/phase))
+    (attr strand :agent-run/error) (assoc :agent-run/error (attr strand :agent-run/error))))
 
 (defn- depends-on-edges [rt]
   (jdbc/execute! (datasource rt)
@@ -157,7 +157,7 @@
 (defn blocked-by-failure
   "Return active strands blocked by active failed or exhausted depends-on targets.
 
-  A blocker is any active `depends-on` target whose `shuttle/phase` attribute is
+  A blocker is any active `depends-on` target whose `agent-run/phase` attribute is
   the string `failed` or `exhausted`. Rows include the blocked strand summary and
   a `:blockers` vector with compact blocker details."
   ([]

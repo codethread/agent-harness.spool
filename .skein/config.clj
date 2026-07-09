@@ -3,7 +3,7 @@
   thin CLI op surface over the shipped spools.
 
   Thin glue only: `skein.spools.devflow` owns the feature lifecycle,
-  `skein.spools.workflow` is the engine, `skein.spools.agents` owns the
+  `skein.spools.workflow` is the engine, `skein.spools.delegation` owns the
   `strand agent` surface plus the `agent-plan` pattern, and `skein.spools.loom`
   owns the read-only work-graph projections (all activated from init.clj).
   This file registers the devflow wrapper ops, the loom projection ops
@@ -21,7 +21,7 @@
             [skein.spools.carder :as carder]
             [skein.spools.devflow :as devflow]
             [skein.spools.loom :as loom]
-            [skein.spools.shuttle :as shuttle]
+            [skein.spools.agent-run :as shuttle]
             [skein.spools.workflow :as workflow]
             [skein.api.current.alpha :as current]
             [skein.api.format.alpha :as format-alpha]
@@ -89,12 +89,12 @@
    [:= [:attr "workflow/family"] "devflow"]])
 
 (defquery work-query
-  "Query for active actionable work, excluding workflow plumbing, shuttle run records, and inert kanban refinement cards."
+  "Query for active actionable work, excluding workflow plumbing, agent run records, and inert kanban refinement cards."
   {:usage "strand ready --query work"}
   [:and
    [:= :state "active"]
-   [:or [:missing [:attr "shuttle/run"]]
-    [:not [:= [:attr "shuttle/run"] "true"]]]
+   [:or [:missing [:attr "agent-run/run"]]
+    [:not [:= [:attr "agent-run/run"] "true"]]]
    [:or [:missing [:attr "kanban/status"]]
     [:not [:= [:attr "kanban/status"] "refinement"]]]
    [:or
@@ -459,7 +459,7 @@
                      |sign-off, squash-merge to local main with full verification, then
                      |green main CI. Registered by .skein/workflows.clj.")}]
    :patterns [{:name "agent-plan"
-               :purpose "Create a feature strand plus task/review children for agent work; shipped by skein.spools.agents."}
+               :purpose "Create a feature strand plus task/review children for agent work; shipped by skein.spools.delegation."}
               {:name "delegate-pipeline"
                :purpose "Sequential chain-loop workflow of subagent gates with optional acceptance checkpoint. Registered by .skein/workflows.clj."}]
    :queries (into [{:name "kanban-cards"
@@ -503,7 +503,7 @@
               :flags {:days {:type :int
                              :doc "Maximum active age, in days, before a strand is stale."}
                       :include-plumbing {:type :boolean-token
-                                         :doc "Whether to include workflow/shuttle plumbing: true or false."}}}}
+                                         :doc "Whether to include workflow and agent-run plumbing: true or false."}}}}
   [ctx]
   (let [{:keys [days include-plumbing]} (:op/args ctx)]
     (suppress-expected-carder-orphans
@@ -535,7 +535,7 @@
   "Return workflow flow status by joining history, frontier, gates, runs, and stalls.
 
   The JSON payload is read-only and suitable for renderers; no workflow,
-  shuttle, or treadle state is mutated. The join and Mermaid gate chain live in
+  agent-run, or gate state is mutated. The join and Mermaid gate chain live in
   `skein.spools.loom/flow-status`; this op only names the run and stamps the
   operation."
   {:arg-spec {:op "flow-status"
@@ -647,7 +647,7 @@
   active work root per branch — `kanban claim` does this for cards — and hangs
   all execution strands beneath that root with parent-of edges. This op supplies
   the repo policy — the `branch` attribute names the branch and the `work` query
-  feeds the ready frontier (so workflow plumbing and shuttle run records stay
+  feeds the ready frontier (so workflow plumbing and agent run records stay
   hidden) — and delegates the projection to `skein.spools.loom/branch-views`.
   A scoping `branch` argument that matches no stamped root fails loudly."
   {:arg-spec {:op "branches"

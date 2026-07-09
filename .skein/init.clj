@@ -21,13 +21,14 @@
 (runtime-alpha/use! runtime :skein/spools-loom
                     {:ns 'skein.spools.loom
                      :call 'skein.spools.loom/install!})
-;; reed is a classpath-shipped spool that fulfils :shell workflow gates by
-;; running the gate command directly. Its install! runs an initial scan, so it
-;; is ordered after workflow (which owns the executor registry it registers into).
+;; The shell executor is a classpath-shipped spool that fulfils :shell workflow
+;; gates by running the gate command directly. Its install! runs an initial
+;; scan, so it is ordered after workflow (which owns the executor registry it
+;; registers into).
 (runtime-alpha/use! runtime :skein/spools-reed
-                    {:ns 'skein.spools.reed
+                    {:ns 'skein.spools.executors.shell
                      :after [:skein/spools-workflow]
-                     :call 'skein.spools.reed/install!})
+                     :call 'skein.spools.executors.shell/install!})
 ;; UNSAFE spool: text-search reaches past the blessed api.* contract into
 ;; skein.core.db to LIKE-search titles and attribute values, including archived
 ;; rows the query language cannot see. It is a maintained, in-the-open example
@@ -55,15 +56,15 @@
                      :call 'skein.macros.demo/install!
                      :required? true})
 (runtime-alpha/use! runtime :skein/spools-shuttle
-                    {:ns 'skein.spools.shuttle
-                     :spools ['skein.spools/shuttle]
-                     :call 'skein.spools.shuttle/install!
+                    {:ns 'skein.spools.agent-run
+                     :spools ['skein.spools/agent-run]
+                     :call 'skein.spools.agent-run/install!
                      :required? true})
 (runtime-alpha/use! runtime :skein/spools-agents
-                    {:ns 'skein.spools.agents
-                     :spools ['skein.spools/agents]
+                    {:ns 'skein.spools.delegation
+                     :spools ['skein.spools/delegation]
                      :after [:skein/spools-shuttle]
-                     :call 'skein.spools.agents/install!
+                     :call 'skein.spools.delegation/install!
                      :required? true})
 (runtime-alpha/use! runtime :skein/spools-bench
                     {:ns 'skein.spools.bench
@@ -92,7 +93,7 @@
                      :required? true})
 ;; Chime is a vocabulary-agnostic notification engine: it installs bare here,
 ;; attention.clj registers this repo's attention rules (HITL checkpoints, agent
-;; failures, treadle errors, kanban lifecycle, parked runs), and each developer
+;; failures, gate errors, kanban lifecycle, parked runs), and each developer
 ;; binds how they are notified in gitignored init.local.clj (loaded after this
 ;; file on startup and reload). Unbound chime records loud notifier-missing
 ;; failures.
@@ -138,12 +139,13 @@
                      :after [:skein/spools-cron :skein/spools-kanban]
                      :call 'nvd-scan/install!
                      :required? true})
-;; Treadle installs last: its install! runs an initial gate scan, so every
-;; harness alias harnesses.clj registers (e.g. worker) must already exist or a
-;; durable ready gate would be stamped treadle/error on every cold start.
+;; The subagent gate executor installs last: its install! runs an initial gate
+;; scan, so every harness alias harnesses.clj registers (e.g. worker) must
+;; already exist or a durable ready gate would be stamped gate/error on every
+;; cold start.
 (runtime-alpha/use! runtime :skein/spools-treadle
-                    {:ns 'skein.spools.treadle
-                     :spools ['skein.spools/shuttle]
+                    {:ns 'skein.spools.executors.subagent
+                     :spools ['skein.spools/agent-run]
                      :after [:skein/spools-shuttle :skein/spools-workflow :harnesses :config :workflows]
-                     :call 'skein.spools.treadle/install!
+                     :call 'skein.spools.executors.subagent/install!
                      :required? true})

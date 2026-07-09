@@ -31,7 +31,7 @@ Function.
 
 Return active strands blocked by active failed or exhausted depends-on targets.
 
-  A blocker is any active `depends-on` target whose `shuttle/phase` attribute is
+  A blocker is any active `depends-on` target whose `agent-run/phase` attribute is
   the string `failed` or `exhausted`. Rows include the blocked strand summary and
   a `:blockers` vector with compact blocker details.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/src/skein/spools/carder.clj#L157-L189">Source</a></sub></p>
@@ -90,6 +90,6 @@ Function.
 Return active strands older than the configured age threshold.
 
   Options: `:days` positive integer threshold (default `default-days`) and
-  `:include-plumbing? true` to include workflow plumbing and shuttle run records.
+  `:include-plumbing? true` to include workflow plumbing and agent-run run records.
   Each row is a compact strand summary plus `:days-stale`.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/src/skein/spools/carder.clj#L87-L105">Source</a></sub></p>

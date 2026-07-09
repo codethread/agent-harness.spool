@@ -13,7 +13,7 @@
   "Test namespaces that are safe to run concurrently, one namespace per worker."
   ['skein.core.db-test 'skein.core.query-compile-test 'skein.core.contract-props-test 'skein.core.specs-test 'skein.core.scheduler-test 'skein.plugin-test 'skein.relations-test
    'skein.spools.bobbin-test 'skein.spools.carder-test 'skein.spools.loom-test 'skein.spools.selvage-test 'skein.spools.text-search-test
-   'skein.guild-test 'skein.agents-test 'skein.kanban-test 'skein.test.alpha-test 'skein.warm-test 'skein.api.cli.alpha-test
+   'skein.guild-test 'skein.delegation-test 'skein.kanban-test 'skein.test.alpha-test 'skein.warm-test 'skein.api.cli.alpha-test
    'skein.alpha-test 'skein.core.client-test 'skein.spools.workflow-test
    'skein.spools.batteries-test 'skein.roster-test 'skein.spools.util-test
    'skein.macros.queries-test 'skein.macros.ops-test 'skein.macros.rules-test 'skein.macros.patterns-test
@@ -28,7 +28,7 @@
    ;; for the scheduler and cron timers, event-lane quiescence for the async
    ;; dispatch suites — so there is no JVM-global timer or shared-lane state.
    'skein.scheduler-runtime-test 'skein.api.scheduler.alpha-test 'skein.scheduler-e2e-test
-   'skein.cron-test 'skein.treadle-test 'skein.spools.reed-test 'skein.chime-test
+   'skein.cron-test 'skein.executors.subagent-test 'skein.spools.executors.shell-test 'skein.chime-test
    'skein.weaver-test])
 
 (def serial-namespaces
@@ -41,7 +41,7 @@
    'skein.weaver-publication-test
    ;; multiple published peer runtimes verify routing semantics.
    'skein.peers-test
-   ;; publishes an ambient runtime for the judge shuttle run and spawns real
+   ;; publishes an ambient runtime for the judge agent run and spawns real
    ;; container-engine subprocesses on a spool executor; real-process,
    ;; published-singleton reasoning keeps it off parent parallel load.
    'skein.bench-test])
@@ -50,8 +50,8 @@
   "Subprocess JVM shard groups for tests that mutate JVM-global tools.deps state."
   {;; Largest add-libs suite stands alone to balance wall time against parent work.
    "A" ['skein.spools-test]
-   ;; Shuttle-first within this JVM; runtime-deps intentionally poisons the basis, so it is last.
-   "B" ['skein.shuttle-test 'skein.runtime-deps-test]
+   ;; Agent-run-first within this JVM; runtime-deps intentionally poisons the basis, so it is last.
+   "B" ['skein.agent-run-test 'skein.runtime-deps-test]
    ;; Medium add-libs suites share one JVM to amortize boot without exceeding shard A.
    ;; nvd-scan-test load-files .skein/nvd_scan.clj (which requires the cron
    ;; spool root via add-libs) just as config-test does, so it shares this

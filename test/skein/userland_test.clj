@@ -128,8 +128,8 @@
 ;; guidance doc.
 (def ^:private guarded-roots
   ["src/skein" "dev/skein"
-   "spools/agents/src" "spools/kanban/src"
-   "spools/chime/src" "spools/shuttle/src" "spools/src"])
+   "spools/delegation/src" "spools/kanban/src"
+   "spools/chime/src" "spools/agent-run/src" "spools/src"])
 
 (defn- clojure-sources [root]
   (->> (io/file root)

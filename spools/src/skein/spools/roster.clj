@@ -210,7 +210,7 @@
 ;;
 ;; Specs are the discoverable/reusable source of truth for the shapes of the
 ;; public `track!`/`finish!`/`roster`/`await-quiet!` input maps, matching
-;; sibling spools (skein.spools.agents, skein.spools.workflow). Each fn's
+;; sibling spools (skein.spools.delegation, skein.spools.workflow). Each fn's
 ;; manual checks cover what s/keys cannot express: closed key sets (s/keys maps
 ;; stay open) and track!'s feature/owner requirement, which is satisfiable from
 ;; an existing `:id` strand rather than the attrs map. Predicate specs are used
@@ -574,7 +574,7 @@
    :summary (fmt/reflow "
              |Roster is the durable active-work registry: ordinary strands marked
              |roster/entry answer \"what work is active in this weaver?\" without replacing
-             |workflow, devflow, kanban lanes, shuttle run state, or `strand branches`.")
+             |workflow, devflow, kanban lanes, agent-run run state, or `strand branches`.")
    :attributes {:roster/entry "\"true\" marker for roster entries"
                 :roster/feature "required non-blank feature/work slug"
                 :roster/owner "required non-blank driver identity (human, harness, or run id)"
@@ -623,7 +623,7 @@
          :working-agreement
          (fmt/fill "
                |Roster answers \"what work is active in this weaver\" without replacing
-               |workflow, devflow, kanban lanes, shuttle run state, or `strand branches`; it
+               |workflow, devflow, kanban lanes, agent-run run state, or `strand branches`; it
                |summarizes work roots for coordination and never enforces locks, ownership,
                |merge gates, or exclusivity.
                |

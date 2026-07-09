@@ -123,14 +123,14 @@ The runtime is pull-based and *every* strand is already a durable wait point: an
   gates can make `await!` stay silent while it is healthy. A gate whose
   waiter has no registered executor always surfaces immediately — there is no
   silent default.
-- A shipped local-root adapter, `skein.spools.treadle`, fulfills ready
-  `:subagent` gates by spawning shuttle runs, registers the `:subagent`
+- A shipped local-root adapter, `skein.spools.executors.subagent`, fulfills ready
+  `:subagent` gates by spawning agent-run runs, registers the `:subagent`
   executor, and closes each gate with the run's result. See
-  `shuttle/treadle.md`.
-- A shipped classpath executor, `skein.spools.reed`, fulfills ready `:shell`
+  `executors/subagent.md`.
+- A shipped classpath executor, `skein.spools.executors.shell`, fulfills ready `:shell`
   gates by running the gate's `shell/argv` command directly, registers the
   `:shell` executor, and closes each gate with `complete!` on a zero exit
-  (stamping a loud `shell/error` otherwise). See `reed.md`.
+  (stamping a loud `shell/error` otherwise). See `executors/shell.md`.
 
 **Dynamic fan-out needs no primitive.** The run subgraph is recomputed live from the graph on every poll, so userland may add strands to a running molecule mid-flight — ordinary `strand!` plus `parent-of`/`depends-on` edges to the run's root — to spawn e.g. sub-agent steps discovered at runtime. Set `workflow/role "step"` on them so they count as workflow work and gate the run's done-check exactly like poured steps.
 
@@ -211,7 +211,7 @@ start! ──▶ next-steps / next-step ──▶ complete! / choose! ──▶ 
 
 The three-arg `(runtime run-id opts)` arity threads the target runtime explicitly, agreeing with `roster/await-quiet!`; the shorter arities resolve the ambient `current/runtime` as the ergonomic default.
 
-It returns `{:reason :done|:checkpoint|:step|:gate|:stalled|:timeout :ready [...] :done boolean :detail ...}`. `opts` takes `:timeout-secs` (default 1800) and `:poll-ms` (default 250, matching the shuttle await surface) — there is no predicate to name, because `await!` resolves attention purely from the ready frontier and the executor registry. A negative or non-integer `:timeout-secs`/ `:poll-ms` fails loudly instead of reaching `Thread/sleep`:
+It returns `{:reason :done|:checkpoint|:step|:gate|:stalled|:timeout :ready [...] :done boolean :detail ...}`. `opts` takes `:timeout-secs` (default 1800) and `:poll-ms` (default 250, matching the agent-run await surface) — there is no predicate to name, because `await!` resolves attention purely from the ready frontier and the executor registry. A negative or non-integer `:timeout-secs`/ `:poll-ms` fails loudly instead of reaching `Thread/sleep`:
 
 - `:done` — the run is finished.
 - `:checkpoint` — a checkpoint is ready (any kind wakes the caller).
@@ -232,7 +232,7 @@ Executor registration is keyed by gate `waiter` name via `register-executor!` (a
 (workflow/registered-executors)                          ; => {:subagent gate-stalled? ...}
 ```
 
-This keeps the workflow namespace free of any executor's vocabulary: a waiter with no registered executor always surfaces as `:gate` immediately, and adapters such as the treadle register their own predicate for their own waiter name at install time (see `shuttle/treadle.md`). There is no more named "stall predicate" independent of a waiter, and no shipped default predicate — `register-stall-predicate!` and the old `:stall-predicate` await option are gone.
+This keeps the workflow namespace free of any executor's vocabulary: a waiter with no registered executor always surfaces as `:gate` immediately, and adapters such as the subagent executor register their own predicate for their own waiter name at install time (see `executors/subagent.md`). There is no more named "stall predicate" independent of a waiter, and no shipped default predicate — `register-stall-predicate!` and the old `:stall-predicate` await option are gone.
 
 ### Procedure join auto-close
 
@@ -243,7 +243,7 @@ A `call` expands to its inner steps plus a `procedure`-role **join** step that d
 - `:step` — materialized strand id, selects which ready step to complete
   when more than one is ready. Without it, single-ready-step behavior
   applies (fails loudly if ambiguous). Validated before any mutation.
-- `:notes` — recorded on the closed step as `"workflow/notes"`.
+- `:notes` — recorded on the closed step as `"workflow/outcome-notes"`.
 - `:attributes` — merged onto the closed step's attributes. Molecules exist
   for the audit trail, so closing a step can record what happened.
 - `:by` — actor identity, recorded as `"workflow/outcome-by"`. **Mandatory**
@@ -442,7 +442,7 @@ This table is the extension API: spools built on top of `skein.spools.workflow` 
 | `workflow/outcome` | The choice name recorded when a checkpoint closes via a `:next`-routed or plain choice. | `choose!`, on the checkpoint step, at close. |
 | `workflow/outcome-input` | The `input` map passed to `choose!`. | `choose!`, on the checkpoint step, at close. |
 | `workflow/outcome-by` | Actor identity that closed the strand; `"engine"` on an auto-closed procedure join. | `choose!` (checkpoint close, when opts supply `:by`); `complete!` (gate close, where `:by` is mandatory); join auto-close (`"engine"`). |
-| `workflow/notes` | Freeform notes recorded when a step closes. | `complete!`, from `opts :notes`. |
+| `workflow/outcome-notes` | Freeform notes recorded when a step closes. | `complete!`, from `opts :notes`. |
 | `workflow/procedure` | Name of the `call` id whose expansion this join step represents. | `expand-call-step`, on the procedure join step. |
 | `workflow/bond` | `"sequential"` — recorded on the bond edge itself, marking a cross-molecule bond. | `bond!`. |
 | `workflow/squashed-root` | Root id of the subgraph a digest strand replaced. | `squash!`. |
@@ -482,8 +482,8 @@ The test suite in [`test/skein/spools/workflow_test.clj`](../test/skein/spools/w
   runtime fns of this namespace as symbol-valued maps, for trusted
   registration by name (mirrors devflow's registries in `devflow.md` §5).
 - [README.md](./README.md) — shipped spools index and loading notes.
-- [`skein.spools.treadle`](./shuttle/treadle.md) — shipped
-  local-root adapter that binds workflow `:subagent` gates to shuttle runs.
-- [`skein.spools.reed`](./reed.md) — shipped classpath executor that fulfills
+- [`skein.spools.executors.subagent`](./executors/subagent.md) — shipped
+  local-root adapter that binds workflow `:subagent` gates to agent-run runs.
+- [`skein.spools.executors.shell`](./executors/shell.md) — shipped classpath executor that fulfills
   workflow `:shell` gates by running their command.
 

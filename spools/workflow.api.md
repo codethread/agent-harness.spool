@@ -110,7 +110,7 @@ Block until workflow run-id is done, at a checkpoint, at a ready `:self`
   executor-owned gate whose stall predicate reports detail, or timed out.
 
   opts: `:timeout-secs` (default 1800) and `:poll-ms` (default 250, matching
-  the shuttle await surface). Fails loudly for a non-negative-integer
+  the agent-run await surface). Fails loudly for a non-negative-integer
   violation on either, agreeing with `skein.spools.roster/await-quiet!`'s
   `:timeout-ms`/`:poll-ms` validation.
 
@@ -267,7 +267,7 @@ Close the current ready non-checkpoint workflow step for run-id and return
 
   opts may include `:step` (materialized strand id) to select among multiple
   ready steps; without it, exactly one step must be ready. opts may also
-  include `:notes` (string, stored as "workflow/notes") and `:attributes`
+  include `:notes` (string, stored as "workflow/outcome-notes") and `:attributes`
   (map merged onto the closed step). A non-blank `:by` is recorded as
   "workflow/outcome-by" on any step it is supplied for, but is only required
   when closing a gate step (one built with `gate`).

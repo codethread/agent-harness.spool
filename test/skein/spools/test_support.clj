@@ -22,7 +22,7 @@
 
   opts: `:prefix` (temp-dir name prefix, for telling concurrent test runs
   apart; default \"skein-spools-config\") and `:nest-skein?` (default false).
-  Some spool code (e.g. shuttle's `pinned-strand-command`) derives a
+  Some spool code (e.g. agent-run's `pinned-strand-command`) derives a
   \"workspace root\" from the config-dir's parent, matching the real
   repo-root/.skein layout; set `:nest-skein?` true so the returned config-dir
   is a `.skein` child of the temp root instead of the root itself, when a
@@ -126,15 +126,15 @@
            (do (Thread/sleep interval-ms) (recur))))))))
 
 (defn await-phase
-  "Poll until the strand's shuttle/phase is in `phases` or timeout; return it.
+  "Poll until the strand's agent-run/phase is in `phases` or timeout; return it.
 
-  Shared by shuttle and agents spool tests so neither requires the other's
+  Shared by agent-run and delegation spool tests so neither requires the other's
   test namespace for a wait helper."
   ([rt id phases] (await-phase rt id phases (await-budget-ms)))
   ([rt id phases timeout-ms]
    (poll-until
     #(let [strand (api/show rt id)]
-       (when (contains? phases (get-in strand [:attributes :shuttle/phase])) strand))
+       (when (contains? phases (get-in strand [:attributes :agent-run/phase])) strand))
     {:timeout-ms timeout-ms
      :on-timeout #(throw (ex-info "Timed out waiting for run phase"
                                   {:id id :want phases :strand (api/show rt id)}))})))

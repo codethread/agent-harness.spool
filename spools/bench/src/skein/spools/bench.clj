@@ -7,7 +7,7 @@
   inside a fresh container against a pristine checkout of a pinned repo+sha;
   when the container exits the engine deterministically extracts metrics and
   stamps them on the entry strand, then closes it. Closing every entry unblocks
-  the judge — a decoupled fulfilment seam (a shuttle run by default, but
+  the judge — a decoupled fulfilment seam (an agent run by default, but
   fulfillable by any mechanism) that writes a comparative verdict.
 
   Setup and measurement are code (this namespace plus `skein.spools.bench.exec`);
@@ -29,7 +29,7 @@
             [skein.spools.bench.exec :as exec]
             [skein.spools.bench.metrics :as metrics]
             [skein.spools.format :as fmt]
-            [skein.spools.shuttle :as shuttle]
+            [skein.spools.agent-run :as agent-run]
             [skein.spools.util :refer [fail! reject-unknown-keys! require-valid! attr-get]])
   (:import [java.io File]
            [java.util.concurrent ExecutorService Executors Semaphore ThreadFactory TimeUnit]))
@@ -650,14 +650,14 @@
 ;;
 ;; The judge strand IS the seam. `judge-spec` builds, as plain data, the full
 ;; judge prompt plus the durable attributes a fulfiller needs — so bench pouring
-;; a shuttle run, a workflow `:subagent` gate, or a human all read one source of
+;; an agent run, a workflow `:subagent` gate, or a human all read one source of
 ;; truth. `bench/judge-prompt` carries the full built prompt on the strand; the
 ;; strand `body` carries a short mechanism-agnostic fulfilment contract; the
 ;; final verdict lands in `bench/verdict` regardless of who fulfils it.
 
 (defn- judge-body
   "The judge strand's `body`: a short, mechanism-agnostic fulfilment contract
-  any fulfiller (a shuttle run, a workflow gate, a human) follows. The full
+  any fulfiller (an agent run, a workflow gate, a human) follows. The full
   judging protocol lives in the strand's `bench/judge-prompt` attribute."
   []
   (str/join
@@ -737,13 +737,13 @@
   only ever the one.
 
   This is the seam `run!` and workflow authors both consume. `run!` pours the
-  judge strand and (in `:harness` mode) its serving shuttle run straight from
-  this output — the strand's `bench/judge-prompt` and a shuttle run's
-  `shuttle/prompt` come from this one builder, so they never drift. A workflow
+  judge strand and (in `:harness` mode) its serving agent run straight from
+  this output — the strand's `bench/judge-prompt` and an agent run's
+  `agent-run/prompt` come from this one builder, so they never drift. A workflow
   author calls `judge-spec` at pour time and maps it onto a `:subagent` gate
-  exactly as roster review specs do (`skein.spools.agents/roster-review-specs`):
-  `:prompt` becomes the gate's `shuttle/prompt`, the author picks the gate's
-  `shuttle/harness`, `:attrs` merge into the gate, and the gate depends on
+  exactly as roster review specs do (`skein.spools.delegation/roster-review-specs`):
+  `:prompt` becomes the gate's `agent-run/prompt`, the author picks the gate's
+  `agent-run/harness`, `:attrs` merge into the gate, and the gate depends on
   `:entry-ids`. Bench thus never requires or references the workflow spool.
 
   Fails loudly when the suite declares `:judge :none` (there is no judge to
@@ -778,7 +778,7 @@
 
 (defn- pour-judge!
   "Pour the judge strand from a `judge-spec` output per the suite's `:judge`
-  fulfilment mode, returning its id. `:harness` spawns a serving shuttle run
+  fulfilment mode, returning its id. `:harness` spawns a serving agent run
   (the run strand IS the judge strand); `:external` pours the strand and stops —
   any external mechanism fulfils it per its body contract. Both carry the same
   `:attrs` and `depends-on` every entry."
@@ -787,8 +787,8 @@
         title (str "Bench judge: " suite-name)]
     (cond
       (:harness judge)
-      (binding [shuttle/*runtime* runtime]
-        (:id (shuttle/spawn-run! {:harness (:harness judge)
+      (binding [agent-run/*runtime* runtime]
+        (:id (agent-run/spawn-run! {:harness (:harness judge)
                                   :prompt prompt
                                   :title title
                                   :depends-on (vec entry-ids)
@@ -825,7 +825,7 @@
   agents registered, judge harness (in `:harness` mode) and engine resolvable —
   and resolves a `:rev` to a concrete sha before creating any strand (TEN-003).
   Pours the run root, one entry per matrix cell, and (unless `:judge :none`) the
-  judge strand depending on every entry — a serving shuttle run in `:harness`
+  judge strand depending on every entry — a serving agent run in `:harness`
   mode, a bare fulfilment-seam strand in `:external` mode — queues entries on the
   bounded executor, and returns `{:run root-id :entries {slug id} :judge
   judge-id}` immediately; execution is async."
@@ -841,8 +841,8 @@
                                  {:agent (:agent cell) :available (mapv :name (agents runtime))}))]
         (validate-cell-axes! agent-def cell)))
     (when (:harness judge)
-      (binding [shuttle/*runtime* runtime]
-        (shuttle/resolve-harness (:harness judge))))
+      (binding [agent-run/*runtime* runtime]
+        (agent-run/resolve-harness (:harness judge))))
     (let [sha (or (:sha normalized)
                   (exec/resolve-rev! (data-root runtime) (:repo normalized) (:rev normalized)))
           root (api/add runtime {:title (str "Bench: " name)
@@ -959,8 +959,8 @@
   `bench/error \"aborted\"`; done entries are left closed. Best-effort kills
   every entry's container by name. The judge strand is closed with
   `bench/error \"aborted\"` (the same marking as an aborted entry, whether the
-  judge is a shuttle run or an external seam); a shuttle-run judge additionally
-  gets `shuttle/phase \"superseded\"` so the run engine treats it as retired."
+  judge is an agent run or an external seam); an agent-run judge additionally
+  gets `agent-run/phase \"superseded\"` so the run engine treats it as retired."
   [runtime run-id]
   (let [root (or (api/show runtime run-id) (fail! "bench abort: no such run" {:id run-id}))
         eng (engine runtime)
@@ -989,7 +989,7 @@
       (api/update runtime (:id judge)
                   {:state "closed"
                    :attributes (cond-> {"bench/aborted" "true" "bench/error" "aborted"}
-                                 (attr-get judge "shuttle/run") (assoc "shuttle/phase" "superseded"))}))
+                                 (attr-get judge "agent-run/run") (assoc "agent-run/phase" "superseded"))}))
     (drop-semaphore! runtime run-id)
     {:aborted run-id :failed failed :judge (:id judge)}))
 
@@ -1037,12 +1037,12 @@
 (defn- judge-verdict
   "Resolve a judge strand's verdict and its source (§8): the strand's
   `bench/verdict` attribute wins (the canonical, mode-agnostic location); else a
-  serving shuttle run's `shuttle/result`; else none. Returns
+  serving agent run's `agent-run/result`; else none. Returns
   `{:verdict <text>? :verdict-source \"attr\"|\"run\"|\"none\"}`."
   [judge]
   (if-let [v (attr-get judge "bench/verdict")]
     {:verdict v :verdict-source "attr"}
-    (if-let [r (attr-get judge "shuttle/result")]
+    (if-let [r (attr-get judge "agent-run/result")]
       {:verdict r :verdict-source "run"}
       {:verdict-source "none"})))
 
@@ -1121,7 +1121,7 @@
      :judge (when judge
               (merge {:id (:id judge)
                       :state (:state judge)
-                      :phase (attr-get judge "shuttle/phase")}
+                      :phase (attr-get judge "agent-run/phase")}
                      (judge-verdict judge)))
      :blocking-failures (->> entries
                              (filter #(= "failed" (attr-get % "bench/phase")))
@@ -1154,14 +1154,14 @@
   "Return the full comparison document for a bench run (§10): per-entry
   normalized metrics, extraction warnings, artifact paths, and per-entry judge
   notes, plus the judge verdict resolved per §8 (the judge strand's
-  `bench/verdict` attr, else a serving run's `shuttle/result`) with its
+  `bench/verdict` attr, else a serving run's `agent-run/result`) with its
   `:verdict-source` (attr|run|none). A pure read."
   [runtime run-id]
   (let [root (run-root! runtime run-id "report")
         children (run-children runtime run-id)
         entries (entry-strands children)
         judge (judge-strand children)]
-    (binding [shuttle/*runtime* runtime]
+    (binding [agent-run/*runtime* runtime]
       {:run run-id
        :suite (attr-get root "bench/suite")
        :repo (attr-get root "bench/repo")
@@ -1176,13 +1176,13 @@
                                          (conj (str "metrics.json unreadable: " (:unreadable parsed))))]
                           (cond-> (assoc (entry-descriptor e)
                                          :artifacts (entry-artifacts runtime run-id slug)
-                                         :judge-notes (shuttle/notes (:id e)))
+                                         :judge-notes (agent-run/notes (:id e)))
                             metrics (assoc :metrics (dissoc metrics :extraction-warnings))
                             (seq warnings) (assoc :extraction-warnings warnings))))
                       entries)
        :judge (when judge
                 (merge {:id (:id judge)
-                        :phase (attr-get judge "shuttle/phase")}
+                        :phase (attr-get judge "agent-run/phase")}
                        (judge-verdict judge)))})))
 
 ;; ---------------------------------------------------------------------------
@@ -1206,7 +1206,7 @@
               |container against a pristine checkout; the engine extracts metrics
               |deterministically and closes the entry. Closing every entry unblocks the judge
               |— a decoupled fulfilment seam that writes a comparative verdict, shipped as a
-              |shuttle run but fulfillable by anything (workflow gate, human, custom bridge).
+              |agent run but fulfillable by anything (workflow gate, human, custom bridge).
               |Setup and measurement are code; only judgment is a model.")
    :determinism-model {:pinned (fmt/reflow
                                 "|repo sha, memory files/skills (overlay manifest), prompt text,
@@ -1255,7 +1255,7 @@
                             |every entry and stamps bench/judge-prompt + a body contract; anything
                             |may fulfil it. bench never requires the workflow spool.")
                     :modes (fmt/reflow
-                            "|:judge {:harness h} spawns a serving shuttle run (shipped default);
+                            "|:judge {:harness h} spawns a serving agent run (shipped default);
                              |:judge {:external true} pours the strand and stops for any external
                              |mechanism (workflow gate, human, custom bridge) to fulfil; :judge
                              |:none runs a judgeless, metrics-only suite. Exactly one of
@@ -1263,21 +1263,21 @@
                     :composition (fmt/reflow
                                   "|skein.spools.bench/judge-spec (trusted Clojure) returns {:prompt
                                    |:attrs :entry-ids} — the same source run! pours from. A workflow
-                                   |author maps it onto a :subagent gate (shuttle/prompt from
+                                   |author maps it onto a :subagent gate (agent-run/prompt from
                                    |:prompt, gate depends on :entry-ids), exactly like agents'
                                    |roster-review-specs.")
-                    :seat "In :harness mode the suite's :judge :harness — any shuttle harness/alias — chooses the approving model."
+                    :seat "In :harness mode the suite's :judge :harness — any agent-run harness/alias — chooses the approving model."
                     :ground-truth (fmt/reflow
                                    "|Metrics are ground truth — the judge never re-derives or
                                     |disputes them; it judges quality, not arithmetic (baked into
                                     |the builder, not overridable by :contract).")
                     :verdict (fmt/reflow
                               "|The verdict lands in bench/verdict on the judge strand (canonical);
-                               |a shuttle run also leaves it as shuttle/result. report/status
-                               |resolve bench/verdict first, else shuttle/result, and report the
+                               |an agent run also leaves it as agent-run/result. report/status
+                               |resolve bench/verdict first, else agent-run/result, and report the
                                |verdict-source (attr|run|none).")
                     :output "One note appended per entry strand with scores and findings, the verdict stamped on the judge strand, then the strand closed."
-                    :recovery "A failed shuttle-run judge recovers with the ordinary strand agent retry."}
+                    :recovery "A failed agent-run judge recovers with the ordinary strand agent retry."}
    :artifact-layout {:root "<weaver state dir>/bench/<run-id>/<slug>/"
                      :files {"workspace/" "clone at the pinned sha with the overlay applied"
                              "home/" "the container HOME; harness session artifacts land here for extraction"
