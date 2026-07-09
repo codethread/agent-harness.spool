@@ -91,7 +91,7 @@ Function.
 
 Block until every id is terminal (closed, failed, or exhausted) or
   `timeout-secs` (default 300) elapses. Returns run summaries plus :timed-out.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1570-L1587">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1596-L1613">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/backends">`backends`</a>
 ``` clojure
@@ -100,7 +100,7 @@ Block until every id is terminal (closed, failed, or exhausted) or
 Function.
 
 Return registered backend metadata ordered by name.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L439-L448">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L465-L474">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/capture!">`capture!`</a>
 ``` clojure
@@ -113,7 +113,7 @@ Capture an interactive run's transcript right now, persist it as the run's
   coordinator peek without attaching) and, when the harness capture source
   outlives the session (hook-written logs), on finished runs too. Fails
   loudly when the run is not interactive or no capture op is configured.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1621-L1634">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1647-L1660">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/defalias!">`defalias!`</a>
 ``` clojure
@@ -135,7 +135,7 @@ Register `name` as an alias layered over another harness or alias.
 Function.
 
 Return the effective workspace review contract text.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1698-L1701">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1724-L1727">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/defbackend!">`defbackend!`</a>
 ``` clojure
@@ -153,7 +153,7 @@ Register an interactive session backend under `name`.
   `:handle/<key>` lookups into the handle `:start` returned. `:start` must
   print one flat JSON object of strings as its last stdout line (empty output
   means `{}`); that handle is stored durably on the run strand.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L406-L430">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L432-L456">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/defharness!">`defharness!`</a>
 ``` clojure
@@ -185,7 +185,7 @@ Register a harness definition under `name`.
 
 
 Default contract text for independent shuttle reviews.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1680-L1686">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1706-L1712">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/harnesses">`harnesses`</a>
 ``` clojure
@@ -194,7 +194,12 @@ Default contract text for independent shuttle reviews.
 Function.
 
 Return registered harness and alias metadata ordered by name.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L355-L364">Source</a></sub></p>
+
+  Alias entries carry `:harness` (the resolved root harness name) and that
+  root's doc as `:harness-doc` beside their own `:doc`, so one listing shows
+  harness-level capabilities (the tool surface) together with alias-level
+  capabilities (the model seat) without callers re-walking alias chains.
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L368-L385">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/in-flight-run-ids">`in-flight-run-ids`</a>
 ``` clojure
@@ -217,7 +222,7 @@ Function.
 
 Install the shuttle into the active weaver: default harnesses, the graph
   event listener, crash reconciliation, and a first scan.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1706-L1723">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1732-L1749">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/kill!">`kill!`</a>
 ``` clojure
@@ -226,7 +231,7 @@ Install the shuttle into the active weaver: default harnesses, the graph
 Function.
 
 Kill a run's harness process (or interactive session) and mark it failed.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1589-L1619">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1615-L1645">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/note!">`note!`</a>
 ``` clojure
@@ -240,7 +245,7 @@ Append an immutable note strand to `target-id`'s memory.
   The note is born closed (it is memory, not work), carries
   `shuttle/note-for`, optional `shuttle/note-by` and `shuttle/round`
   attributes, and a `notes` annotation edge to the target.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1636-L1659">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1662-L1685">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/notes">`notes`</a>
 ``` clojure
@@ -250,7 +255,7 @@ Append an immutable note strand to `target-id`'s memory.
 Function.
 
 Return `target-id`'s notes in creation order, optionally one `:round`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1661-L1675">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1687-L1701">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/on-event">`on-event`</a>
 ``` clojure
@@ -260,7 +265,7 @@ Function.
 
 Weaver event handler: any graph mutation may unblock a pending run or
   complete the strand an interactive session serves.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1262-L1267">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1288-L1293">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/pinned-strand-command">`pinned-strand-command`</a>
 ``` clojure
@@ -273,7 +278,7 @@ Return the fully pinned strand invocation prefix for spawned agents.
   Harness shells may re-source user dotfiles and override ambient env, so the
   state root that selects the mill/weaver must ride inside the command text,
   not the inherited environment.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L566-L573">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L592-L599">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/preamble-extension-conflicts">`preamble-extension-conflicts`</a>
 ``` clojure
@@ -289,7 +294,7 @@ Return the durable record of genuine set-preamble-extension! conflicts.
   record survives for the weaver lifetime (and across `reload!`, carried through
   `migrate-state`) so a conflict stays visible to operators and attention
   detectors after the stderr warning has scrolled off.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L605-L615">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L631-L641">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/reconcile!">`reconcile!`</a>
 ``` clojure
@@ -312,7 +317,7 @@ Recover running runs whose owning weaver died.
   (auto-respawn would silently discard a human conversation).
 
   Returns a summary of respawned/exhausted/adopted/reaped/failed run ids.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1287-L1356">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1313-L1382">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/register-default-backends!">`register-default-backends!`</a>
 ``` clojure
@@ -321,7 +326,7 @@ Recover running runs whose owning weaver died.
 Function.
 
 Register the shipped tmux backend, keeping any existing entries.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L450-L465">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L476-L491">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/register-default-harnesses!">`register-default-harnesses!`</a>
 ``` clojure
@@ -330,7 +335,7 @@ Register the shipped tmux backend, keeping any existing entries.
 Function.
 
 Register the shipped harness definitions, keeping any existing entries.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L366-L398">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L387-L424">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/resolve-backend">`resolve-backend`</a>
 ``` clojure
@@ -339,7 +344,7 @@ Register the shipped harness definitions, keeping any existing entries.
 Function.
 
 Return the backend definition registered under `name`; fails loudly.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L432-L437">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L458-L463">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/resolve-harness">`resolve-harness`</a>
 ``` clojure
@@ -356,7 +361,7 @@ Return the effective harness definition for `name`, flattening alias layers.
 
 
 Query form selecting all shuttle run strands.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L529-L531">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L555-L557">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/run-summary">`run-summary`</a>
 ``` clojure
@@ -369,7 +374,7 @@ Project a run strand into the compact summary shape the op surface returns.
 
   Pass `parents` (the run's parent-of source ids) to reuse a bulk fetch; when
   omitted a single indexed lookup resolves them.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1503-L1533">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1529-L1559">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/runs">`runs`</a>
 ``` clojure
@@ -381,7 +386,7 @@ Function.
 Return summaries of shuttle runs; opts may filter to `:active` or `:for`.
   Listing doubles as an interactive liveness checkpoint (there is no
   background poller): dead sessions are failed here, best-effort.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1535-L1562">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1561-L1588">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/scan!">`scan!`</a>
 ``` clojure
@@ -390,7 +395,7 @@ Return summaries of shuttle runs; opts may filter to `:active` or `:for`.
 Function.
 
 Spawn every ready pending run not already claimed. Returns claimed run ids.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1251-L1260">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1277-L1286">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/set-default-review-contract!">`set-default-review-contract!`</a>
 ``` clojure
@@ -399,7 +404,7 @@ Spawn every ready pending run not already claimed. Returns claimed run ids.
 Function.
 
 Set the workspace default review contract text; nil restores the generic one.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1690-L1696">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1716-L1722">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/set-preamble-extension!">`set-preamble-extension!`</a>
 ``` clojure
@@ -422,7 +427,7 @@ Register additional preamble text appended after shuttle's engine contract.
     incident), which is worse than a recorded clash. The durable record is the
     fail-loud substitute — an operator/detector can see the conflict long after
     the stderr line has scrolled away, unlike the prior stderr-only signal.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L577-L603">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L603-L629">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/spawn-run!">`spawn-run!`</a>
 ``` clojure
@@ -446,7 +451,7 @@ Create one agent-run strand; the engine spawns it when it becomes ready.
   launch the harness `:resume` splice resolves from the predecessor's captured
   attributes ahead of the prompt (see `validate-resume!` for the loud rules).
   Asynchronous: returns the created run strand immediately.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1398-L1461">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1424-L1487">Source</a></sub></p>
 
 ## <a name="skein.spools.shuttle/supervise!">`supervise!`</a>
 ``` clojure
@@ -460,4 +465,4 @@ Advance every interactive run in phase running: reap completed ones, fail
   in the same instant is reaped as done, not failed. This runs on graph
   events and inspection calls; the weaver deliberately has no timers, so
   there is no background poller. Returns {:reaped [..] :failed [..]}.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1089-L1131">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/shuttle/src/skein/spools/shuttle.clj#L1115-L1157">Source</a></sub></p>

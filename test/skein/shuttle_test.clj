@@ -57,18 +57,35 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"prompt-via"
                               (shuttle/defharness! :bad {:argv ["x"] :prompt-via :std-in}))))
       (testing "alias layering flattens onto the base harness"
-        (shuttle/defharness! :base {:argv ["tool" "-p"] :parse :raw})
-        (shuttle/defalias! :fast {:alias-of :base :extra-args ["--model" "fast"]})
+        (shuttle/defharness! :base {:argv ["tool" "-p"] :parse :raw :doc "Base tool surface."})
+        (shuttle/defalias! :fast {:alias-of :base :extra-args ["--model" "fast"] :doc "Fast seat."})
         (shuttle/defalias! :fast-reviewer {:alias-of :fast :prompt-prefix "Review: "})
         (let [effective (shuttle/resolve-harness :fast-reviewer)]
           (is (= ["tool" "-p"] (:argv effective)))
           (is (= ["--model" "fast"] (:extra-args effective)))
           (is (= "Review: " (:prompt-prefix effective)))))
+      (testing "the listing shows alias and root-harness docs together"
+        (let [by-name (into {} (map (juxt :name identity)) (shuttle/harnesses))
+              fast (get by-name "fast")
+              reviewer (get by-name "fast-reviewer")]
+          (is (= {:alias-of "base" :harness "base"
+                  :harness-doc "Base tool surface." :doc "Fast seat."}
+                 (select-keys fast [:alias-of :harness :harness-doc :doc])))
+          ;; chains resolve to the root, not the immediate base
+          (is (= "fast" (:alias-of reviewer)))
+          (is (= "base" (:harness reviewer)))
+          (is (= "Base tool surface." (:harness-doc reviewer)))))
       (testing "alias cycles and missing harnesses fail loudly"
         (shuttle/defalias! :a {:alias-of :b})
         (shuttle/defalias! :b {:alias-of :a})
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cycle"
                               (shuttle/resolve-harness :a)))
+        ;; the listing stays best-effort: a broken chain drops its root keys
+        ;; instead of taking the whole diagnostic surface down
+        (let [entry (first (filter #(= "a" (:name %)) (shuttle/harnesses)))]
+          (is (some? entry))
+          (is (not (contains? entry :harness)))
+          (is (not (contains? entry :harness-doc))))
         (try
           (shuttle/resolve-harness :missing)
           (is false "missing harness should throw")

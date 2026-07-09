@@ -352,15 +352,36 @@
                :extra-args extra-args
                :prompt-prefix prompt-prefix)))))
 
+(defn- root-harness
+  "Return `[root-key root-def]` for the alias chain starting at `key`, or nil
+  when the chain is dangling or cyclic. The listing stays best-effort here;
+  `resolve-harness` is the loud path a broken chain fails on."
+  [key]
+  (loop [key key
+         seen #{}]
+    (when-not (seen key)
+      (when-let [def (get @(harness-registry) key)]
+        (if-let [base (:alias-of def)]
+          (recur (harness-key base) (conj seen key))
+          [key def])))))
+
 (defn harnesses
-  "Return registered harness and alias metadata ordered by name."
+  "Return registered harness and alias metadata ordered by name.
+
+  Alias entries carry `:harness` (the resolved root harness name) and that
+  root's doc as `:harness-doc` beside their own `:doc`, so one listing shows
+  harness-level capabilities (the tool surface) together with alias-level
+  capabilities (the model seat) without callers re-walking alias chains."
   []
   (mapv (fn [[key def]]
-          (cond-> {:name (name key)
-                   :kind (if (:alias-of def) "alias" "harness")}
-            (:alias-of def) (assoc :alias-of (name (harness-key (:alias-of def))))
-            (:argv def) (assoc :argv (:argv def))
-            (:doc def) (assoc :doc (:doc def))))
+          (let [[root-key root-def] (when (:alias-of def) (root-harness key))]
+            (cond-> {:name (name key)
+                     :kind (if (:alias-of def) "alias" "harness")}
+              (:alias-of def) (assoc :alias-of (name (harness-key (:alias-of def))))
+              root-key (assoc :harness (name root-key))
+              (:doc root-def) (assoc :harness-doc (:doc root-def))
+              (:argv def) (assoc :argv (:argv def))
+              (:doc def) (assoc :doc (:doc def)))))
         (sort-by key @(harness-registry))))
 
 (defn register-default-harnesses!
@@ -372,7 +393,9 @@
                   :prompt-via :stdin
                   :resume ["--resume" :shuttle/session-id]
                   :doc (fmt/reflow "
-                        |Claude Code headless. The worker prompt rides on stdin (`claude -p` reads
+                        |Claude Code headless: full agentic coding toolset (file edits, shell,
+                        |subagents) plus web search/fetch, from a code-focused model family.
+                        |The worker prompt rides on stdin (`claude -p` reads
                         |it) so it never lands in the process argv, keeping prompts out of `ps` and
                         |out of the blast radius of any `pkill -f` pattern kill. Skips permission
                         |prompts so the run can drive the strand CLI; redefine with your own argv
@@ -383,7 +406,10 @@
               :prompt-via :stdin
               :resume ["--session" :shuttle/session-id]
               :doc (fmt/reflow "
-                    |pi headless in JSON event mode. The worker prompt rides on stdin (`pi -p`
+                    |pi headless in JSON event mode: agentic coding toolset that is
+                    |provider/model-agnostic — aliases pick the model via --provider/--model,
+                    |so model capability notes belong on the aliases.
+                    |The worker prompt rides on stdin (`pi -p`
                     |reads it) so it stays out of the process argv, `ps`, and any `pkill -f`
                     |blast radius. :pi-json captures shuttle/session-id and :resume continues
                     |that specific session with `--session <session-id>` (an existing session,
