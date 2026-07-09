@@ -13,6 +13,14 @@
   `agent-run/max-attempts`. Run memory is append-only note strands linked by
   `notes` annotation edges plus `note/for` attributes.
 
+  Delegation semantics ride a `serves` edge (run → target): a serving run is a
+  delegation of that target's own work. This is distinct from the `parent-of`
+  edge, which only places a run in the graph — a serving run carries both
+  (placement plus semantics), a read-only helper (recon spawn, reviewer, panel
+  seat) carries `parent-of` alone. `spawn-run!` writes the `serves` edge; the
+  read side (`run-summary` `:for`, `runs`, delegation guards) keys serving off
+  it rather than inferring it from placement.
+
   A run may continue a predecessor's harness session: `spawn-run!` accepts
   `:resume <predecessor-run-id>`, and a harness def declares a `:resume` argv
   splice (keyword placeholders resolve from the predecessor's captured
@@ -22,10 +30,26 @@
   recovery deliberately branches to a fresh spawn rather than silently starting
   cold.
 
+  A dead run is succeeded — never mutated in place — through the one primitive
+  `supersede-and-respawn!`: it mints a fresh successor preserving the
+  predecessor's `serves` target, `depends-on` edges, `spawned-by` provenance,
+  and execution shape, closes the predecessor `agent-run/phase \"superseded\"`,
+  and records lineage as a `supersedes` edge (successor → predecessor) plus an
+  `agent-run/supersedes` attr. `runs-serving` resolves the current run for a
+  target as the serving run with no incoming `supersedes` edge. Crash-respawn
+  (`reconcile!`) and session-carrying resume are the same family read two ways:
+  reconcile resets a strand in place so the run id stays stable, and
+  `:continuity :resume` layers the resume link onto a supersession — `resumes`
+  and `supersedes` stay distinct edges and the resolution rule keys on
+  `supersedes` alone.
+
   Interactive runs are the second execution mode: instead of exec-and-wait, the
   engine launches the harness into a user-registered multiplexer backend
   (tmux by default) and supervises it through the graph — the run completes
-  when the strand it serves closes (claims model), not when a process exits.
+  when its interactive completion target (`agent-run/for`) closes (claims
+  model), not when a process exits. That interactive `agent-run/for` target is
+  the interactive completion signal, separate from the headless `serves`
+  delegation edge above and never folded into it.
   Backends are data-first argv definitions (`defbackend!`) whose `:start` op
   returns a durable handle stored as `agent-run/handle.*` attributes, so
   sessions survive weaver restarts and are adopted, never respawned.
@@ -221,11 +245,6 @@
   `sattr` reads."
   [strand k]
   (attr-get strand (keyword "note" k)))
-
-(defn- attr
-  "Read a normalized strand attribute, tolerating keyword- or string-keyed maps."
-  [strand k]
-  (attr-get strand k))
 
 (defn- now [] (str (Instant/now)))
 
@@ -1562,12 +1581,16 @@
 
   Opts: `:harness` and `:prompt` required; optional `:title`, `:depends-on`
   (vector of strand ids), `:parent` and `:spawned-by` (each gets a parent-of
-  edge to the run), `:cwd`, `:max-attempts`, and extra `:attrs`. Interactive
-  sessions pass `:mode :interactive` with a required `:backend`, and
-  optionally `:reap` (`auto` tears the session down on completion, `manual`
-  leaves it to the human; default auto). An interactive run with a `:parent`
-  completes when that strand closes (claim); without one it completes when
-  its own run strand is closed (manual-close).
+  edge placing the run in the graph), `:serves <target-id>` (writes one `serves`
+  edge run → target, marking the run a delegation of that target's own work),
+  `:cwd`, `:max-attempts`, and extra `:attrs`. Placement and serving are
+  orthogonal: a serving run carries both `parent-of` and `serves`, a helper
+  carries `parent-of` alone. Interactive sessions pass `:mode :interactive` with
+  a required `:backend`, and optionally `:reap` (`auto` tears the session down on
+  completion, `manual` leaves it to the human; default auto). An interactive run
+  with a `:parent` completes when that strand closes (claim) — its interactive
+  completion target `agent-run/for`, distinct from the headless `serves` edge;
+  without one it completes when its own run strand is closed (manual-close).
 
   `:resume <predecessor-run-id>` continues the predecessor's harness session:
   the run is stamped `agent-run/resumes` with a `resumes` annotation edge, and at
@@ -1575,7 +1598,7 @@
   attributes ahead of the prompt (see `validate-resume!` for the loud rules).
   Asynchronous: returns the created run strand immediately."
   [{:keys [harness prompt title depends-on parent spawned-by cwd max-attempts attrs
-           mode backend reap resume]}]
+           mode backend reap resume serves]}]
   (when (str/blank? prompt)
     (fail! "Run :prompt must be non-blank" {}))
   (let [resolved (resolve-harness (or harness (fail! "Run :harness is required" {})))]
@@ -1614,10 +1637,13 @@
     (doseq [parent-id parent-ids]
       (when-not (api/show (rt) parent-id)
         (fail! "Run parent strand not found" {:id parent-id})))
+    (when (and serves (not (api/show (rt) serves)))
+      (fail! "Run :serves target not found" {:id serves}))
     (let [run (api/add (rt) {:title (or title (truncate prompt 72))
                              :attributes (merge attrs reserved)
                              :edges (cond-> (mapv (fn [dep] {:type "depends-on" :to dep}) (distinct (or depends-on [])))
-                                      resume (conj {:type "resumes" :to resume}))})]
+                                      resume (conj {:type "resumes" :to resume})
+                                      serves (conj {:type "serves" :to serves}))})]
       (doseq [parent-id parent-ids]
         (api/update (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
       run)))
@@ -1641,13 +1667,110 @@
            {}
            (incoming-edges-fn (rt) (vec run-ids) "parent-of"))))
 
+(defn- serving-targets-by-run
+  "Map run-id -> its outgoing `serves` target from one bulk outgoing-edge fetch,
+  so summarising many runs resolves serving with a single query instead of one
+  per run. A run serves at most one target."
+  [run-ids]
+  (reduce (fn [m {:keys [from_strand_id to_strand_id]}]
+            (assoc m from_strand_id to_strand_id))
+          {}
+          (graph/outgoing-edges (rt) (vec run-ids) "serves")))
+
 (defn- run-for-target
-  "Return the delegated target for `run` given its parent-of source ids,
-  excluding spawned-by provenance."
+  "Return the run's serving target: the target of its one outgoing `serves`
+  edge, else nil. Serving is the delegation relation — a read-only helper
+  carries `parent-of` placement only, no `serves` edge, so this is nil for it."
+  [run]
+  (first (map :to_strand_id (graph/outgoing-edges (rt) [(:id run)] "serves"))))
+
+(defn runs-serving
+  "Runs currently serving strand `target-id`: those with a `serves` edge to it
+  that have not been superseded. This is the C5 resolution rule — its unique
+  element is the current run serving the target. A run is superseded when it
+  carries an incoming `supersedes` edge, equivalently `agent-run/phase
+  \"superseded\"`; `supersede-and-respawn!` writes edge and phase together so the
+  two criteria stay in lockstep. Read-only helpers carry `parent-of` placement
+  with no `serves` edge, so they never appear here."
+  [target-id]
+  (let [run-ids (mapv :from_strand_id (graph/incoming-edges (rt) [target-id] "serves"))
+        superseded-ids (set (map :to_strand_id (graph/incoming-edges (rt) run-ids "supersedes")))]
+    (->> run-ids
+         (remove superseded-ids)
+         (map #(api/show (rt) %))
+         (remove #(= "superseded" (sattr % "phase"))))))
+
+(defn- helper-parent
+  "Return a helper run's structural target: its `parent-of` parent (from
+  `parents`, the run's parent-of source ids), excluding `spawned-by` provenance.
+  Helpers carry no `serves` edge, so `spawn --for X` still reads \"for X\" off
+  placement."
   [run parents]
-  (or (attr run :gate/step)
-      (let [spawned-by (sattr run "spawned-by")]
-        (first (remove #(= spawned-by %) parents)))))
+  (let [spawned-by (sattr run "spawned-by")]
+    (first (remove #(= spawned-by %) parents))))
+
+(defn supersede-and-respawn!
+  "Succeed a dead run `old-run-id` with a fresh successor — the sole succession
+  path in the engine (PROP-Aep-001.C4). Preserved from the predecessor, engine
+  owned: its `serves` target (the successor now serves it), its structural
+  `parent-of` placement (the served target for serving runs, the `--for`
+  placement for helpers — a serving run carries both edges, C1), its
+  `depends-on` edges, its `spawned-by` provenance (the parent-of placement plus
+  the `agent-run/spawned-by` attr), and its execution shape (`agent-run/mode`/
+  `backend`/`reap` and the interactive completion target for interactive runs,
+  `agent-run/max-attempts` always). `:prompt` and `:harness` come from the
+  caller, `:cwd` too (else the predecessor's). `:carry-attrs` layers spool-owned
+  structural attrs on top — the primitive stays ignorant of the delegation
+  vocabulary.
+
+  The successor is fresh: a new run id and strand, `agent-run/phase \"pending\"`,
+  no execution residue. `:continuity` (default `:fresh`) severs any session;
+  `:resume` continues the predecessor's session by stamping `:resume` on the
+  spawn (a `resumes` edge plus `agent-run/resumes`, validated by the resume
+  machinery at launch), so `resumes` and `supersedes` stay distinct edges.
+
+  Lineage is recorded in the same call: the predecessor is closed
+  `agent-run/phase \"superseded\"`, and the successor gains a `supersedes` edge
+  to it (successor --supersedes--> predecessor, the catalog direction) plus an
+  `agent-run/supersedes` attr naming it. `runs-serving` keys on the `serves`
+  edge and the absence of an incoming `supersedes` edge, which the `superseded`
+  phase mirrors because this call writes edge and phase together. Returns the
+  successor run strand."
+  [old-run-id {:keys [prompt harness cwd carry-attrs continuity]
+               :or {continuity :fresh}}]
+  (when-not (contains? #{:fresh :resume} continuity)
+    (fail! "supersede-and-respawn! :continuity must be :fresh or :resume"
+           {:run old-run-id :continuity continuity}))
+  (let [predecessor (or (api/show (rt) old-run-id)
+                        (fail! "Supersede predecessor not found" {:run old-run-id}))
+        interactive? (interactive? predecessor)
+        served-target (run-for-target predecessor)
+        placement (or served-target
+                      (helper-parent predecessor (parent-of-sources old-run-id)))
+        deps (mapv :to_strand_id (graph/outgoing-edges (rt) [old-run-id] "depends-on"))
+        successor (spawn-run!
+                   (cond-> {:harness harness
+                            :prompt prompt
+                            :title (:title predecessor)
+                            :cwd (or cwd (sattr predecessor "cwd"))
+                            :depends-on deps}
+                     placement (assoc :parent placement)
+                     served-target (assoc :serves served-target)
+                     (sattr predecessor "spawned-by") (assoc :spawned-by (sattr predecessor "spawned-by"))
+                     (sattr predecessor "max-attempts") (assoc :max-attempts (sattr predecessor "max-attempts"))
+                     interactive? (assoc :mode :interactive :backend (sattr predecessor "backend"))
+                     (and interactive? (sattr predecessor "reap")) (assoc :reap (sattr predecessor "reap"))
+                     (and interactive? (sattr predecessor "for")) (assoc :parent (sattr predecessor "for"))
+                     (= :resume continuity) (assoc :resume old-run-id)
+                     (seq carry-attrs) (assoc :attrs carry-attrs)))]
+    ;; Close the predecessor and record lineage only once the successor exists,
+    ;; so a spawn that throws (resume validation, missing target) leaves the
+    ;; predecessor untouched rather than half-succeeded.
+    (api/update (rt) old-run-id {:state "closed" :attributes {"agent-run/phase" "superseded"}})
+    (api/update (rt) (:id successor)
+                {:attributes {"agent-run/supersedes" old-run-id}
+                 :edges [{:type "supersedes" :to old-run-id}]})
+    successor))
 
 (defn- attach-hint
   "Render the backend :attach op over the run's stored handle as the human
@@ -1667,11 +1790,15 @@
 (defn run-summary
   "Project a run strand into the compact summary shape the op surface returns.
 
-  Pass `parents` (the run's parent-of source ids) to reuse a bulk fetch; when
-  omitted a single indexed lookup resolves them."
-  ([run] (run-summary run (parent-of-sources (:id run))))
-  ([run parents]
-   (let [target (run-for-target run parents)
+  `:for` resolves serving first: a serving run reads its `serves`-edge target; a
+  helper (`parent-of` only) falls back to its structural parent, so `spawn --for
+  X` still shows the helper \"for X\". Pass `parents` (the run's parent-of source
+  ids) and `served-target` (its `serves` target) to reuse bulk fetches; when
+  omitted single indexed lookups resolve them."
+  ([run] (run-summary run (parent-of-sources (:id run)) (run-for-target run)))
+  ([run parents] (run-summary run parents (run-for-target run)))
+  ([run parents served-target]
+   (let [target (or served-target (helper-parent run parents))
          base (cond-> {:id (:id run)
                        :title (:title run)
                        :state (:state run)
@@ -1703,21 +1830,22 @@
    (let [run-strands (api/list (rt)
                                (if active [:and [:= :state "active"] run-query] run-query)
                                {})
-         ;; A run satisfies a --for filter two ways: a structural parent-of edge
-         ;; from the target, or gate/step provenance stamped on the run itself
-         ;; (subagent-executor-delegated runs carry no parent-of edge — subagent.md §2). Narrow
-         ;; to both up front (one indexed edge lookup plus a bulk attr check on the
-         ;; already-loaded run strands) rather than summarising every run.
+         ;; A run satisfies a --for filter two ways: a serving run has an
+         ;; incoming `serves` edge from the target, and a helper has a structural
+         ;; `parent-of` edge from it. Narrow to the union up front (two indexed
+         ;; edge lookups) rather than summarising every run.
          run-strands (if for
                        (let [children (set (map :to_strand_id
-                                                (graph/outgoing-edges (rt) [for] "parent-of")))]
-                         (filterv (fn [run]
-                                    (or (children (:id run))
-                                        (= for (attr run :gate/step))))
-                                  run-strands))
+                                                (graph/outgoing-edges (rt) [for] "parent-of")))
+                             servers (set (map :from_strand_id
+                                               (graph/incoming-edges (rt) [for] "serves")))
+                             relevant (into children servers)]
+                         (filterv #(relevant (:id %)) run-strands))
                        run-strands)
-         parents (parents-by-run (mapv :id run-strands) incoming-edges-fn)
-         summaries (mapv #(run-summary % (get parents (:id %) [])) run-strands)]
+         run-ids (mapv :id run-strands)
+         parents (parents-by-run run-ids incoming-edges-fn)
+         serving (serving-targets-by-run run-ids)
+         summaries (mapv #(run-summary % (get parents (:id %) []) (get serving (:id %))) run-strands)]
       (if for
         (filterv #(= for (:for %)) summaries)
         summaries))))
