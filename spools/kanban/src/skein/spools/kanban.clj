@@ -10,11 +10,10 @@
   lanes and `kanban next`.
 
   Cards are work roots: claiming stamps `owner`/`branch`/`worktree`, and
-  plans, devflow runs, and task DAGs hang beneath the card with `parent-of`
-  edges — the kanban spool complements those workflows, it does not replace
-  them. Notes and handovers are closed child note strands, so a cold agent
-  can self-discover in-flight work: `kanban board` -> `kanban card <id>` ->
-  latest handover."
+  execution strands hang beneath the card with `parent-of` edges — the kanban
+  spool complements the engines that produce them, it does not replace them. Notes are closed child note strands, so a cold agent can
+  self-discover in-flight work: `kanban board` -> `kanban card <id>` ->
+  the doing-task and its latest note."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.current.alpha :as current]
@@ -31,7 +30,7 @@
 (def ^:private type-attr :kanban/type)
 (def ^:private priority-attr :kanban/priority)
 (def ^:private note-attr :kanban/note)
-(def ^:private handover-attr :kanban/handover)
+(def ^:private task-attr :kanban/task)
 
 (def ^:private addable-statuses #{"pending" "refinement"})
 (def ^:private active-lanes #{"refinement" "pending" "claimed" "in_review"})
@@ -133,6 +132,17 @@
   (let [strand (card-strand id)]
     (when-not (= "epic" (card-type strand))
       (throw (ex-info "Strand is not an epic card" {:id id :type (card-type strand)})))
+    strand))
+
+(defn- feature-strand
+  "Return id's feature card strand, failing loudly for non-feature cards.
+
+  Only features bear tasks; an epic parent fails here rather than silently
+  parenting a task under the wrong tier."
+  [id]
+  (let [strand (card-strand id)]
+    (when-not (= "feature" (card-type strand))
+      (throw (ex-info "Strand is not a feature card" {:id id :type (card-type strand)})))
     strand))
 
 (defn add!
@@ -321,26 +331,128 @@
        :card (select-keys updated [:id :title :state :attributes])})))
 
 ;; ---------------------------------------------------------------------------
-;; notes and handovers
+;; task tier: execution strands under a feature card
+;; ---------------------------------------------------------------------------
+
+(defn- task-strand?
+  "Return true when strand is a kanban task."
+  [strand]
+  (= "true" (attr-value strand task-attr)))
+
+(defn- feature-tasks
+  "Return a feature card's direct `parent-of` task strands, sorted by id.
+
+  Closed tasks are kept (they read as `done`); only the marker attr selects a
+  task, so non-task children (plans, reviews, notes) never leak in."
+  [rt feature-id]
+  (let [task-ids (mapv :to_strand_id (graph/outgoing-edges rt [feature-id] "parent-of"))]
+    (->> (graph/strands-by-ids rt task-ids)
+         (filter task-strand?)
+         (sort-by :id)
+         vec)))
+
+(defn- derive-task-status
+  "Derive a task's status from core graph state and the core `owner` attr only.
+
+  `dep-states` is the seq of `:state` values of the task's `depends-on` targets.
+  Reads no execution-engine vocabulary: `done` on a closed strand,
+  `blocked` while any dependency is unclosed, then `doing`/`ready` split on
+  whether an `owner` is stamped."
+  [task dep-states]
+  (cond
+    (= "closed" (:state task)) "done"
+    (some #(not= "closed" %) dep-states) "blocked"
+    (some? (attr-value task :owner)) "doing"
+    :else "ready"))
+
+(defn- compact-task
+  "Return the compact task shape used in `task list` output."
+  [strand]
+  (cond-> {:id (:id strand)
+           :title (:title strand)
+           :state (:state strand)}
+    (attr-value strand :owner) (assoc :owner (attr-value strand :owner))
+    (attr-value strand :body) (assoc :body (attr-value strand :body))))
+
+(defn- tasks-with-status
+  "Return compact tasks decorated with their derived status.
+
+  Batches the `depends-on` frontier: one edge lookup across every task, one
+  state lookup across every dependency, so status derives without a per-task
+  round trip."
+  [rt tasks]
+  (let [dep-edges (graph/outgoing-edges rt (mapv :id tasks) "depends-on")
+        target-state (into {}
+                           (map (juxt :id :state))
+                           (graph/strands-by-ids rt (into [] (map :to_strand_id) dep-edges)))
+        deps-by-task (reduce (fn [m {:keys [from_strand_id to_strand_id]}]
+                               (update m from_strand_id (fnil conj []) to_strand_id))
+                             {} dep-edges)]
+    (mapv (fn [task]
+            (assoc (compact-task task)
+                   :status (derive-task-status
+                            task
+                            (map target-state (get deps-by-task (:id task))))))
+          tasks)))
+
+(defn task-add!
+  "Create a task strand under a feature card via a `parent-of` edge.
+
+  `--depends-on <id>` is repeatable and lays the same `depends-on` edges that
+  are the concurrency DAG and drive the derived `blocked`/`ready` split; task
+  status is never stored."
+  [feature-id title flags]
+  (let [feature (feature-strand (require-non-blank! :feature feature-id))
+        title (require-non-blank! :title title)
+        rt (current/runtime)
+        deps (get flags "--depends-on")
+        task (api/add rt {:title title
+                          :attributes (cond-> {task-attr "true"
+                                               :kind "task"}
+                                        (get flags "--body") (assoc :body (get flags "--body")))})]
+    (api/update rt (:id feature) {:edges [{:type "parent-of" :to (:id task)}]})
+    (when (seq deps)
+      (api/update rt (:id task) {:edges (mapv (fn [dep] {:type "depends-on" :to dep}) deps)}))
+    {:operation "kanban task add"
+     :feature (:id feature)
+     :task (select-keys (api/show rt (:id task)) [:id :title :state :attributes])}))
+
+(defn task-list
+  "Project a feature card's tasks with their derived statuses."
+  [feature-id]
+  (let [rt (current/runtime)
+        feature (feature-strand (require-non-blank! :feature feature-id))]
+    {:operation "kanban task list"
+     :feature (:id feature)
+     :tasks (tasks-with-status rt (feature-tasks rt (:id feature)))}))
+
+(defn task-op
+  "Dispatch a parsed `kanban task ...` action, failing loudly on an unknown one."
+  [{:keys [action feature title]} flags]
+  (case action
+    "add" (task-add! feature (str/join " " title) flags)
+    "list" (task-list feature)
+    (throw (ex-info "kanban task action must be add or list"
+                    {:action action :allowed ["add" "list"]}))))
+
+;; ---------------------------------------------------------------------------
+;; notes
 ;; ---------------------------------------------------------------------------
 
 (defn note!
-  "Append a note (or `--handover` note) to a card via the blessed notes relation.
+  "Append a note to a card via the blessed notes relation.
 
   The note rides the shared `notes` edge (`skein.api.notes.alpha/note!`) with
-  `kanban/note`, `kind`, and optional `kanban/handover`/`author` as decorating
-  attrs, so concurrent agents never race a read-merge-write cycle and every note
-  keeps its own timestamp and author. A handover note is the crash/stop
-  contract: record what is done, what is next, validation state, and gotchas so
-  any agent can resume from `kanban card <id>` alone."
+  `kanban/note`, `kind`, and optional `author` as decorating attrs, so
+  concurrent agents never race a read-merge-write cycle and every note keeps
+  its own timestamp and author. Note as you go — a resuming agent reads the
+  doing-task and its latest note from `kanban card <id>` alone."
   [id text flags]
   (let [card (card-strand (require-non-blank! :id id))
         text (require-non-blank! :text text)
-        handover? (boolean (get flags "--handover"))
         rt (current/runtime)
         decorating (cond-> {note-attr "true"
                             :kind "note"}
-                     handover? (assoc handover-attr "true")
                      (get flags "--author") (assoc :author (get flags "--author")))
         {note-id :id} (notes/note! rt (:id card) text decorating)
         note (api/show rt note-id)]
@@ -354,8 +466,7 @@
   (cond-> {:id (:id strand)
            :title (:title strand)
            :body (attr-value strand :note/text)
-           :created_at (:created_at strand)
-           :handover (= "true" (attr-value strand handover-attr))}
+           :created_at (:created_at strand)}
     (attr-value strand :author) (assoc :author (attr-value strand :author))))
 
 (defn- summarize-strand
@@ -408,8 +519,10 @@
   "Return the card's notes and its parent-of work strands.
 
   Notes source from the card's incoming `notes` edges (the blessed note
-  relation), newest first; work is the card's `parent-of` subgraph. The two
-  relations are disjoint, so notes no longer overload `parent-of`."
+  relation), newest first; work is the card's `parent-of` subgraph. Notes and
+  tasks both ride `parent-of` but own their own projections (`:notes` and the
+  derived-status `:tasks` lane), so both are split out of the generic work set
+  — task status has one source of truth in `:tasks`."
   [rt card]
   (let [note-ids (mapv :from_strand_id (graph/incoming-edges rt [(:id card)] "notes"))
         notes (->> (graph/strands-by-ids rt note-ids)
@@ -420,15 +533,17 @@
         work (->> strands
                   (remove #(= (:id card) (:id %)))
                   (remove note-strand?)
+                  (remove task-strand?)
                   (sort-by :id)
                   vec)]
     {:notes notes :work work}))
 
 (defn card-view
-  "Return one card joined to its notes, latest handover, work, and frontier.
+  "Return one card joined to its notes, tasks, work, and frontier.
 
   This is the resume entry point: everything an agent needs to continue a
-  card lives here."
+  card lives here. `:tasks` projects the feature card's child tasks with the
+  four derived statuses (empty for cards that carry no task tier)."
   [id]
   (let [rt (current/runtime)
         card (card-strand (require-non-blank! :id id))
@@ -438,7 +553,7 @@
         ready (filterv #(contains? work-ids (:id %)) (api/ready rt))]
     {:operation "kanban card"
      :card (select-keys card [:id :title :state :attributes :created_at :updated_at])
-     :latest-handover (some->> notes (filter #(= "true" (attr-value % handover-attr))) first compact-note)
+     :tasks (tasks-with-status rt (feature-tasks rt (:id card)))
      :notes (mapv compact-note notes)
      :active-work (mapv summarize-strand active-work)
      :ready (mapv summarize-strand ready)
@@ -485,13 +600,15 @@
                          (map (fn [edge] [(:to_strand_id edge) (:id epic)]))))))
         epics))
 
-(defn- latest-handover-for
-  "Return the compact latest handover note for a card, or nil."
+(defn- doing-task-for
+  "Return the compact derived-`doing` task for a card, or nil.
+
+  The doing task is the board's live resume signal: the first active,
+  deps-met, owned task under the feature card."
   [rt card]
-  (some->> (:notes (card-subtree rt card))
-           (filter #(= "true" (attr-value % handover-attr)))
-           first
-           compact-note))
+  (some->> (tasks-with-status rt (feature-tasks rt (:id card)))
+           (filter #(= "doing" (:status %)))
+           first))
 
 (defn- needs-review-entries
   "Return review-frontier entries across review-relevant feature cards.
@@ -518,8 +635,8 @@
 (defn board
   "Return the grouped board snapshot: epics, feature lanes, closed count.
 
-  Claimed cards carry their latest handover so a cold agent can see in one
-  call who is working where and how to pick up interrupted work.
+  Claimed and in-review cards carry their doing-task so a cold agent can see in
+  one call who is working where and how to pick up interrupted work.
   `:needs-review` aggregates the human-review frontier across claimed and
   in-review cards."
   []
@@ -550,13 +667,13 @@
              :pending (lane "pending")
              :claimed (mapv (fn [card]
                               (cond-> (with-epic card)
-                                (latest-handover-for rt card)
-                                (assoc :latest-handover (latest-handover-for rt card))))
+                                (doing-task-for rt card)
+                                (assoc :doing-task (doing-task-for rt card))))
                             (by-priority claimed-features))
              :in_review (mapv (fn [card]
                                 (cond-> (with-epic card)
-                                  (latest-handover-for rt card)
-                                  (assoc :latest-handover (latest-handover-for rt card))))
+                                  (doing-task-for rt card)
+                                  (assoc :doing-task (doing-task-for rt card))))
                               (by-priority review-features))
              :needs-review (needs-review-entries rt (concat claimed-features review-features))
              :closed {:count (count (filter #(= "closed" (:state %)) all))}}
@@ -594,13 +711,20 @@
           (mapv row-fn entries)
           ["  (none)"])))
 
-(defn- handover-line
-  "Return the indented latest-handover row for a claimed card, or nil."
-  [{:keys [latest-handover]}]
-  (when latest-handover
+(defn- doing-task-line
+  "Return the indented doing-task row for a claimed/in-review card, or nil."
+  [{:keys [doing-task]}]
+  (when doing-task
     (str "         " (clip (- board-width 9)
-                           (str (:created_at latest-handover) "  "
-                                (first (str/split-lines (or (:body latest-handover) ""))))))))
+                           (str "doing: " (:title doing-task))))))
+
+(defn- wip-row
+  "Return the ASCII rows for a claimed/in-review card: the card line plus its
+  doing-task signal line when present."
+  [card]
+  (->> [(card-line card) (doing-task-line card)]
+       (remove nil?)
+       (str/join "\n")))
 
 (defn- review-line
   "Return one ASCII row for a needs-review entry."
@@ -620,17 +744,9 @@
           [""]
           (lane-lines "PENDING" pending card-line)
           [""]
-          (lane-lines "CLAIMED / WIP" claimed
-                      (fn [card]
-                        (if-let [handover (handover-line card)]
-                          (str (card-line card) "\n" handover)
-                          (card-line card))))
+          (lane-lines "CLAIMED / WIP" claimed wip-row)
           [""]
-          (lane-lines "IN REVIEW" in_review
-                      (fn [card]
-                        (if-let [handover (handover-line card)]
-                          (str (card-line card) "\n" handover)
-                          (card-line card))))
+          (lane-lines "IN REVIEW" in_review wip-row)
           [""]
           (lane-lines "NEEDS REVIEW" needs-review review-line)
           (when (seq unknown-status)
@@ -661,20 +777,21 @@
                 status-attr "refinement|pending|claimed|in_review|<outcome>"
                 priority-attr "p1|p2|p3|p4 (default p3); orders lanes and `kanban next`"
                 note-attr "true on note strands (closed notes-relation children of a card)"
-                handover-attr "true on handover notes"
+                task-attr "true on task strands (parent-of children of a feature card; status derived)"
                 :kanban/source "optional path or URL for design context"
                 :owner "claimant, required at claim"
                 :branch "work branch, required at claim"
                 :worktree "optional worktree path"}
    :convention (fmt/reflow "
-                 |The card is the work root: claim stamps owner/branch, and plans, devflow runs, and
-                 |task DAGs hang under it with parent-of. Kanban complements devflow and delegation;
-                 |it never tracks agent-run runs directly.")
-   :handover-contract (fmt/reflow "
-                        |Before stopping (or at any interruption risk), write `kanban note <id> --handover`
-                        |covering: what is done, what is next, validation state, gotchas, and where the
-                        |work lives (branch/worktree). Resume path for a cold agent: `kanban board` ->
-                        |`kanban card <id>` -> latest handover.")
+                 |The card is the work root: claim stamps owner/branch, and execution strands hang
+                 |under it with parent-of. Kanban complements the engines that produce them; it never
+                 |tracks their runs directly.")
+   :note-discipline (fmt/reflow "
+                      |Note as you go: `kanban note <id> \"...\" --author <name>` records each
+                      |significant decision, step, and gotcha while the work is fresh. Tasks are the
+                      |resume point — a cold agent resumes from the doing-task and its latest note
+                      |via `kanban board` -> `kanban card <id>`. Even with no notes yet, the
+                      |doing-task's body, deps, and lane name the next move.")
    :discovery {:help "strand help kanban"
                :prime "strand kanban prime"
                :batch-pattern "strand pattern explain kanban-batch"}
@@ -687,7 +804,8 @@
               {:verb "priority" :purpose "Change a card's p1..p4 ordering priority."}
               {:verb "promote" :purpose "Move a refinement card into the pending lane."}
               {:verb "claim" :purpose "Move a card into claimed and stamp owner/branch/worktree."}
-              {:verb "note" :purpose "Append an immutable card note, optionally marked as handover."}
+              {:verb "note" :purpose "Append an immutable card note."}
+              {:verb "task" :purpose "Add or list a feature card's tasks with their derived statuses."}
               {:verb "review" :purpose "Move a claimed card into in_review."}
               {:verb "rework" :purpose "Move an in_review card back to claimed."}
               {:verb "finish" :purpose "Close a card with an explicit outcome."}
@@ -706,7 +824,7 @@
   point here (`strand kanban prime`) rather than duplicating conventions that
   then drift from the spool. A superset of `about` — it reuses the same lane,
   attribute, command, and pattern surface and adds the working agreement,
-  pick-up flow, notes/handover discipline, adjacent-work awareness, and branch
+  pick-up flow, note discipline, adjacent-work awareness, and branch
   visibility that an agent needs before touching the board."
   []
   (assoc (about)
@@ -719,8 +837,8 @@
                |Every agent working directly with the user works under a claimed card — claim
                |before starting user work.
                |
-               |Kanban complements devflow, agent plans, and delegation; those hang beneath a
-               |card via `parent-of`. Kanban never tracks agent-run runs directly.
+               |Execution strands hang beneath a card via `parent-of` — kanban complements the
+               |engines that produce them, it never tracks their runs directly.
                |
                |Half-formed ideas go to the refinement lane (`kanban add \"...\" --status
                |refinement`); they stay inert until a human `kanban promote`s them.")
@@ -734,23 +852,22 @@
                |<path>]` — owner and branch are mandatory; the claim is what makes branch work
                |discoverable.
                |
-               |Create feature plans, devflow runs, or task DAGs under the card via `parent-of`.
+               |Create the feature's execution strands under the card via `parent-of`.
                |The card is the parent/audit root; child strands are the executable work.
                |
                |`kanban review <id>` when work enters review, `kanban rework <id>` when it needs changes, and `kanban finish <id> [--outcome done|abandoned]` after merge, archive, or
                |explicit abandonment.")
-         :notes-and-handovers
+         :note-discipline
          (fmt/fill "
-               |Record significant decisions as you go: `kanban note <id> \"...\" --author
-               |<name>`.
+               |Note as you go: `kanban note <id> \"...\" --author <name>` records each
+               |significant decision, step, and gotcha while the work is fresh — do not save it
+               |for a stopping point.
                |
-               |Always leave a `--handover` note before stopping or at any interruption risk,
-               |covering: what is done, what is next, validation state, gotchas, and where the
-               |work lives (branch/worktree).
-               |
-               |Crash recovery is self-discovering: `kanban board` shows claimed and in-review
-               |cards with their latest handover; `kanban card <id>` returns the card, notes,
-               |active work, and ready frontier.")
+               |Tasks are the resume point. A cold agent resumes from the doing-task and its
+               |latest note: `kanban board` shows claimed and in-review cards with their
+               |doing-task; `kanban card <id>` returns the card, its tasks, notes, active work,
+               |and ready frontier. Even with no notes yet, the doing-task's body, deps, and
+               |lane name the next move.")
          :staying-aware
          (fmt/fill "
                |`kanban board` returns `needs-review`: the human-review frontier aggregated
@@ -768,7 +885,7 @@
                |Every piece of work on a branch has exactly one active work root strand stamped
                |`branch` (plus `owner`, and `worktree` when one exists), with execution strands
                |beneath it via `parent-of`. `kanban claim` stamps card roots; for non-card roots
-               |(ad hoc agent-plan roots, coordination strands) stamp them yourself: `strand
+               |(ad hoc execution roots, coordination strands) stamp them yourself: `strand
                |update <root-id> --attr branch=<branch> --attr owner=<name>`. Children are
                |reachable from the root and need no `branch` attr of their own.")))
 
@@ -804,14 +921,22 @@
                      :branch {:doc "Work branch (required by handler)."}
                      :worktree {:doc "Optional worktree path."}}
              :positionals [{:name :id :required? true :doc "Kanban card id."}]}
-    "note" {:doc "Append a note or handover as a closed child strand."
-            :flags {:author {:doc "Note author."}
-                    :handover {:type :boolean :doc "Mark this note as a handover."}}
+    "note" {:doc "Append a note as a closed child strand."
+            :flags {:author {:doc "Note author."}}
             :positionals [{:name :id :required? true :doc "Kanban card id."}
                           {:name :text
                            :required? true
                            :variadic? true
                            :doc "Note text words."}]}
+    "task" {:doc "Manage a feature card's tasks: `add <feature> <title...>` or `list <feature>`."
+            :flags {:body {:doc "Longer task context (add only)."}
+                    :depends-on {:repeat? true
+                                 :doc "Task/strand id this task depends on (repeatable; add only)."}}
+            :positionals [{:name :action :required? true :doc "Task action: add or list."}
+                          {:name :feature :required? true :doc "Feature card id the tasks hang under."}
+                          {:name :title
+                           :variadic? true
+                           :doc "Task title words (add only)."}]}
     "review" {:doc "Move a claimed card into the in_review lane."
               :positionals [{:name :id :required? true :doc "Kanban card id."}]}
     "rework" {:doc "Move an in_review card back to claimed for rework."
@@ -827,7 +952,7 @@
         (keep (fn [[k v]]
                 (when (and (not= k :subcommand)
                            (some? v)
-                           (not (contains? #{:id :title :text} k)))
+                           (not (contains? #{:id :title :text :action :feature} k)))
                   [(str "--" (name k)) v])))
         args))
 
@@ -845,6 +970,7 @@
       "priority" (set-priority! (:id args) (:priority args))
       "promote" (promote! (:id args))
       "claim" (claim! (:id args) flags)
+      "task" (task-op args flags)
       "review" (request-review! (:id args))
       "rework" (rework! (:id args))
       "note" (note! (:id args) (str/join " " (:text args)) flags)
@@ -860,7 +986,7 @@
                                 :name "kanban"
                                 :owner :skein/spools-kanban
                                 :keys ["kanban/card" "kanban/status" "kanban/type"
-                                       "kanban/priority" "kanban/source"]
+                                       "kanban/priority" "kanban/source" "kanban/task"]
                                 :doc "Kanban card state attributes written by skein.spools.kanban/add!."})
      :ops [(api/register-op! rt 'kanban
                              {:doc "Manage the user-facing kanban work board. Run `strand kanban about` for the convention manual."

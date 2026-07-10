@@ -127,6 +127,32 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"integer"
                               (agents/agent-op {:op/argv ["await" "id" "--timeout-secs" "soon"]})))))))
 
+(deftest agent-note-attr-decoration-round-trips
+  (with-agents
+    (fn [rt]
+      (testing "--attr decorates the note strand and reads back intact beside --by"
+        (let [target (api/add rt {:title "note target"})]
+          (agents/agent-op {:op/argv ["note" (:id target) "decision recorded"
+                                      "--attr" "note/kind=decision"
+                                      "--attr" "review/pass=p1"
+                                      "--by" "run-x"]})
+          (let [[note] (agents/agent-op {:op/argv ["notes" (:id target)]})
+                strand (api/show rt (:id note))]
+            (is (= "decision recorded" (:note note)))
+            (is (= "run-x" (:by note)))
+            (is (= "decision" (get-in strand [:attributes :note/kind])))
+            (is (= "p1" (get-in strand [:attributes :review/pass]))))))
+      (testing "a --attr spec without key=value fails loudly"
+        (let [target (api/add rt {:title "bad attr target"})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Malformed --attr"
+                                (agents/agent-op {:op/argv ["note" (:id target) "x" "--attr" "novalue"]})))))
+      (testing "a repeated --attr key fails loudly, matching strand note's contract"
+        (let [target (api/add rt {:title "dup attr target"})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate attribute key in --attr"
+                                (agents/agent-op {:op/argv ["note" (:id target) "x"
+                                                            "--attr" "note/kind=a"
+                                                            "--attr" "note/kind=b"]}))))))))
+
 (deftest agent-spend-aggregates-recorded-usage
   (with-agents
     (fn [rt]
@@ -369,9 +395,9 @@
             (is (= v (get-in run [:attributes (keyword k)])))))
         (testing "the pass tag threads notes together and separates rounds"
           (is (str/includes? (get (first (:reviewers specs)) :prompt)
-                             (str "[" (:review-pass review) "]")))
+                             (str "--attr review/pass=" (:review-pass review))))
           (is (str/includes? (get-in specs [:synthesizer :prompt])
-                             (str "tagged [" (:review-pass review) "]")))
+                             (str "--attr review/pass=" (:review-pass review))))
           (is (not= (:review-pass (agents/roster-review-specs :composed {:target (:id target)}))
                     (:review-pass (agents/roster-review-specs :composed {:target (:id target)})))
               "each pass mints a distinct tag"))
@@ -445,11 +471,11 @@
                            "agent notes s1"))
         (is (str/includes? (#'agents/read-the-board-fragment {:view :strand :form :continuation :board-id "s1"})
                            "The board is strand s1")))
-      (testing "post-with-tag prefixes the tag and omits it when nil"
+      (testing "post-with-tag threads the tag as a review/pass decoration attr and omits it when nil"
         (is (str/includes? (#'agents/post-with-tag-fragment {:board-id "s1" :tag "pass-7"})
-                           "\"[pass-7] <findings>\""))
-        (is (str/includes? (#'agents/post-with-tag-fragment {:board-id "s1" :tag nil})
-                           "\"<findings>\"")))
+                           "--attr review/pass=pass-7"))
+        (is (not (str/includes? (#'agents/post-with-tag-fragment {:board-id "s1" :tag nil})
+                                "--attr review/pass"))))
       (testing "review-prompt is assembled from the shared fragments byte-for-byte"
         (let [prompt (#'agents/review-prompt {:target-id "s1" :contract "C" :note-tag "p1"})]
           (is (str/includes? prompt (#'agents/read-the-board-fragment {:view :strand :board-id "s1"})))
