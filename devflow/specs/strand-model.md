@@ -1,6 +1,6 @@
 # Strand Model
 
-**Document ID:** `SPEC-001` **Status:** Implemented **Last Updated:** 2026-07-09 **Code:** `src/skein/core/db.clj`
+**Document ID:** `SPEC-001` **Status:** Implemented **Last Updated:** 2026-07-10 **Code:** `src/skein/core/db.clj`
 
 ## SPEC-001.P1 Purpose
 
@@ -31,7 +31,7 @@ Attributes are userland strand fields such as priority, owner, estimates, due da
 
 Attribute map keys are Clojure keywords or strings. Keyword keys serialize to their full `namespace/name` text when a namespace is present, and JSON attribute reads keywordize object keys. Namespaced userland vocabularies such as `workflow/*` and `agent-run/*` therefore round-trip without collapsing distinct namespaces onto the same local name.
 
-Attribute namespaces name concepts, not owners. A namespace segment identifies the concept the attribute describes (`agent-run/…`, `review/…`, `panel/…`, `note/…`, `gate/…`), never the spool that happens to write it; ownership is registered in the runtime, not encoded in the key. Names that ride durable strand data or worker prompts must be self-describing compound nouns a cold reader can decode from `strand show` alone; contributor-internalized names — namespaces, directories, local `:as` aliases — may stay short. Third-party spools qualify their attribute namespaces with a project prefix so they never collide with the core vocabulary.
+Attribute namespaces name concepts, not owners. A namespace segment identifies the concept the attribute describes (`agent-run/…`, `review/…`, `panel/…`, `note/…`, `gate/…`), never the spool that happens to write it; ownership is registered in the runtime — the `skein.api.vocab.alpha` registry records which owner declares each namespace — not encoded in the key. Names that ride durable strand data or worker prompts must be self-describing compound nouns a cold reader can decode from `strand show` alone; contributor-internalized names — namespaces, directories, local `:as` aliases — may stay short. Third-party spools qualify their attribute namespaces with a project prefix so they never collide with the core vocabulary; a colliding namespace claim fails loudly at install through the registry's duplicate-owner edge.
 
 Attribute reads have two tiers. The full tier returns every attribute value verbatim. The lean tier returns attribute values whose JSON-encoded UTF-8 byte length exceeds the fixed 1024-byte floor as an omission descriptor instead of the value; values at or below the floor pass through unchanged. Small metadata keys — the keys queries filter on — are therefore never omitted.
 
@@ -53,7 +53,7 @@ The `notes` relation is a core-owned operational edge from a closed note strand 
 
 Self-edges fail for every relation. Writes to declared acyclic relations fail when they introduce a cycle within that same relation. Undeclared annotation relations may form non-self cycles.
 
-The blessed `skein.api.relations.alpha` namespace ships a source-visible advisory catalog of this relation vocabulary for agents, config, and REPL workflows: `catalog` data plus `relation`, `operational-relations`, and `annotation-relations` lookups, each entry carrying the relation's family (operational battery vs behavior-free annotation), direction gloss, declared-acyclicity flag, and help text. It is documentation-only — not a storage allowlist or runtime relation-semantics registry — so relation names outside the catalog remain valid userland annotations. As an `skein.api.*.alpha` namespace it carries accretion-based compatibility within the subnamespace.
+The blessed `skein.api.relations.alpha` namespace ships a source-visible advisory catalog of this relation vocabulary for agents, config, and REPL workflows: `catalog` data plus `relation`, `operational-relations`, and `annotation-relations` lookups, each entry carrying the relation's family (operational battery vs behavior-free annotation), direction gloss, declared-acyclicity flag, and help text. It is documentation-only — not a storage allowlist or runtime relation-semantics registry — so relation names outside the catalog remain valid userland annotations. The `skein.api.vocab.alpha` registry reflects this catalog as owned `:edge` declarations (owner `:skein/core`) so the shipped edge vocabulary has one source and never forks. As an `skein.api.*.alpha` namespace it carries accretion-based compatibility within the subnamespace.
 
 ## SPEC-001.P6 Batch graph mutation
 
