@@ -1,11 +1,3 @@
-# Table of contents
--  [`skein.spools.cron`](#skein.spools.cron)  - Generic timer/scheduling engine for the Skein weaver.
-    -  [`deregister!`](#skein.spools.cron/deregister!) - Cancel a cron job's pending fire and remove it from <code>runtime</code>.
-    -  [`failures`](#skein.spools.cron/failures) - Return recorded cron failures (seed and execution) for this runtime's weaver lifetime, oldest first.
-    -  [`install!`](#skein.spools.cron/install!) - Activate cron on the current runtime, creating the scheduled executor.
-    -  [`jitter-offset-ms`](#skein.spools.cron/jitter-offset-ms) - Return a uniform jitter offset in the range [-bound-ms, bound-ms].
-    -  [`jobs`](#skein.spools.cron/jobs) - Return the cron jobs registered on <code>runtime</code> as status maps, sorted by id.
-    -  [`register!`](#skein.spools.cron/register!) - Register (or replace) a named cron job on <code>runtime</code>'s scheduled executor.
 
 -----
 # <a name="skein.spools.cron">skein.spools.cron</a>
