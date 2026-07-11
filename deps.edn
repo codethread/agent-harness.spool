@@ -16,12 +16,14 @@
          :extra-deps {io.github.codethread/devflow.spool
                       {:git/url "https://github.com/codethread/devflow.spool.git"
                        :git/sha "e9b28f5db61820b28a1ac1b590cc87e70c835cac"}
-                      ;; kanban is an external spool consumed from a sibling
-                      ;; checkout while codethread/kanban.spool has no remote.
-                      ;; Keep this coordinate synchronized with .skein/spools.edn;
-                      ;; switch both to the same sha-pinned git coordinate once
-                      ;; the repo is published.
-                      io.github.codethread/kanban.spool {:local/root "../kanban.spool"}
+                      ;; kanban is a git-distributed spool. Keep this sha exactly
+                      ;; synchronized with .skein/spools.edn (config_test enforces
+                      ;; the pairing): config_test loads .skein/config.clj
+                      ;; in-process, while the weaver consumes the spools.edn
+                      ;; coordinate.
+                      io.github.codethread/kanban.spool
+                      {:git/url "https://github.com/codethread/kanban.spool.git"
+                       :git/sha "54eea43e3afc50c3f17335d297a74af8d6767704"}
                       ;; Test-only ergonomics: readable nested-map/JSON assertions
                       ;; (match?) and spec-driven property tests (defspec). Kept
                       ;; off the main src/weaver classpath.
