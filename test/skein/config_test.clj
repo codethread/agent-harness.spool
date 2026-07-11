@@ -1,8 +1,9 @@
 (ns skein.config-test
   "Tests for the repo-local .skein config modules (config.clj plus the
-  harnesses.clj and workflows.clj siblings): registration surface, the
-  delegate-pipeline weave pattern, the land workflow, and the devflow op
-  wrappers over skein.spools.devflow."
+  harnesses.clj, workflows.clj, and analytics.clj siblings): registration
+  surface, the delegate-pipeline weave pattern, the land workflow, the
+  devflow op wrappers over skein.spools.devflow, and the feature-costs
+  usage rollup."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -55,9 +56,11 @@
         (load-file ".skein/config.clj")
         (load-file ".skein/harnesses.clj")
         (load-file ".skein/workflows.clj")
+        (load-file ".skein/analytics.clj")
         ((requiring-resolve 'config/install!))
         ((requiring-resolve 'harnesses/install!))
         ((requiring-resolve 'workflows/install!))
+        ((requiring-resolve 'analytics/install!))
         (f rt)
         (finally
           (runtime/stop! rt)
@@ -69,7 +72,8 @@
   [target]
   (.mkdirs (io/file target))
   (doseq [name ["init.clj" "config.clj" "workflows.clj" "harnesses.clj"
-                "attention.clj" "nvd_scan.clj" "reviewers.clj" "spools.edn"]]
+                "attention.clj" "nvd_scan.clj" "reviewers.clj" "analytics.clj"
+                "spools.edn"]]
     (io/copy (io/file ".skein" name) (io/file target name)))
   ;; The shipped spools.edn approves local roots relative to the config dir,
   ;; which does not resolve from a copy. Rewrite it to the repo's canonical
@@ -249,6 +253,8 @@
                     {:name "workflow-runs" :help "strand help workflow-runs"}
                     {:name "current-dags" :help "strand help current-dags"}
                     {:name "carder-report" :help "strand help carder-report"}
+                    {:name "feature-costs" :help "strand help feature-costs"
+                     :purpose "Agent-run cost/usage rollup beneath a work root, as pure data. Registered by .skein/analytics.clj."}
                     {:name "agent" :help "strand help agent" :manual "strand agent about"}
                     {:name "flow-await" :help "strand help flow-await"}
                     {:name "flow-status" :help "strand help flow-status"}
@@ -317,6 +323,78 @@
         (is (= #{"M1" "D1"} (rows "workflow-runs" {})))
         (is (= #{"D1"} (rows "devflow-runs" {})))
         (is (= #{"A1" "A2" "A3" "B1" "R1"} (rows "work" {})))))))
+
+(deftest feature-costs-rolls-up-agent-run-usage-beneath-a-root
+  ;; analytics.clj contract: pure-data rollup of the agent-run usage stamps in
+  ;; a work root's parent-of subtree — rows ordered by start time, totals with
+  ;; wall-clock bounds, per-harness aggregates sorted by cost, and explicit
+  ;; missing-usage ids for runs whose harness recorded nothing.
+  (with-config-runtime
+    (fn [rt]
+      (let [card (api/add rt {:title "Feature card" :state "active"
+                              :attributes {:kanban/card "true"}})
+            run-a (api/add rt {:title "Delegate: implement"
+                               :state "closed"
+                               ;; values stamped as typed JSON, the shape the
+                               ;; shuttle spool writes; the corrupt-usage test
+                               ;; covers the string form
+                               :attributes {:agent-run/run "true"
+                                            :agent-run/harness "build"
+                                            :agent-run/cost-usd 1.25
+                                            :agent-run/tokens-total 1000
+                                            :agent-run/tokens {"input" 800 "output" 200}
+                                            :agent-run/usage-source "session"
+                                            :agent-run/exit-code 0
+                                            :agent-run/started-at "2026-07-10T10:00:00Z"
+                                            :agent-run/finished-at "2026-07-10T10:05:00Z"}})
+            run-b (api/add rt {:title "Review: skeptic"
+                               :state "closed"
+                               :attributes {:agent-run/run "true"
+                                            :agent-run/harness "hard-gpt"
+                                            :agent-run/started-at "2026-07-10T10:06:00Z"
+                                            :agent-run/finished-at "2026-07-10T10:08:30Z"}})
+            note (api/add rt {:title "Not a run" :state "closed"
+                              :attributes {:kind "note"}})]
+        (api/update rt (:id card) {:edges [{:type "parent-of" :to (:id run-a)}
+                                           {:type "parent-of" :to (:id run-b)}
+                                           {:type "parent-of" :to (:id note)}]})
+        (let [result (op! "feature-costs" [(:id card)])]
+          (is (= "feature-costs" (:operation result)))
+          (is (= {:id (:id card) :title "Feature card" :state "active"}
+                 (:root result)))
+          (is (= [(:id run-a) (:id run-b)] (mapv :id (:runs result)))
+              "rows are ordered by start time and exclude non-run strands")
+          (is (= {:runs 2 :runs-with-usage 1 :cost-usd 1.25 :tokens-total 1000
+                  :wall-clock {:started-at "2026-07-10T10:00:00Z"
+                               :finished-at "2026-07-10T10:08:30Z"
+                               :duration-secs 510.0}}
+                 (:totals result)))
+          (is (= [{:harness "build" :runs 1 :runs-with-usage 1
+                   :cost-usd 1.25 :tokens-total 1000}
+                  {:harness "hard-gpt" :runs 1 :runs-with-usage 0
+                   :cost-usd 0.0 :tokens-total 0}]
+                 (:by-harness result))
+              "per-harness rollups sort most expensive first")
+          (is (= [(:id run-b)] (:missing-usage result)))
+          (let [row (first (:runs result))]
+            (is (= 300.0 (:duration-secs row)))
+            (is (zero? (:exit-code row)))
+            (is (= {:input 800 :output 200} (:tokens row))
+                "token breakdown is a keyword-keyed map, not JSON text")))))))
+
+(deftest feature-costs-fails-loudly-on-unknown-root-and-corrupt-usage
+  (with-config-runtime
+    (fn [rt]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"root strand not found"
+                            (op! "feature-costs" ["nope"])))
+      (let [root (api/add rt {:title "Ad hoc root" :state "active" :attributes {}})
+            bad (api/add rt {:title "Corrupt run" :state "closed"
+                             :attributes {:agent-run/run "true"
+                                          :agent-run/cost-usd "not-a-number"}})]
+        (api/update rt (:id root) {:edges [{:type "parent-of" :to (:id bad)}]})
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"malformed agent-run attribute"
+                              (op! "feature-costs" [(:id root)]))
+            "a present but unparseable usage value is corrupt data, not absence")))))
 
 (deftest chime-attention-rules-register-and-fire
   ;; TASK-Srm-009.MI1: through the full startup fixture (which loads attention.clj

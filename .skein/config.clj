@@ -451,6 +451,8 @@
          {:name "workflow-runs" :help "strand help workflow-runs"}
          {:name "current-dags" :help "strand help current-dags"}
          {:name "carder-report" :help "strand help carder-report"}
+         {:name "feature-costs" :help "strand help feature-costs"
+          :purpose "Agent-run cost/usage rollup beneath a work root, as pure data. Registered by .skein/analytics.clj."}
          {:name "agent" :help "strand help agent" :manual "strand agent about"}
          {:name "flow-await" :help "strand help flow-await"}
          {:name "flow-status" :help "strand help flow-status"}

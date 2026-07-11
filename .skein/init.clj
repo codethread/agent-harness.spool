@@ -76,7 +76,8 @@
 ;; harnesses.clj — model seats + routing policy; workflows.clj — hand-authored
 ;; land workflow + delegate-pipeline pattern; attention.clj — chime rules;
 ;; nvd_scan.clj — the scheduled NVD deep-scan cron job; reviewers.clj — the
-;; declarative reviewer roster; config.clj — named queries + the CLI op surface.
+;; declarative reviewer roster; analytics.clj — agent-run cost/usage rollups;
+;; config.clj — named queries + the CLI op surface.
 (runtime-alpha/use! runtime :harnesses
                     {:file "harnesses.clj"
                      :after [:skein/spools-agents]
@@ -125,6 +126,14 @@
                      :after [:skein/spools-ephemeral :skein/spools-workflow :skein/spools-devflow
                              :skein/spools-loom :skein/spools-shuttle :macros/patterns]
                      :call 'config/install!})
+;; Analytics is a read-only rollup surface over agent-run usage stamps; it
+;; only needs the defop macro (macros spool) and the shuttle vocabulary the
+;; runs were stamped with.
+(runtime-alpha/use! runtime :analytics
+                    {:file "analytics.clj"
+                     :after [:skein/spools-shuttle :macros/patterns]
+                     :call 'analytics/install!
+                     :required? true})
 ;; workflows.clj reuses config.clj's public CLI-tail helpers, so it loads after
 ;; the :config module.
 (runtime-alpha/use! runtime :workflows
