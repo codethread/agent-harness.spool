@@ -234,6 +234,7 @@
                         :doc "spools/kanban.md"
                         :purpose "User-facing kanban board: feature/epic cards with refinement/pending/claimed/in_review lanes."}]
               :ops [{:name "kanban" :help "strand help kanban" :manual "strand kanban about"}
+                    {:name "kanban-export" :help "strand help kanban-export"}
                     {:name "branches" :help "strand help branches"}
                     {:name "devflow-start" :help "strand help devflow-start"}
                     {:name "devflow-next" :help "strand help devflow-next"}
