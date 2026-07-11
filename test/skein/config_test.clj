@@ -99,8 +99,6 @@
                           {:local/root (.getCanonicalPath (io/file "spools/delegation"))}
                           'skein.spools/chime
                           {:local/root (.getCanonicalPath (io/file "spools/chime"))}
-                          'skein.spools/kanban
-                          {:local/root (.getCanonicalPath (io/file "spools/kanban"))}
                           'skein.spools/cron
                           {:local/root (.getCanonicalPath (io/file "spools/cron"))}
                           'skein.spools/bench
@@ -112,7 +110,9 @@
                           'skein.macros/macros
                           {:local/root (.getCanonicalPath (io/file ".skein/spools/macros"))}
                           'codethread/devflow
-                          {:local/root (.getCanonicalPath (test-alpha/spool-checkout-root "skein/spools/devflow.clj"))}}}))
+                          {:local/root (.getCanonicalPath (test-alpha/spool-checkout-root "skein/spools/devflow.clj"))}
+                          'codethread/kanban
+                          {:local/root (.getCanonicalPath (test-alpha/spool-checkout-root "skein/spools/kanban.clj"))}}}))
   ;; The shipped config leaves chime's notifier to each developer's personal
   ;; init.local.clj. Bind an inert command through that same overlay hook
   ;; (loaded after init.clj on startup and on every reload) so the test also

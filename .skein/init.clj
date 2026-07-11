@@ -122,10 +122,14 @@
                :after [:skein/spools-chime :skein/spools-shuttle :macros/patterns]
                :call 'attention/install!
                :required? true})
+;; kanban is an external git-distributed spool (codethread/kanban.spool). Its
+;; namespace requires skein.spools.devflow (the `kanban card` devflow join), so
+;; activation guards both approved coordinates and orders after devflow.
 (runtime/use! runtime :skein/spools-kanban
               {:ns 'skein.spools.kanban
-               :spools ['skein.spools/kanban]
+               :spools ['codethread/kanban 'codethread/devflow]
                :call 'skein.spools.kanban/install!
+               :after [:skein/spools-devflow]
                :required? true})
 ;; Cron is a generic weaver timer engine; install! only creates its scheduled
 ;; executor. nvd_scan.clj requires it (for the job's seed/jitter fns), so it

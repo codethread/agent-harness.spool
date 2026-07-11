@@ -122,10 +122,7 @@ nav:
           - Contract: spools/text-search.md
           - Cookbook: spools/text-search.cookbook.md
           - API: spools/text-search.api.md
-      - Kanban Board:
-          - Contract: spools/kanban.md
-          - Cookbook: spools/kanban.cookbook.md
-          - API: spools/kanban.api.md
+      - Kanban Board: spools/kanban.md
       - Agent Runs:
           - Contract: spools/agent-run/README.md
           - Cookbook: spools/agent-run.cookbook.md

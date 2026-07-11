@@ -19,7 +19,6 @@
    {:name "shell" :source "spools/workflow/src/skein/spools/executors/shell.clj" :outfile "spools/executors/shell.api.md"}
    {:name "subagent" :source "spools/agent-run/src/skein/spools/executors/subagent.clj" :outfile "spools/executors/subagent.api.md"}
    {:name "chime" :source "spools/chime/src/skein/spools/chime.clj" :outfile "spools/chime.api.md"}
-   {:name "kanban" :source "spools/kanban/src/skein/spools/kanban.clj" :outfile "spools/kanban.api.md"}
    {:name "cron" :source "spools/cron/src/skein/spools/cron.clj" :outfile "spools/cron.api.md"}
    {:name "bench" :source "spools/bench/src/skein/spools/bench.clj" :outfile "spools/bench.api.md"}])
 
