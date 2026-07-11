@@ -8,7 +8,9 @@
 // pure presentation, so the tool stays a single dependency-free file.
 //
 // Usage: bun scripts/kanban-export/kanban-export.ts <card-id> [--workspace dir] [--out file.html] [--open]
+// Default output is /tmp/kanban-export/kanban-<id>.html.
 
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 type Strand = {
@@ -257,7 +259,10 @@ ${kids(root.id).filter((c) => !isCard(c)).length ? `<ul class="leaves">${kids(ro
 </html>
 `;
 
-const outPath = resolve(opts.out || `kanban-${root.id}.html`);
+// Default output lands in a dedicated /tmp dir (never the working tree) so
+// exports stay throwaway; `make kanban-serve` serves that same directory.
+const outPath = resolve(opts.out || `/tmp/kanban-export/kanban-${root.id}.html`);
+mkdirSync(dirname(outPath), { recursive: true });
 await Bun.write(outPath, html);
 console.error(`wrote ${outPath} (${overall.done}/${overall.total} items done)`);
 if (opts.open) await run(["open", outPath], process.cwd());
