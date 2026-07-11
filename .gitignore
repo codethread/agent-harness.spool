@@ -11,6 +11,7 @@ cli/bin/
 site/
 
 scripts/agent-dash/node_modules/
+scripts/kanban-export/node_modules/
 
 .lsp/
 .clj-kondo/

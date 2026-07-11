@@ -1,4 +1,4 @@
-.PHONY: build install dash api-docs docs-site docs-serve docs-check fmt fmt-check lint lint-go lint-clj lint-splint reflect-check deps-report security-report test-warm test-warm-stop
+.PHONY: build install dash kanban-export api-docs docs-site docs-serve docs-check fmt fmt-check lint lint-go lint-clj lint-splint reflect-check deps-report security-report test-warm test-warm-stop
 
 GO_CLI := ./cli/cmd/strand
 MILL_CLI := ./cli/cmd/mill
@@ -40,6 +40,14 @@ install:
 dash:
 	bun install --cwd scripts/agent-dash --silent
 	bun scripts/agent-dash/index.tsx
+
+# Standalone HTML export of a feature/epic card subtree; polls the strand CLI.
+# Pass the card id as ID and any extra flags (--out, --workspace, --open) as ARGS,
+# e.g. make kanban-export ID=abc12 ARGS='--open'
+kanban-export:
+	@test -n "$(ID)" || { echo "make kanban-export: pass a card id, e.g. make kanban-export ID=abc12 [ARGS='--open']" >&2; exit 2; }
+	bun install --cwd scripts/kanban-export --silent
+	bun scripts/kanban-export/kanban-export.ts $(ID) $(ARGS)
 
 api-docs:
 	@if command -v bb >/dev/null 2>&1; then \
