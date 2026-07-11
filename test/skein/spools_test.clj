@@ -1438,3 +1438,259 @@
                            (constantly {:shape :old :close-fn #(throw (ex-info "boom" {}))}))
       (let [v2 (runtime/spool-state rt ::demo {:version 2} (constantly {:shape :new}))]
         (is (= :new (:shape v2)))))))
+
+(defn- write-empty-lib!
+  "Write a synced-able spool root with a deps.edn but no namespace sources."
+  [config-dir lib-name]
+  (let [root (io/file config-dir "spools" lib-name)]
+    (.mkdirs (io/file root "src"))
+    (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+    root))
+
+(defn- reload-reason [rt coord]
+  (try
+    (spool-sync/reload-synced-spool! rt coord)
+    nil
+    (catch clojure.lang.ExceptionInfo e
+      (:reason (ex-data e)))))
+
+(deftest reload-synced-spool-makes-single-namespace-source-live
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.reload-ns-" suffix))
+            lib (symbol (str "demo/reload-lib-" suffix))
+            root (write-local-lib! config-dir "reload-ns" ns-sym)
+            src-file (io/file root "src" "demo" (str "reload_ns_" suffix ".clj"))]
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/reload-ns"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (let [result (spool-sync/reload-synced-spool! rt lib)]
+          (is (= lib (:coord result)))
+          (is (= (.getCanonicalPath root) (:root result)))
+          (is (= [{:ns ns-sym :file (.getCanonicalPath src-file)}]
+                 (:namespaces result)))
+          (is (= :synced-lib-loaded ((requiring-resolve (symbol (str ns-sym "/marker")))))))))))
+
+(deftest reload-synced-spool-fails-when-coordinate-not-approved
+  (with-runtime
+    (fn [rt _config-dir]
+      (is (= :not-approved (reload-reason rt 'demo/never-approved))))))
+
+(deftest reload-synced-spool-fails-when-coordinate-not-synced
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.unsynced-" suffix))
+            lib (symbol (str "demo/unsynced-lib-" suffix))]
+        (write-local-lib! config-dir "unsynced" ns-sym)
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/unsynced"}}}))
+        (is (= :not-synced (reload-reason rt lib)))))))
+
+(deftest reload-synced-spool-fails-when-sync-failed
+  (with-runtime
+    (fn [rt config-dir]
+      (let [lib (symbol (str "demo/sync-failed-lib-" (str/replace (str (java.util.UUID/randomUUID)) "-" "")))]
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/missing"}}}))
+        (is (= :missing-root (get-in (runtime/sync! rt) [:spools lib :reason])))
+        (is (= :sync-failed (reload-reason rt lib)))))))
+
+;; A synced root removed or replaced *after* a clean sync is a real post-sync
+;; scenario, but reproducing it by deleting a genuinely add-libs'd root would
+;; poison this add-libs shard's JVM-global tools.deps basis (every later sync!
+;; re-resolves the now-missing root and fails). The on-disk re-check reads only
+;; the sync-state :root, so seeding a clean :loaded entry whose root is absent /
+;; replaced exercises the same gate without ever add-libs'ing the doomed root.
+(deftest reload-synced-spool-fails-when-root-missing-after-sync
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            lib (symbol (str "demo/missing-root-lib-" suffix))
+            rel (str "spools/missing-root-" suffix)
+            missing-root (io/file config-dir rel)]
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root rel}}}))
+        (swap! (access/approved-spool-sync-state rt) assoc lib
+               {:lib lib :status :loaded :root (.getCanonicalPath missing-root)})
+        (is (= :missing-root (reload-reason rt lib)))))))
+
+(deftest reload-synced-spool-fails-when-root-replaced-by-file-after-sync
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            lib (symbol (str "demo/unreadable-root-lib-" suffix))
+            rel (str "spools/unreadable-root-" suffix)
+            root-file (io/file config-dir rel)]
+        (.mkdirs (.getParentFile root-file))
+        (spit root-file "not a directory\n")
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root rel}}}))
+        (swap! (access/approved-spool-sync-state rt) assoc lib
+               {:lib lib :status :loaded :root (.getCanonicalPath root-file)})
+        (is (= :unreadable-root (reload-reason rt lib)))))))
+
+(deftest reload-synced-spool-fails-when-root-has-no-namespaces
+  (with-runtime
+    (fn [rt config-dir]
+      (let [lib (symbol (str "demo/no-ns-lib-" (str/replace (str (java.util.UUID/randomUUID)) "-" "")))]
+        (write-empty-lib! config-dir "no-ns")
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/no-ns"}}}))
+        (is (contains? #{:loaded :already-available}
+                       (get-in (runtime/sync! rt) [:spools lib :status])))
+        (is (= :no-namespaces (reload-reason rt lib)))))))
+
+;; Two distinct source files under the root declaring the same namespace would let
+;; `into {}` keep whichever parsed last and silently drop the other from the reload
+;; set. Sync only adds the root to the classpath (no compile), so the collision must
+;; fail loudly at reload-ordering time, naming the namespace and both file paths.
+(deftest reload-synced-spool-fails-when-two-sources-declare-same-namespace
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            shared-ns (symbol (str "demo.dup-shared-" suffix))
+            lib (symbol (str "demo/dup-ns-lib-" suffix))
+            root (io/file config-dir "spools" "dup-ns")
+            file-a (io/file root "src" "demo" (str "dup_a_" suffix ".clj"))
+            file-b (io/file root "src" "demo" (str "dup_b_" suffix ".clj"))]
+        (.mkdirs (.getParentFile file-a))
+        (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+        (spit file-a (str "(ns " shared-ns ")\n(defn a [] :a)\n"))
+        (spit file-b (str "(ns " shared-ns ")\n(defn b [] :b)\n"))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/dup-ns"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (spool-sync/reload-synced-spool! rt lib)))
+              data (ex-data ex)]
+          (is (= :duplicate-namespace (:reason data)))
+          (is (= shared-ns (:namespace data)))
+          (is (= lib (:coord data)))
+          (is (= #{(.getCanonicalPath file-a) (.getCanonicalPath file-b)}
+                 (set (:files data)))))))))
+
+;; A genuine circular intra-root require makes tools.namespace throw a raw
+;; `::circular-dependency` ex-info with no :status/:coord. The seam must catch it
+;; and rethrow under the documented `{:status :failed :reason :coord}` contract.
+;; Sync only adds the root to the classpath (no compile), so the cycle surfaces at
+;; reload-ordering rather than sync.
+(deftest reload-synced-spool-fails-on-circular-intra-root-requires
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-a (symbol (str "demo.cycle-a-" suffix))
+            ns-b (symbol (str "demo.cycle-b-" suffix))
+            lib (symbol (str "demo/cycle-lib-" suffix))
+            root (io/file config-dir "spools" "cycle")]
+        (.mkdirs (io/file root "src"))
+        (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+        (write-spool-ns! root ns-a (str "(ns " ns-a " (:require [" ns-b " :as b]))\n"))
+        (write-spool-ns! root ns-b (str "(ns " ns-b " (:require [" ns-a " :as a]))\n"))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/cycle"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (spool-sync/reload-synced-spool! rt lib)))
+              data (ex-data ex)]
+          (is (= :circular-requires (:reason data)))
+          (is (= lib (:coord data)))
+          (is (= #{ns-a ns-b} (set (vals (:cycle data))))))))))
+
+;; PLAN-shr-001.V3: two intra-root namespaces where `a` uses a macro from `b`.
+;; A bumped `b` macro only reaches `a`'s expansion when `b` reloads before `a`;
+;; the reverse order re-expands `a` against the stale macro. Asserting `a`'s new
+;; value proves the topo-sort reloads dependencies first, not in arbitrary order.
+(deftest reload-synced-spool-reloads-intra-root-dependencies-first
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-b (symbol (str "demo.dep-macro-" suffix))
+            ns-a (symbol (str "demo.dep-consumer-" suffix))
+            lib (symbol (str "demo/dep-order-lib-" suffix))
+            root (io/file config-dir "spools" "dep-order")]
+        (.mkdirs (io/file root "src"))
+        (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+        (write-spool-ns! root ns-b (str "(ns " ns-b ")\n(defmacro tag [] :v1)\n"))
+        (write-spool-ns! root ns-a
+                         (str "(ns " ns-a " (:require [" ns-b " :as b]))\n(defn value [] (b/tag))\n"))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/dep-order"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (is (= :loaded (:status (runtime/use! rt (keyword (str "dep-order-" suffix))
+                                              {:ns ns-a :spools [lib]}))))
+        (is (= :v1 ((requiring-resolve (symbol (str ns-a "/value"))))))
+        (write-spool-ns! root ns-b (str "(ns " ns-b ")\n(defmacro tag [] :v2)\n"))
+        (let [result (spool-sync/reload-synced-spool! rt lib)]
+          (is (= :v2 ((requiring-resolve (symbol (str ns-a "/value")))))
+              "a re-expands against the bumped macro only if b reloaded first")
+          (is (= [ns-b ns-a] (mapv :ns (:namespaces result)))))))))
+
+;; PLAN-shr-001.V2 keystone (the gap proof): a synced+loaded spool fn returns :v1;
+;; after the source is bumped to :v2, neither the config `reload!` nor a bare
+;; `(require ns :reload)` — both blind to the spool classloader's roots — see the
+;; change, but `reload-synced-spool!` load-files it live under the spool loader.
+(deftest reload-synced-spool-picks-up-bumped-source-that-reload-and-require-miss
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.keystone-" suffix))
+            lib (symbol (str "demo/keystone-lib-" suffix))
+            root (io/file config-dir "spools" "keystone")
+            src-file (io/file root "src" "demo" (str "keystone_" suffix ".clj"))
+            version #(requiring-resolve (symbol (str ns-sym "/version")))]
+        (.mkdirs (.getParentFile src-file))
+        (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+        (spit src-file (str "(ns " ns-sym ")\n(defn version [] :v1)\n"))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/keystone"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (is (= :loaded (:status (runtime/use! rt (keyword (str "keystone-" suffix))
+                                              {:ns ns-sym :spools [lib]}))))
+        (is (= :v1 ((version))))
+        (spit src-file (str "(ns " ns-sym ")\n(defn version [] :v2)\n"))
+        ;; Config reload does not reload spool sources; it also clears the sync
+        ;; registry, so restore it with a plain re-sync (which only re-adds the
+        ;; root to the classloader — it never load-files the namespace).
+        (runtime/reload! rt)
+        (is (= :v1 ((version))) "config reload is blind to the bumped spool source")
+        (is (contains? #{:loaded :already-available}
+                       (get-in (runtime/sync! rt) [:spools lib :status])))
+        (is (= :v1 ((version))) "re-sync add-libs the root but does not reload the source")
+        ;; A bare require :reload runs on the base loader, which has no spool root.
+        (try (require ns-sym :reload) (catch java.io.FileNotFoundException _ nil))
+        (is (= :v1 ((version))) "require :reload is classloader-blind to the spool root")
+        (let [result (spool-sync/reload-synced-spool! rt lib)]
+          (is (= :v2 ((version))) "the blessed seam load-files the bumped source live")
+          (is (= [ns-sym] (mapv :ns (:namespaces result)))))))))
+
+;; TASK-shr-003.MI1: the blessed verb fails loudly before delegating when `coord`
+;; is not a symbol, rather than passing a bad key into the sync-state lookup. It
+;; routes through the canonical `require-valid!` seam, so the failure carries the
+;; standard `{:value :explain}` boundary-validation shape its siblings produce.
+(deftest reload-spool-verb-rejects-non-symbol-coordinate
+  (with-runtime
+    (fn [rt _config-dir]
+      (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                            (runtime/reload-spool! rt :demo/keyword-coord)))
+            data (ex-data ex)]
+        (is (= :demo/keyword-coord (:value data)))
+        (is (contains? data :explain))))))
+
+;; TASK-shr-003.MI5: the keystone gap proof exercised *through* the blessed
+;; `runtime/reload-spool!` (runtime passed explicitly, no ambient singleton): a
+;; synced+loaded spool fn returns :v1; after the source is bumped, the blessed
+;; verb makes :v2 live and returns the data-first coordinate/root/namespaces map.
+(deftest reload-spool-verb-makes-bumped-source-live
+  (with-runtime
+    (fn [rt config-dir]
+      (let [suffix (str/replace (str (java.util.UUID/randomUUID)) "-" "")
+            ns-sym (symbol (str "demo.verb-keystone-" suffix))
+            lib (symbol (str "demo/verb-keystone-lib-" suffix))
+            root (io/file config-dir "spools" "verb-keystone")
+            src-file (io/file root "src" "demo" (str "verb_keystone_" suffix ".clj"))
+            version #(requiring-resolve (symbol (str ns-sym "/version")))]
+        (.mkdirs (.getParentFile src-file))
+        (spit (io/file root "deps.edn") "{:paths [\"src\"]}\n")
+        (spit src-file (str "(ns " ns-sym ")\n(defn version [] :v1)\n"))
+        (write-spools! config-dir (pr-str {:spools {lib {:local/root "spools/verb-keystone"}}}))
+        (is (= :loaded (get-in (runtime/sync! rt) [:spools lib :status])))
+        (is (= :loaded (:status (runtime/use! rt (keyword (str "verb-keystone-" suffix))
+                                              {:ns ns-sym :spools [lib]}))))
+        (is (= :v1 ((version))))
+        (spit src-file (str "(ns " ns-sym ")\n(defn version [] :v2)\n"))
+        (let [result (runtime/reload-spool! rt lib)]
+          (is (= :v2 ((version))) "the blessed verb makes the bumped source live")
+          (is (= lib (:coord result)))
+          (is (= (.getCanonicalPath root) (:root result)))
+          (is (= [{:ns ns-sym :file (.getCanonicalPath src-file)}]
+                 (:namespaces result))))))))

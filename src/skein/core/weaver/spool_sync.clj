@@ -14,6 +14,8 @@
             [clojure.java.io :as io]
             [clojure.repl.deps :as repl-deps]
             [clojure.string :as str]
+            [clojure.tools.namespace.dependency :as ns-dep]
+            [clojure.tools.namespace.parse :as ns-parse]
             [skein.core.format :as format]
             [skein.core.query :as query]
             [skein.core.weaver.access :refer [approved-spool-sync-state
@@ -620,3 +622,186 @@
                         {:ns ns-sym
                          :relative-path relative-path
                          :searched-roots searched-roots}))))))
+
+(defn- clojure-source? [^java.io.File file]
+  (let [n (.getName file)]
+    (and (.isFile file)
+         (or (str/ends-with? n ".clj") (str/ends-with? n ".cljc")))))
+
+(defn- source-file->ns-sym
+  "Derive a namespace symbol from a source `file` relative to its classpath `dir`.
+
+  `root-paths` only vets top-level `:paths` entries, so a file reached through a
+  deeper symlink can canonicalize outside `dir`'s prefix. That escape fails loudly
+  with the offending file and root instead of a bare `StringIndexOutOfBoundsException`
+  carrying no context."
+  [^java.io.File dir ^java.io.File file]
+  (let [canonical-dir (.getCanonicalPath dir)
+        canonical-file (.getCanonicalPath file)
+        prefix (str canonical-dir java.io.File/separator)]
+    (when-not (str/starts-with? canonical-file prefix)
+      (throw (ex-info "Synced spool source escapes its classpath dir via a symlink"
+                      {:status :failed :reason :source-escapes-root
+                       :file canonical-file :root canonical-dir})))
+    (-> (subs canonical-file (count prefix))
+        (str/replace #"\.cljc?$" "")
+        (str/replace java.io.File/separator ".")
+        (str/replace "_" "-")
+        symbol)))
+
+(defn- spool-namespace-sources
+  "Discover `{:ns sym :file path}` for every `.clj`/`.cljc` under `root`'s consented
+  `root-paths` classpath dirs. The reload file set is exactly that classpath, no wider."
+  [root]
+  (vec
+   (for [^java.io.File dir (root-paths root)
+         ^java.io.File file (file-seq dir)
+         :when (clojure-source? file)]
+     {:ns (source-file->ns-sym dir file)
+      :file (.getCanonicalPath file)})))
+
+(defn- parse-source-ns
+  "Attach the declared namespace and its required deps to `source`.
+
+  Reads the source's `ns` form with `org.clojure/tools.namespace` — the same
+  battle-tested parser the compiler-agnostic `refresh` uses — rather than
+  trusting the classpath-derived name. `:deps` is the set of every namespace this
+  source requires/uses; the intra-root subset becomes the reload-order edges. A
+  source with no readable `ns` form keeps its path-derived `:ns` and contributes
+  no edges."
+  [{:keys [file] :as source}]
+  (with-open [reader (java.io.PushbackReader. (io/reader (io/file file)))]
+    (let [decl (ns-parse/read-ns-decl reader)]
+      (assoc source
+             :ns (if decl (ns-parse/name-from-ns-decl decl) (:ns source))
+             :deps (if decl (ns-parse/deps-from-ns-decl decl) #{})))))
+
+(defn- index-sources-by-ns
+  "Index parsed `sources` by declared `:ns`, failing loudly on a collision.
+
+  Two files under `coord`'s consented root-paths that declare the same namespace
+  would let a plain `(into {} …)` silently keep whichever parsed last and drop the
+  other from the reload set. That violates the swallow-nothing contract, so a
+  collision throws with the colliding namespace and both file paths instead of
+  arbitrarily picking one."
+  [coord sources]
+  (reduce (fn [m source]
+            (let [ns-sym (:ns source)]
+              (if-let [prior (get m ns-sym)]
+                (throw (ex-info "Two synced spool sources declare the same namespace"
+                                {:status :failed :reason :duplicate-namespace :coord coord
+                                 :namespace ns-sym :files [(:file prior) (:file source)]}))
+                (assoc m ns-sym source))))
+          {}
+          sources))
+
+(defn- dependency-graph
+  "Build the intra-root dependency graph over `parsed`, restricted to `intra` edges.
+
+  A genuine circular intra-root require makes `org.clojure/tools.namespace` throw a
+  raw `::circular-dependency` ex-info carrying no `:status`/`:coord`. Catch it and
+  rethrow under the same fixed `{:status :failed :reason … :coord …}` contract the
+  coordinate-resolution gates use, naming the cycle."
+  [coord intra parsed]
+  (try
+    (reduce (fn [g {:keys [ns deps]}]
+              (reduce (fn [g dep]
+                        (if (contains? intra dep)
+                          (ns-dep/depend g ns dep)
+                          g))
+                      g
+                      deps))
+            (ns-dep/graph)
+            parsed)
+    (catch clojure.lang.ExceptionInfo e
+      (let [{:keys [reason node dependency]} (ex-data e)]
+        (if (= ::ns-dep/circular-dependency reason)
+          (throw (ex-info "Synced spool sources have a circular intra-root require"
+                          {:status :failed :reason :circular-requires :coord coord
+                           :cycle {:namespace node :requires dependency}}
+                          e))
+          (throw e))))))
+
+(defn- dependency-ordered-sources
+  "Order `coord`'s `sources` dependencies-first within this root only.
+
+  Each source is parsed for its `ns` form, then topologically sorted so a
+  namespace reloads after every intra-root namespace it requires. External
+  requires (`clojure.*`, blessed `skein.api.*`, other spools) are edges out of
+  the set and are neither ordered nor reloaded. Namespaces with no intra-root
+  relationship keep their discovery order and follow the sorted set. Two sources
+  declaring the same namespace, or a circular intra-root require, fail loudly
+  under the coordinate's `{:status :failed :reason …}` contract."
+  [coord sources]
+  (let [parsed (mapv parse-source-ns sources)
+        by-ns (index-sources-by-ns coord parsed)
+        intra (set (keys by-ns))
+        graph (dependency-graph coord intra parsed)
+        sorted (filter intra (ns-dep/topo-sort graph))
+        remaining (remove (set sorted) (map :ns parsed))]
+    (mapv by-ns (concat sorted remaining))))
+
+(defn reload-synced-spool!
+  "Make coordinate `coord`'s latest synced source live under the spool classloader.
+
+  Resolves `coord`'s synced root from the runtime's approved-spool sync state and
+  approved allowlist (a coordinate can be approved yet unsynced or sync-failed),
+  discovers its namespace sources under the consented `root-paths` classpath, sorts
+  them dependencies-first with `org.clojure/tools.namespace` (intra-root edges only),
+  and `load-file`s each inside `with-spool-classloader`. Unlike `load-synced-namespace!`
+  there is no load-once short-circuit — already-loaded namespaces are reloaded. A
+  bumped cross-namespace macro is therefore live for its consumers, which reload
+  after it. External requires are edges out of the set and are not reloaded, so this
+  is neither `refresh` (classloader-blind to spool roots) nor `require :reload-all`
+  (reloads transitive non-spool deps).
+
+  Fails loudly with a reused `:reason` in ex-data (mirroring `sync-failed`'s
+  `{:status :failed :reason …}` shape), checked in fixed order:
+  `:not-approved` → `:not-synced` → `:sync-failed` → `:missing-root` →
+  `:unreadable-root` → `:no-namespaces`. The on-disk root re-check mirrors
+  `sync-approved-spool!`'s `exists`/`isDirectory`/`canRead` gate, so a root replaced
+  by a file or permission-stripped since sync fails with `:missing-root`/
+  `:unreadable-root` rather than a raw `load-file` exception carrying no `:reason`.
+
+  Two further reasons surface at reload-ordering time, once the root is confirmed
+  loadable: `:duplicate-namespace` (two sources under the root declare the same
+  namespace, which would otherwise silently drop one file) and `:circular-requires`
+  (a circular intra-root require, rethrown from `org.clojure/tools.namespace` under
+  this same `{:status :failed :reason … :coord …}` shape rather than escaping raw).
+
+  Returns a data-first map naming the coordinate, its resolved canonical root, and
+  the namespaces reloaded with their source files."
+  [runtime coord]
+  (let [approved (approved-spools runtime)
+        syncs @(approved-spool-sync-state runtime)
+        sync (get syncs coord)]
+    (when-not (contains? (:spools approved) coord)
+      (throw (ex-info "Spool coordinate is not approved"
+                      {:status :failed :reason :not-approved :coord coord})))
+    (when-not (contains? syncs coord)
+      (throw (ex-info "Spool coordinate is not synced"
+                      {:status :failed :reason :not-synced :coord coord})))
+    (when-not (#{:loaded :already-available} (:status sync))
+      (throw (ex-info "Spool coordinate did not sync successfully"
+                      {:status :failed :reason :sync-failed :coord coord :sync sync})))
+    (let [root (:root sync)
+          root-file (io/file root)]
+      (when-not (.exists root-file)
+        (throw (ex-info "Synced spool root is missing on disk"
+                        {:status :failed :reason :missing-root :coord coord :root root})))
+      (when (or (not (.isDirectory root-file)) (not (.canRead root-file)))
+        (throw (ex-info "Synced spool root is not a readable directory"
+                        {:status :failed :reason :unreadable-root :coord coord :root root})))
+      (let [canonical-root (.getCanonicalPath root-file)
+            sources (spool-namespace-sources root)]
+        (when (empty? sources)
+          (throw (ex-info "Synced spool root has no namespace sources"
+                          {:status :failed :reason :no-namespaces :coord coord :root canonical-root})))
+        (let [ordered (dependency-ordered-sources coord sources)]
+          (with-spool-classloader
+            runtime
+            (fn [] (doseq [{:keys [file]} ordered]
+                     (load-file file))))
+          {:coord coord
+           :root canonical-root
+           :namespaces (mapv #(select-keys % [:ns :file]) ordered)})))))
