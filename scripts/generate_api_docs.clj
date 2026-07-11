@@ -23,7 +23,17 @@
    {:name "cron" :source "spools/cron/src/skein/spools/cron.clj" :outfile "spools/cron.api.md"}
    {:name "bench" :source "spools/bench/src/skein/spools/bench.clj" :outfile "spools/bench.api.md"}])
 
-(doseq [{:keys [source outfile]} spool-docs]
+;; The blessed spool-facing API tier (SPEC-005.C2). Generated reference only —
+;; the behavior contracts stay in the root specs.
+(def alpha-api-docs
+  (for [nm ["batch" "cli" "current" "events" "format" "graph" "hooks" "notes"
+            "patterns" "peers" "relations" "runtime" "scheduler" "views"
+            "vocab" "weaver"]]
+    {:name nm
+     :source (str "src/skein/api/" nm "/alpha.clj")
+     :outfile (str "docs/api/" nm ".api.md")}))
+
+(doseq [{:keys [source outfile]} (concat spool-docs alpha-api-docs)]
   (quickdoc/quickdoc
    {:source-paths [source]
     :outfile outfile

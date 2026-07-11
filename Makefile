@@ -75,7 +75,7 @@ docs-site:
 
 docs-check:
 	$(MAKE) api-docs
-	git diff --exit-code -- 'spools/*.api.md' 'spools/executors/*.api.md'
+	git diff --exit-code -- 'spools/*.api.md' 'spools/executors/*.api.md' 'docs/api/*.api.md'
 	$(MAKE) docs-site
 
 docs-serve:

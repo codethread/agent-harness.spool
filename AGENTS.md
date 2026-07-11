@@ -43,7 +43,7 @@ flock -w 3600 /tmp/skein-test.lock clojure -M:test  # full locked suite — queu
 (cd cli && go test ./...)               # primary validation, CI-blocking
 clojure -M:smoke                        # primary validation, CI-blocking
 make fmt-check lint reflect-check docs-check   # blocking CI quality gates, held at zero findings
-make api-docs                           # regenerate spools/*.api.md after touching any spool docstring
+make api-docs                           # regenerate spools/*.api.md and docs/api/*.api.md after touching any spool or skein.api.*.alpha docstring
 ```
 
 `make security-report` (CI) and `make deps-report` (local-only, needs `CLJ_WATSON_NVD_API_KEY`) are non-blocking. New splint suppressions need written justification in `.splint.edn`. The codebase-wide formatting commit is listed in `.git-blame-ignore-revs`. After validation, `git status --short` must not show generated SQLite or runtime metadata artifacts.

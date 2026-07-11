@@ -58,6 +58,25 @@ nav:
       - Weaver Runtime: devflow/specs/daemon-runtime.md
       - REPL API: devflow/specs/repl-api.md
       - Strand Model: devflow/specs/strand-model.md
+  # Generated per-fn reference for the blessed skein.api.*.alpha tier; the
+  # behavior contracts remain the specs above (SPEC-005.C2).
+  - Alpha API:
+      - skein.api.batch.alpha: docs/api/batch.api.md
+      - skein.api.cli.alpha: docs/api/cli.api.md
+      - skein.api.current.alpha: docs/api/current.api.md
+      - skein.api.events.alpha: docs/api/events.api.md
+      - skein.api.format.alpha: docs/api/format.api.md
+      - skein.api.graph.alpha: docs/api/graph.api.md
+      - skein.api.hooks.alpha: docs/api/hooks.api.md
+      - skein.api.notes.alpha: docs/api/notes.api.md
+      - skein.api.patterns.alpha: docs/api/patterns.api.md
+      - skein.api.peers.alpha: docs/api/peers.api.md
+      - skein.api.relations.alpha: docs/api/relations.api.md
+      - skein.api.runtime.alpha: docs/api/runtime.api.md
+      - skein.api.scheduler.alpha: docs/api/scheduler.api.md
+      - skein.api.views.alpha: docs/api/views.api.md
+      - skein.api.vocab.alpha: docs/api/vocab.api.md
+      - skein.api.weaver.alpha: docs/api/weaver.api.md
   - Spools:
       - Index: spools/README.md
       - Batteries:
