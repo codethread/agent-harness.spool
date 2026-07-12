@@ -119,6 +119,9 @@
     (throw (ex-info message {:value value :explain (s/explain-str spec value)})))
   value)
 
+(defn- require-positive-limit! [limit]
+  (require-valid! ::specs/read-limit limit "Read result limit must be a positive integer"))
+
 (defn json-key
   "Render a map key as JSON object key text, preserving keyword/symbol namespaces.
 
@@ -208,7 +211,21 @@
        CHECK (status IN ('completed', 'cancelled', 'failed')),
        CHECK (json_valid(payload))
      )"]
-   ["CREATE INDEX IF NOT EXISTS idx_scheduler_history_status ON scheduler_history(status, id)"]])
+   ["CREATE INDEX IF NOT EXISTS idx_scheduler_history_status ON scheduler_history(status, id)"]
+   ["CREATE TABLE IF NOT EXISTS burn_history (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       strand_id TEXT NOT NULL,
+       title TEXT NOT NULL,
+       state TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL,
+       attributes TEXT NOT NULL DEFAULT '{}',
+       edges TEXT NOT NULL DEFAULT '[]',
+       recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+       CHECK (json_valid(attributes)),
+       CHECK (json_valid(edges))
+     )"]
+   ["CREATE INDEX IF NOT EXISTS idx_burn_history_strand ON burn_history(strand_id, id)"]])
 
 (def ^:private required-strand-columns #{"id" "title" "state" "created_at" "updated_at"})
 (def ^:private forbidden-strand-columns #{"attributes"})
@@ -884,7 +901,46 @@
     ds
     #(archive-attributes-in-transaction! % strand-id keys false))))
 
+(defn- capture-burn-tombstone!
+  "Record a burn_history tombstone for id when it still exists in tx.
+
+  Captures the strand's core row, its full attribute map (each value tagged
+  with its archived flag so archived keys stay distinguishable), and its
+  incident edges in both directions, then inserts one tombstone row. The
+  attribute map and edge vector are shaped to map onto the batch-mutation
+  payload's :strands and :edges entries so recovery is mechanical. Ids already
+  gone at capture time are skipped. Runs inside the caller's burn transaction,
+  so a failed insert propagates and aborts the burn."
+  [tx id]
+  ;; A missing row deletes nothing, so skipping it records no unrecorded burn:
+  ;; every strand that is actually deleted still has its tombstone captured.
+  (when-let [row (execute-one! tx [(str "SELECT " strand-columns " FROM strands WHERE id = ?") id])]
+    (let [attributes (reduce (fn [acc {:keys [key value archived]}]
+                               (assoc acc key {:value (<-json value) :archived (= 1 archived)}))
+                             {}
+                             (execute! tx ["SELECT key, value, archived
+                                            FROM attributes WHERE strand_id = ? ORDER BY key" id]))
+          edges (mapv (fn [{:keys [from_strand_id to_strand_id edge_type attributes]}]
+                        {:from from_strand_id
+                         :to to_strand_id
+                         :type edge_type
+                         :attributes (<-json attributes)})
+                      (execute! tx ["SELECT from_strand_id, to_strand_id, edge_type, attributes
+                                     FROM strand_edges
+                                     WHERE from_strand_id = ? OR to_strand_id = ?
+                                     ORDER BY from_strand_id, to_strand_id, edge_type" id id]))]
+      (execute-one! tx ["INSERT INTO burn_history
+                           (strand_id, title, state, created_at, updated_at, attributes, edges)
+                         VALUES (?, ?, ?, ?, ?, json(?), json(?))"
+                        id (:title row) (:state row) (:created_at row) (:updated_at row)
+                        (->json attributes) (json/write-str edges :key-fn json-key)]))))
+
 (defn- delete-strands! [ds ids]
+  ;; Capture every tombstone before deleting any strand: a delete cascades the
+  ;; incident edges, so interleaving capture and deletion would drop a shared
+  ;; edge from the later co-burned strand's tombstone.
+  (doseq [id ids]
+    (capture-burn-tombstone! ds id))
   (doseq [id ids]
     (execute! ds ["DELETE FROM strand_edges WHERE from_strand_id = ? OR to_strand_id = ?" id id])
     (execute! ds ["DELETE FROM strands WHERE id = ?" id])))
@@ -901,6 +957,36 @@
   "Delete one existing strand by id and return burn metadata."
   [ds id]
   (burn-by-ids! ds [id]))
+
+(defn- decode-burn-history-row
+  "Decode one burn_history row's JSON attributes and edges into Clojure data."
+  [row]
+  (-> row
+      (update :attributes <-json)
+      (update :edges #(json/read-str % :key-fn keyword))))
+
+(defn burn-history-for-strand
+  "Return every burn tombstone recorded for burned strand-id, newest first.
+
+  Each tombstone is a keyword-keyed map with the burned strand's core fields,
+  its full attribute map (each value carried as {:value ... :archived ...} so
+  archived keys stay distinguishable), its incident edges, and recorded_at.
+  Attributes and edges are decoded from JSON."
+  [ds strand-id]
+  (mapv decode-burn-history-row
+        (execute! ds ["SELECT id, strand_id, title, state, created_at, updated_at, attributes, edges, recorded_at
+                       FROM burn_history WHERE strand_id = ? ORDER BY id DESC" strand-id])))
+
+(defn recent-burn-history
+  "Return the latest limit burn tombstones across all strands, newest first.
+
+  limit is required and must be a positive integer; there is no unbounded read.
+  Each tombstone is decoded to a keyword-keyed map as in burn-history-for-strand."
+  [ds limit]
+  (require-positive-limit! limit)
+  (mapv decode-burn-history-row
+        (execute! ds ["SELECT id, strand_id, title, state, created_at, updated_at, attributes, edges, recorded_at
+                       FROM burn_history ORDER BY id DESC LIMIT ?" limit])))
 
 (def ^:private batch-mutation-top-level-keys #{:refs :strands :edges :burn})
 (def ^:private batch-mutation-strand-keys #{:ref :title :state :attributes})
@@ -1237,9 +1323,6 @@
    (query-strands ds query-def {}))
   ([ds query-def params]
    (query-strands ds query-def params)))
-
-(defn- require-positive-limit! [limit]
-  (require-valid! ::specs/read-limit limit "Read result limit must be a positive integer"))
 
 (defn- bounded-select!
   "Return selected rows, failing loudly when more than limit rows match."
