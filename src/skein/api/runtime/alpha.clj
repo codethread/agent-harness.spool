@@ -15,6 +15,45 @@
             [skein.core.weaver.spool-sync :as spool-sync]))
 
 (s/def ::coord symbol?)
+(s/def ::status keyword?)
+(s/def ::lib symbol?)
+(s/def ::kind keyword?)
+(s/def ::root any?)
+(s/def ::source any?)
+(s/def ::previous-root any?)
+(s/def ::new-root any?)
+(s/def ::loaded-namespaces (s/coll-of symbol? :kind vector?))
+(s/def ::removed-root (s/keys :req-un [::lib ::kind ::root]
+                              :opt-un [::source]))
+(s/def ::changed-root (s/keys :req-un [::lib ::previous-root ::new-root]))
+(s/def ::redefinition (s/keys :req-un [::lib ::root ::loaded-namespaces]))
+(s/def ::removed-roots (s/coll-of ::removed-root :kind vector?))
+(s/def ::changed-roots (s/coll-of ::changed-root :kind vector?))
+(s/def ::redefinitions (s/coll-of ::redefinition :kind vector?))
+(s/def ::diff (s/keys :opt-un [::removed-roots ::changed-roots ::redefinitions]))
+(s/def ::generation (s/or :id string? :unknown #{:unknown}))
+(s/def ::approved-spools set?)
+(s/def ::remedy string?)
+(s/def ::pending-generation (s/keys :req-un [::status ::generation ::diff ::approved-spools ::remedy]))
+(s/def ::key any?)
+(s/def ::current-generation string?)
+(s/def ::reason keyword?)
+(s/def ::retained-spool-state-entry (s/keys :req-un [::key ::generation ::current-generation]
+                                            :opt-un [::reason]))
+(s/def ::retained-spool-state (s/coll-of ::retained-spool-state-entry :kind vector?))
+(s/def ::spools map?)
+(s/def ::sync-result (s/keys :req-un [::spools]
+                             :opt-un [::pending-generation ::retained-spool-state]))
+(s/def ::non-additive-sync-diff-ex-data
+  (s/keys :req-un [::status ::reason ::diff ::pending-generation ::remedy]))
+
+(defn- validate-sync-result! [result]
+  (require-valid! ::sync-result result "runtime sync result has an invalid shape")
+  result)
+
+(defn- validate-sync-ex-data! [data]
+  (when (= :non-additive-sync-diff (:reason data))
+    (require-valid! ::non-additive-sync-diff-ex-data data "runtime sync exception data has an invalid shape")))
 
 (defn approved
   "Return the normalized approved spool roots for `runtime`'s config dir."
@@ -22,14 +61,27 @@
   (spool-sync/approved-spools runtime))
 
 (defn sync!
-  "Load approved local roots into `runtime`."
+  "Load approved local roots into `runtime`.
+
+  Returns `{:spools ...}` plus `:retained-spool-state` when preserved spool-state
+  entries are from an older or unknown generation. Refuses non-additive diffs by
+  throwing ExceptionInfo with `:reason :non-additive-sync-diff`, `:diff`,
+  `:pending-generation`, and `:remedy`; later successful calls include the
+  pending generation until the weaver process is replaced."
   [runtime]
-  (spool-sync/sync-approved-spools runtime))
+  (try
+    (validate-sync-result! (spool-sync/sync-approved-spools runtime))
+    (catch clojure.lang.ExceptionInfo ex
+      (validate-sync-ex-data! (ex-data ex))
+      (throw ex))))
 
 (defn syncs
-  "Return `runtime`'s most recent approved-root sync state."
+  "Return `runtime`'s most recent approved-root sync state.
+
+  The result is `{:spools ...}` and may include the latest recorded
+  `:pending-generation` from a refused non-additive sync diff."
   [runtime]
-  (spool-sync/approved-spool-syncs runtime))
+  (validate-sync-result! (spool-sync/approved-spool-syncs runtime)))
 
 (defn reload!
   "Reload startup files from `runtime`'s config dir after clearing registries."
@@ -248,19 +300,28 @@
                         {:opts opts})))))
   opts)
 
+(defn- tag-spool-state-generation
+  "Tag `value` with the runtime generation that created it, when metadata permits it."
+  [runtime value]
+  (if (instance? clojure.lang.IObj value)
+    (vary-meta value assoc :skein.runtime/generation (:generation-id runtime))
+    value))
+
 (defn- versioned-value
   "Tag `value` with its declared spool-state `version` for later reload checks.
 
   Version nil (the unversioned default) leaves `value` untouched. A declared
   version is stored as value metadata, so `close-fn` lookups and consumers still
   see the plain state value; versioned state must therefore support metadata."
-  [value version]
-  (if (nil? version)
-    value
-    (if (instance? clojure.lang.IObj value)
-      (vary-meta value assoc ::version version)
-      (throw (ex-info "Versioned spool state must support metadata"
-                      {:version version :class (class value)})))))
+  [runtime value version]
+  (tag-spool-state-generation
+   runtime
+   (if (nil? version)
+     value
+     (if (instance? clojure.lang.IObj value)
+       (vary-meta value assoc ::version version)
+       (throw (ex-info "Versioned spool state must support metadata"
+                       {:version version :class (class value)}))))))
 
 (defn- reinit-mismatched-state
   "Build the replacement value when preserved `existing` state mismatches the
@@ -270,8 +331,9 @@
   returns the new value. Without one, `existing`'s `:close-fn` runs best-effort
   so a stale executor or scheduler is released, then `init-fn` builds fresh
   state — preserving nothing. The result is re-tagged with `version`."
-  [existing version migrate-fn init-fn]
+  [runtime existing version migrate-fn init-fn]
   (versioned-value
+   runtime
    (if migrate-fn
      (migrate-fn existing)
      (do (when-let [close-fn (:close-fn existing)]
@@ -325,7 +387,7 @@
                existing (get m* key)]
            (cond
              (not (contains? m* key))
-             (let [value (versioned-value (init-fn) version)]
+             (let [value (versioned-value runtime (init-fn) version)]
                (swap! state assoc key value)
                value)
 
@@ -333,6 +395,6 @@
              existing
 
              :else
-             (let [replacement (reinit-mismatched-state existing version migrate-fn init-fn)]
+             (let [replacement (reinit-mismatched-state runtime existing version migrate-fn init-fn)]
                (swap! state assoc key replacement)
                replacement))))))))
