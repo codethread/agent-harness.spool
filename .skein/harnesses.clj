@@ -38,10 +38,15 @@
   prohibition-heavy prompts on gpt seats dilute the objective (coordinator
   observation, 2026-07-13).
 
+  Judge policy: bench judges always run on :oracle or :sol-high — never a
+  cheaper seat. Verdicts drive future routing, so judge quality compounds
+  and is worth the premium (user decision, 2026-07-13).
+
   Aliases are weaver-lifetime state, so startup config re-registers them
   like queries and ops. `strand agent harnesses` lists the live registry.
-  pi seats are deprioritized pending a pi-vs-codex harness bench (codex
-  currently wins on RAM/CPU under concurrent load); the pi harness itself
+  pi seats are deprioritized for build work pending a pi-vs-codex harness
+  bench (codex currently wins on RAM/CPU under concurrent load); :flash is
+  the benched exception for cheap recon sweeps, and the pi harness itself
   stays registered via its spool."
   (:require [skein.api.format.alpha :as format-alpha]
             [skein.spools.delegation :as agents]
@@ -116,11 +121,16 @@
       :doc (format-alpha/reflow
             "|{:complexity 3 :code-taste 4 :resilience 1 :ui-design 2
              | :coordination - :cost 9}
-             |gpt-5.6-luna low via codex. Concrete, well-scoped recon and fan-out
-             |search at the lowest cost of the roster (benched $0.12-0.36/task);
-             |quits at the first sign of environment friction and benched lowest
-             |on authored-code quality. Scores: pandora-task-002 bench (card
-             |nihrl); ui-design is a prior.")})
+             |gpt-5.6-luna low via codex. Concrete, well-scoped recon, fan-out
+             |search, and single-concern review sweeps at the lowest codex cost
+             |($0.06-0.36/task benched). Won the explore bench's deep-trace and
+             |needle arms outright (card vk5re) and matched :terra-med's recall
+             |on every change-review sweep lens at ~28% of the price (card
+             |vw8pf; single-commit diff — re-probe on large changes). Quits at
+             |the first sign of environment friction and benched lowest on
+             |authored-code quality. Scores: pandora-task-002 bench (card
+             |nihrl) plus the 2026-07-13 explore and review-sweeps benches;
+             |ui-design is a prior.")})
    (shuttle/defalias! :luna-low-ro
      {:alias-of :codex-ro
       :extra-args ["-m" "gpt-5.6-luna" "-c" "model_reasoning_effort=low"]
@@ -257,6 +267,22 @@
              |and validation. Scores estimated from a bench-spool smoke run only
              |— don't route broader work here until a larger run proves it holds
              |up.")})
+   (shuttle/defalias! :flash
+     {:alias-of :pi
+      :extra-args ["--agent" "main" "--model" "deepseek/deepseek-v4-flash"
+                   "--thinking" "high"]
+      :doc (format-alpha/reflow
+            "|{:complexity X :code-taste X :resilience X :ui-design X
+             | :coordination - :cost 9}
+             |DeepSeek v4 Flash (high thinking) via pi. Enumeration-shaped recon
+             |sweeps and provider-quota fallback at $0.003-0.016/task — 30-60x
+             |cheaper than any codex seat. Won the explore bench's wide fan-out
+             |arm but loses precision on deep traces and exact citations
+             |(invents small details under pressure): verify citations before
+             |acting, never route load-bearing deep dives here. thinking=high
+             |benched more precise than low at identical cents cost. Scores:
+             |explore bench 2026-07-13 (card vk5re), judged vs luna/haiku on
+             |skein-src recon; unbenched for authored code.")})
    (shuttle/defalias! :deepseek
      {:alias-of :pi
       :extra-args ["--agent" "main" "--model" "deepseek/deepseek-v4-pro:high"]

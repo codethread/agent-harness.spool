@@ -32,10 +32,16 @@
   Routing note: pick seats by scanning the scorecards in
   .skein/harnesses.clj ({:complexity :code-taste :resilience :ui-design
   :cost}, X = untested), matching the axes the contract actually needs -
-  route by waste-type, not call count. In practice: trivially greppable
-  single-sweep concerns take the cheapest seat (:luna-low, cost 9);
-  read-through single-concern lenses take :terra-med (code-taste 7 at ~40%
-  of sol's price); judgment-heavy contracts take :sol-med or :opus. Note
+  route by waste-type, not call count. In practice (review-sweeps bench
+  2026-07-13, card vw8pf): mechanical single-target contracts over a
+  small diff take the cheapest seat (:luna-low, cost 9) - it matched
+  :terra-med's recall on every change-review lens at ~28% of the price,
+  and its occasional cite typo is cheap for the synthesizer to merge;
+  contracts that must sweep for coherence beyond the changed-file list
+  (docs-drift's generated api.md and README index checks) take
+  :terra-med; judgment-heavy contracts take :sol-med or :opus. Boundary
+  caveat: benched on a single-commit three-file diff - re-probe before
+  trusting :luna-low on large multi-file changes. Note
   reviewers must run on read/write seats for now: findings append via the
   strand CLI over the weaver socket, which the -ro sandbox blocks (see
   :codex-ro in harnesses.clj) - read-only stays prompt-discipline. Two
@@ -60,7 +66,7 @@
      :scope "test files and test helpers in the change"}
 
     {:name "fail-loudly"
-     :harness :terra-med
+     :harness :luna-low
      :contract (str "Enforce TEN-003 (devflow/TENETS.md): unexpected input or state must fail "
                     "loudly, never fall back to 'sensible defaults', silent nil-punning, or "
                     "swallowed exceptions. Flag every new code path that guesses instead of "
@@ -71,16 +77,19 @@
                     "concisely and let the synthesizer merge by root cause. Budget ~12-15 calls.")}
 
     {:name "surface-minimalism"
-     :harness :terra-med
+     :harness :luna-low
      :contract (str "Enforce TEN-004 (devflow/TENETS.md): the change should expose the minimum "
-                    "possible new public surface. Flag new API functions, CLI verbs, flags, or "
-                    "attributes that userland composition of existing surface could replace, "
-                    "and any new surface left undocumented or untested. Work from the "
+                    "possible new public surface. For EVERY new op, public fn, CLI verb, flag, "
+                    "or attribute, answer explicitly in your findings: could an existing op, a "
+                    "new flag on an existing op, or userland composition of existing surface "
+                    "serve instead? State the answer even when it is no - the enumeration is "
+                    "the deliverable, not an afterthought behind doc/test coverage. Also flag "
+                    "any new surface left undocumented or untested. Work from the "
                     "changed-file list with targeted diff reads; do not read whole namespaces "
                     "or re-read a file in slices after a whole read. Budget ~12-15 calls.")}
 
     {:name "spec-shapes"
-     :harness :terra-med
+     :harness :luna-low
      :contract (str "Check that every public data shape the change introduces or reshapes - "
                     "registry inputs (defroster!/defharness!-style), weave pattern inputs, and "
                     "the input/output shapes of public seam functions - is defined by a "
@@ -95,7 +104,7 @@
                     "root cause. Budget ~15 calls.")}
 
     {:name "correctness"
-     :harness :terra-med
+     :harness :luna-low
      :contract (str "Verify the change does what its strand contract and docs claim: trace the "
                     "main paths, check boundary and concurrency behavior against the actual "
                     "code, and flag regressions to adjacent behavior the diff touches. Report "
