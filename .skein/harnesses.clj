@@ -97,13 +97,14 @@
    ;; weaver socket (agent note / strand show) — so -ro seats suit contracts
    ;; whose findings ride the run result, not standard note-appending roster
    ;; reviews, until a `-c permissions...` unix-socket grant for the weaver
-   ;; state dir is proven in a disposable world. `-a never` keeps sandboxed
-   ;; runs headless instead of hanging on an approval prompt. `codex exec
+   ;; state dir is proven in a disposable world. No approval flag rides the
+   ;; argv: `codex exec` is headless and auto-denies sandboxed writes rather
+   ;; than prompting (exec rejects `-a` as of codex 0.144.3). `codex exec
    ;; review` (headless --json review over --base/--commit/--uncommitted) is
    ;; a further candidate harness once ranges can ride argv.
    (shuttle/defharness! :codex-ro
      {:argv ["codex" "exec" "--json" "--skip-git-repo-check" "--color" "never"
-             "--sandbox" "read-only" "-a" "never"
+             "--sandbox" "read-only"
              "-c" "shell_environment_policy.inherit=all"]
       :parse :codex-json
       :resume ["resume" :agent-run/session-id]
