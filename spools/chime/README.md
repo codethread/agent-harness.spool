@@ -33,7 +33,9 @@ Activate it from trusted startup config after syncing approved roots:
    :required? true})
 ```
 
-`install!` registers only the graph-event handler. A useful setup then layers two things on top:
+`install!` registers the graph-event handler and the pre-commit barrier that
+orders mutations against rule registration. A useful setup then layers two
+things on top:
 
 - shared config (`init.clj` / a workspace spool) registers the workspace's
   rules with `defrule!`, so the repo decides what needs attention;
@@ -95,7 +97,20 @@ Worked example — notify when a strand that parents other work is closed:
 (chime/remove-rule! :parent-completed)
 ```
 
-Chime deduplicates notifications per `[rule strand]` while the rule keeps matching: a strand is marked seen only after the notifier process starts, so a missing or failing notifier does not swallow the alert, and the mark clears when the rule stops matching so a recurrence notifies again. Use `(chime/reset-seen!)` from tests or config to clear that memory.
+When a rule is registered, chime treats its currently matching strands as an
+initial seen baseline. Restarting a weaver therefore does not replay every
+durable condition on the next graph mutation. This suppresses every condition
+already true at registration, including one that first became true while the
+weaver was down and has never produced a notification. Conditions that start
+after registration notify normally. Chime's pre-commit mutation barrier orders
+concurrent graph changes after registration, so they are not absorbed into the
+baseline.
+
+Chime then deduplicates notifications per `[rule strand]` while the rule keeps
+matching: a strand is marked seen only after the notifier process starts, so a
+missing or failing notifier does not swallow the alert, and the mark clears when
+the rule stops matching so a recurrence notifies again. Use
+`(chime/reset-seen!)` from tests or config to clear that memory.
 
 Rule, notifier, and process failures are recorded by `(chime/failures)` and event handler failures remain visible through the Skein event failure surface.
 

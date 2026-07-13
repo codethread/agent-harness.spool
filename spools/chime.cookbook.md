@@ -112,7 +112,11 @@ Honest source: this repo's [`.skein/init.clj`](../.skein/init.clj) chime block a
 - **Chime deduplicates per `[rule strand]` while the rule keeps matching**, so a
   run that stays `failed` across many later mutations still notifies once. The
   mark clears when the rule stops matching, so a genuine recurrence alerts again.
-  You write the plain predicate; the engine handles "only once."
+  Registration seeds currently matching strands as the initial seen baseline,
+  so a weaver restart does not replay old failures. This also suppresses a
+  never-notified condition that became true while the weaver was down. A
+  concurrent mutation is ordered after registration and still notifies. You
+  write the plain predicate; the engine handles "only once."
 
 Honest source: this repo's `agent-failure-rule` and `hitl-checkpoint-ready-rule` in [`.skein/attention.clj`](../.skein/attention.clj), registered together in `register-chime-rules!`; the fire-once-per-transition behaviour is pinned by `registered-rules-fire-end-to-end` and `dedup-and-reset-seen` in [`test/skein/chime_test.clj`](../test/skein/chime_test.clj).
 
@@ -158,8 +162,9 @@ Honest source: this repo's `agent-failure-rule` and `hitl-checkpoint-ready-rule`
   gain agent-run-specific branching.
 - **The match is durable.** `agent-run/mode=interactive` and
   `agent-run/phase=running` are run attributes, so the rule still explains itself
-  after a restart. Chime's per-`[rule strand]` dedup means a long-running session
-  notifies once while it remains running.
+  after a restart. A session already running when the rule is registered becomes
+  part of the initial seen baseline; a session that starts afterward notifies
+  once while it remains running.
 - **The attach text comes from the same surface humans already use.**
   `agent-run/runs` is the Clojure side of `strand agent ps`; it performs the
   interactive liveness check and renders the backend's display-only `:attach`

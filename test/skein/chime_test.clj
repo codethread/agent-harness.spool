@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.events.alpha :as events]
+            [skein.api.hooks.alpha :as hooks]
             [skein.api.weaver.alpha :as weaver]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.runtime :as weaver-runtime]
@@ -121,6 +122,13 @@
 (defn- invalid-notification-rule [_]
   {:body "missing title"})
 
+(def ^:private mutation-reached-hook (atom nil))
+
+(defn signal-mutation-hook
+  "Signal that a test mutation reached its pre-commit hook."
+  [_context]
+  (.countDown ^java.util.concurrent.CountDownLatch @mutation-reached-hook))
+
 ;; --- tests ------------------------------------------------------------------
 
 (deftest install-registers-no-rules
@@ -198,6 +206,93 @@
           (weaver/update rt (:id parent) {:state "closed"})
           (chime/scan! {:strand/id (:id parent)})
           (is (eventually #(file-contains? out-file "Plan complete: plan p"))))))))
+
+(deftest restart-baselines-durable-matches-before-notifying-new-ones
+  (let [db-file (db-test/temp-db-file)
+        first-config (test-support/temp-config-dir {:prefix "skein-chime-restart-first"})
+        second-config (test-support/temp-config-dir {:prefix "skein-chime-restart-second"})]
+    (try
+      (let [first-rt (weaver-runtime/start!
+                      db-file
+                      {:world (test-support/test-world (.getCanonicalPath first-config))
+                       :publish? false})]
+        (try
+          (weaver-runtime/with-runtime-binding
+            first-rt
+            #(weaver/add first-rt {:title "historical failure"
+                                   :attributes {"phase" "failed"}}))
+          (finally
+            (weaver-runtime/stop! first-rt))))
+      (let [second-rt (weaver-runtime/start!
+                       db-file
+                       {:world (test-support/test-world (.getCanonicalPath second-config))
+                        :publish? false})]
+        (try
+          (weaver-runtime/with-runtime-binding
+            second-rt
+            (fn []
+              (chime/install!)
+              (chime/defrule! :phase-failed 'skein.chime-test/phase-failed-rule)
+              (let [out-file (bind-file-notifier! second-config)]
+                (weaver/add second-rt {:title "unrelated mutation"})
+                (events/await-quiescent! second-rt)
+                (await-notifier-threads!)
+                (is (not (file-contains? out-file "historical failure")))
+                (weaver/add second-rt {:title "new failure"
+                                       :attributes {"phase" "failed"}})
+                (eventually #(file-contains? out-file "new failure"))
+                (is (not (file-contains? out-file "historical failure"))))))
+          (finally
+            (weaver-runtime/stop! second-rt))))
+      (finally
+        (db-test/delete-sqlite-family! db-file)))))
+
+(deftest mutation-committing-during-registration-notifies
+  (with-chime
+    (fn [rt config-dir]
+      (let [strand (weaver/add rt {:title "failure during registration"})
+            out-file (bind-file-notifier! config-dir)
+            baseline-entered (java.util.concurrent.CountDownLatch. 1)
+            release-baseline (java.util.concurrent.CountDownLatch. 1)
+            mutation-entered (java.util.concurrent.CountDownLatch. 1)
+            affected-strands-var #'chime/affected-strands
+            original-affected-strands @affected-strands-var]
+        (events/await-quiescent! rt)
+        (reset! mutation-reached-hook mutation-entered)
+        (hooks/register! rt :test/mutation-reached
+                         #{:strand/update-before-commit}
+                         'skein.chime-test/signal-mutation-hook
+                         {:order 0})
+        (try
+          (with-redefs-fn
+            {affected-strands-var
+             (fn [event]
+               (.countDown baseline-entered)
+               (.await release-baseline)
+               (original-affected-strands event))}
+            (fn []
+              (let [registration (future
+                                   (binding [chime/*runtime* rt]
+                                     (chime/defrule!
+                                       :phase-failed
+                                       'skein.chime-test/phase-failed-rule)))]
+                (.await baseline-entered)
+                (let [mutation (future
+                                 (binding [chime/*runtime* rt]
+                                   (weaver/update rt (:id strand)
+                                                  {:attributes {"phase" "failed"}})))]
+                  (.await mutation-entered)
+                  (is (= ::blocked (deref mutation 100 ::blocked))
+                      "the mutation cannot commit inside the registration baseline")
+                  (.countDown release-baseline)
+                  @registration
+                  @mutation
+                  (events/await-quiescent! rt)
+                  (await-notifier-threads!)
+                  (is (file-contains? out-file "failure during registration"))))))
+          (finally
+            (.countDown release-baseline)
+            (reset! mutation-reached-hook nil)))))))
 
 (deftest ready-rule-fires-born-ready-and-when-unblocked
   (with-chime
