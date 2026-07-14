@@ -58,3 +58,12 @@ The repo's `.skein` workspace is the shared coordination world — kanban board,
 - Keep SQL and shared persistence behavior in `skein.core.db`; strand attribute values stay JSON `TEXT` in the `attributes` table — no JSONB assumptions.
 - Runtime publication: one ambient runtime per real weaver process (SPEC-004.C8a); tests and embedded runtimes start `:publish? false` and pass the runtime explicitly.
 - Spool state is runtime-owned via `skein.api.runtime.alpha/spool-state`; no module-level atoms in spools.
+
+<!-- mill:skein-prime -->
+## Skein / strand
+
+This repo uses Skein strands to track work. Orientation ships in the `mill` CLI:
+
+- `mill skein prime` — where the Skein source and docs live, and how to extend this repo's `.skein/` config.
+- `mill strand prime` — the strand planning/tracking workflow; run it before multi-step work.
+<!-- /mill:skein-prime -->
