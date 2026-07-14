@@ -14,7 +14,7 @@ Agent coordination spool layered over the agent-run engine.
 
 
 Structured manual returned by `agent about`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L112-L517">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L112-L522">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/agent-op">`agent-op`</a>
 ``` clojure
@@ -23,7 +23,7 @@ Structured manual returned by `agent about`.
 Function.
 
 Dispatch parsed `strand agent` subcommands.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2012-L2041">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2053-L2082">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/agent-plan">`agent-plan`</a>
 ``` clojure
@@ -32,7 +32,7 @@ Dispatch parsed `strand agent` subcommands.
 Function.
 
 Create a feature strand plus task/review children for agent work.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2068-L2099">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2109-L2140">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/council!">`council!`</a>
 ``` clojure
@@ -57,7 +57,7 @@ Convene a multi-agent council as a `:fresh`-blackboard panel (A7): its rounds
 
   Returns `{:council <shared strand id> :turns [[run-ids]...] :synthesizer
   <run id>}`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1604-L1669">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1645-L1710">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/defroster!">`defroster!`</a>
 ``` clojure
@@ -74,7 +74,7 @@ Register or replace a named reviewer roster (weaver-lifetime state, so
   with its own precise contract; `:scope` is prompt-level confinement text.
   `:synthesizer` overrides the harness of the synthesis run (default: first
   reviewer's harness). Malformed data fails loudly with spec explain data.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L891-L905">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L896-L910">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/install!">`install!`</a>
 ``` clojure
@@ -83,7 +83,7 @@ Register or replace a named reviewer roster (weaver-lifetime state, so
 Function.
 
 Install the agents op surface, pattern, query, and worker preamble hook.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2101-L2129">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L2142-L2170">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/panel!">`panel!`</a>
 ``` clojure
@@ -111,7 +111,7 @@ Spawn a panel from an inline panel value.
   `:spawned-by` and `:cwd` ride onto every run.
 
   Returns `{:panel :blackboard :turns [[run-ids...]...] :synthesizer? :review-pass}`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1405-L1486">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1435-L1521">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/panel-specs">`panel-specs`</a>
 ``` clojure
@@ -140,7 +140,7 @@ Compile an **inline panel value** into plain, fully-built run specs
   `panel/seat`, `panel/turn`, `review/target`, and
   `review/pass`. `:synthesizer` is present unless `:synthesis` is
   absent or `:none`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1313-L1403">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1343-L1433">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/review!">`review!`</a>
 ``` clojure
@@ -166,7 +166,12 @@ Spawn independent read-only reviewers for a target strand.
   windows — injected into every reviewer prompt so reviewers read the diff
   instead of re-deriving it. The synthesizer never receives it (it weighs
   notes, not the diff).
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1507-L1591">Source</a></sub></p>
+
+  A kanban card is never a valid target: findings append as notes on the
+  target, and card notes stay lean for handover, so a card-targeted review
+  fails loudly toward the card's task tier. The check reads only the
+  `kanban/card` marker attribute — no kanban spool code is involved.
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1542-L1632">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/review-contract">`review-contract`</a>
 
@@ -188,7 +193,7 @@ Convert a roster value into an equivalent single-round, target-blackboard
   the panel synthesis. Pure — the roster is validated identically to
   `defroster!` input. A rounds=1 panel compiles to the independent review
   shape, so this is how `review!` is expressible over the panel primitive.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1488-L1505">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1523-L1540">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/roster-review-specs">`roster-review-specs`</a>
 ``` clojure
@@ -206,8 +211,11 @@ Return a roster's review fan-out as plain, fully-built run specs
   `:attrs` merge into the gate's attributes, and the synthesizer gate
   depends on every reviewer gate. Specs are pure data built from the
   roster and the workspace base review contract; `:target` is the strand id
-  under review (existence is checked where runs are spawned, not here).
-  Unknown rosters and a blank target fail loudly.
+  under review. Existence and the kanban-card prohibition are checked where
+  runs are spawned, not here: specs are pure data with no runtime, so a
+  workflow composition consuming them enforces the card policy at its own
+  spawn seam (as `review!` and `panel!` do). Unknown rosters and a blank
+  target fail loudly.
 
   `roster` is a registered roster name **or an inline roster value** — a map
   conforming to `:skein.spools.delegation/roster`, validated identically to
@@ -227,7 +235,7 @@ Return a roster's review fan-out as plain, fully-built run specs
   present it is injected into every reviewer prompt so reviewers read the
   changed files instead of re-deriving the diff; the synthesizer never carries
   it. Malformed change context fails loudly against its spec.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1076-L1145">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L1103-L1175">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/rosters">`rosters`</a>
 ``` clojure
@@ -236,7 +244,7 @@ Return a roster's review fan-out as plain, fully-built run specs
 Function.
 
 List registered reviewer rosters as full plain data.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L907-L911">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/skein/spools/delegation.clj#L912-L916">Source</a></sub></p>
 
 ## <a name="skein.spools.delegation/worker-contract">`worker-contract`</a>
 
