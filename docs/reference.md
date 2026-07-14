@@ -448,6 +448,69 @@ works after `mine` has been registered in the weaver's named-query registry.
 `strand list --query mine --state active` when you only want active matches. `strand ready --query
 mine` always applies readiness semantics, so returned strands are active and unblocked.
 
+### Query expression grammar
+
+A query definition is either a bare where expression, or a map with `:where` and declared
+`:params`:
+
+```clojure
+[:= [:attr :owner] "ct"]                                       ; bare expression
+{:params [:owner]
+ :where  [:= [:attr :owner] [:param :owner]]}                  ; parameterized
+```
+
+A where expression is an EDN vector of `[operator & args]`:
+
+| Form | Meaning |
+| --- | --- |
+| `[:= f v]` `[:!= f v]` `[:< f v]` `[:<= f v]` `[:> f v]` `[:>= f v]` | compare field `f` against value `v` |
+| `[:in f [v …]]` | `f` matches one of a non-empty collection of values |
+| `[:exists f]` / `[:missing f]` | `f` has a value / has none |
+| `[:and e …]` / `[:or e …]` | compose one or more child expressions |
+| `[:not e]` | negate exactly one child expression |
+| `[:edge/out rel q]` | this strand has an outgoing `rel` edge to a strand matching `q` |
+| `[:edge/in rel q]` | this strand has an incoming `rel` edge from a strand matching `q` |
+
+A field `f` is a core column written as a bare keyword — `:id`, `:title`, `:state`, `:created_at`,
+`:updated_at` — or an attribute path `[:attr :key]`. Extra path segments read inside the
+attribute's JSON value: `[:attr :external :issue]` matches the `issue` field of the JSON stored
+under `external`.
+
+Attribute comparisons run in SQLite over the extracted JSON value: numbers compare numerically,
+strings lexically, and mixed types follow SQLite's cross-type ordering, where every number sorts
+before every string. The CLI writes strings, so a strand added with `--attr temporary=true`
+matches `[:= [:attr :temporary] "true"]`, not `true`. A stored JSON `null` satisfies `:missing`,
+not `:exists`, and archived attributes never match — `[:missing [:attr :k]]` is true when the
+strand has no hot value under `k`.
+
+`[:param :name]` can stand in for a comparison value, an `:in` collection, or an edge relation
+name. CLI params are strings, passed as repeated `--param key=value` pairs, so scalar params work
+from the CLI; a query whose `:in` collection is a param can only be invoked from the trusted
+surfaces (the REPL `query` helper or `skein.api.graph.alpha`), where params are real EDN values.
+Registration to invocation looks like:
+
+```clojure
+(graph/register-query! runtime 'owned-by
+  {:params [:owner]
+   :where  [:= [:attr :owner] [:param :owner]]})
+```
+
+```sh
+strand list --query owned-by --param owner=ct
+```
+
+Edge endpoint queries are strand-local — nesting another `:edge/out` / `:edge/in` inside `q`
+fails loudly, as does any malformed expression at registration or compile time; nothing coerces
+to an empty or match-all predicate.
+
+`ready` speaks the same grammar: it is equivalent to
+`[:and [:= :state "active"] [:not [:edge/out "depends-on" [:= :state "active"]]]]`, and
+`ready --query <name>` adds your expression on top. The contracts behind this section: queryable
+fields and attribute predicate capability in [SPEC-001.P9](../devflow/specs/strand-model.md), edge
+predicates in [SPEC-003.C13a](../devflow/specs/repl-api.md), and the `ready` equivalence in
+[SPEC-003.C15](../devflow/specs/repl-api.md); the rest reflects the current compiler
+(`skein.core.query`).
+
 ## REPL
 
 The REPL is the trusted, high-power surface. `mill weaver repl` attaches directly to the selected
