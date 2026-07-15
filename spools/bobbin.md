@@ -11,9 +11,13 @@
 
 `skein.spools.bobbin` assembles a compact context bundle for one strand: the target summary, nearby blocking and ownership graph, attached notes, and workflow metadata when present. The bundle is JSON-compatible and self-contained: every edge emitted by a section references strands summarized in that section.
 
-Bobbin is deliberately a classpath reference spool. It owns no engine behavior and composes only the documented `skein.repl` and `skein.api.graph.alpha` surfaces.
+Bobbin is deliberately an opt-in reference spool. It owns no engine behavior
+and composes only the documented `skein.repl` and
+`skein.api.graph.alpha` surfaces.
 
 ## 2. Usage
+
+Bobbin is opt-in: approve `skein.spools/bobbin {:local/root "../spools/bobbin"}` in `.skein/spools.edn` and activate it from trusted config (`runtime/sync!` + `runtime/use!`, see [the customisation guide](../docs/spools/customisation.md)) before requiring it.
 
 ```clojure
 (require '[skein.spools.bobbin :as bobbin])

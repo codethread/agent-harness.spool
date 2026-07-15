@@ -16,17 +16,32 @@ Use it when a repo wants other local weavers to call stable, intentional entry p
 
 ## Loading
 
-Because `skein.spools.guild` ships on the weaver classpath, no `spools.edn` approval is needed:
+Approve the Guild root in `.skein/spools.edn`:
 
 ```clojure
-(require '[skein.spools.guild :as guild])
+{:spools {skein.spools/guild {:local/root "../spools/guild"}}}
+```
 
-(guild/install!)
+Then sync and activate it from trusted config:
+
+```clojure
+(require '[skein.api.current.alpha :as current]
+         '[skein.api.runtime.alpha :as runtime])
+
+(def runtime (current/runtime))
+
+(runtime/sync! runtime)
+(runtime/use! runtime :skein/spools-guild
+  {:ns 'skein.spools.guild
+   :spools #{'skein.spools/guild}
+   :call 'skein.spools.guild/install!})
 ```
 
 `install!` registers the built-in `guild.describe` op and resets the spool's runtime-local weaver-lifetime declaration state for reload-friendly startup. The declaration state is isolated from other runtimes in the same JVM. It may also take a non-blank fallback guild name for contexts without runtime metadata:
 
 ```clojure
+(require '[skein.spools.guild :as guild])
+
 (guild/install! "backend")
 ```
 
@@ -119,12 +134,24 @@ Assume two repos, `frontend` and `backend`, each with a checked-in portable weav
 
 A machine with two clones can disambiguate locally with `.skein/config.local.json` when needed; the local overlay is not committed.
 
-In the backend repo's checked-in `.skein/init.clj`, publish a guild API:
+With the Guild root approved in the backend repo's `.skein/spools.edn` and activated as shown in [Loading](#loading) (`runtime/sync!` + `runtime/use!`), the backend's checked-in `.skein/init.clj` publishes a guild API:
 
 ```clojure
 (ns user
   (:require [clojure.spec.alpha :as s]
-            [skein.spools.guild :as guild]))
+            [skein.api.current.alpha :as current]
+            [skein.api.runtime.alpha :as runtime]))
+
+(def runtime (current/runtime))
+
+(runtime/sync! runtime)
+(runtime/use! runtime :skein/spools-guild
+  {:ns 'skein.spools.guild
+   :spools #{'skein.spools/guild}
+   :call 'skein.spools.guild/install!})
+
+;; Loaded by the use! above; required here for the declarations below.
+(require '[skein.spools.guild :as guild])
 
 (s/def ::gate-name string?)
 (s/def ::gate-status-input (s/keys :req-un [::gate-name]))
@@ -134,7 +161,6 @@ In the backend repo's checked-in `.skein/init.clj`, publish a guild API:
   {:gate (:gate-name input)
    :satisfied false})
 
-(guild/install!)
 (guild/defop! 'gate.status.v1
   {:doc "Return whether a backend gate is satisfied."
    :spec ::gate-status-input
