@@ -1,0 +1,4 @@
+{:spool/format 1
+ :roots {ct.spools/agent-run "agent-run"
+         ct.spools/delegation "delegation"
+         ct.spools/bench "bench"}}

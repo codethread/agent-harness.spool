@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Compatibility alarm: run a previous release's test suites against the
+# working tree. Red means the published contract changed under its name —
+# a break that must ship as a new name instead. Green is an alarm-level
+# signal only, never proof of accretion.
+# Usage: bin/compat-alarm <previous-release-tag>
+set -euo pipefail
+tag="${1:?usage: compat-alarm <previous-release-tag>}"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+git archive "$tag" | tar -x -C "$tmp"
+
+src_paths=""
+for r in */src; do
+  [ -d "$r" ] && src_paths+="\"$r\" "
+done
+
+test_paths=""
+if [ -d "$tmp/test" ]; then
+  test_paths+="\"$tmp/test\" "
+fi
+for t in "$tmp"/*/test; do
+  [ -d "$t" ] && test_paths+="\"$t\" "
+done
+
+nss=""
+while IFS= read -r f; do
+  rel="${f#*/test/}"
+  nss+="$(echo "${rel%.clj}" | tr '/_' '.-') "
+done < <(find "$tmp" -path '*/test/*' -name '*_test.clj')
+[ -n "$nss" ] || { echo "no test namespaces found at $tag"; exit 2; }
+
+requires=""
+syms=""
+for n in $nss; do
+  requires+="'$n "
+  syms+="'$n "
+done
+
+exec clojure \
+  -Sdeps "{:paths [${src_paths}${test_paths}\"../skein-src/test\" \"../skein-src/spools/workflow/src\"]
+           :deps {io.skein/skein {:local/root \"../skein-src\"}}}" \
+  -J--enable-native-access=ALL-UNNAMED \
+  -M -e "
+(require 'clojure.test ${requires})
+(let [r (apply clojure.test/run-tests [${syms}])]
+  (System/exit (if (zero? (+ (:fail r) (:error r))) 0 1)))"
