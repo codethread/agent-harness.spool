@@ -1,4 +1,4 @@
-(ns skein.bench-metrics-test
+(ns ct.spools.bench-metrics-test
   "Tests for the bench spool's shipped metrics extractors.
 
   Each extractor is a pure `(fn [ctx] -> partial metrics map)`, so the bulk of
@@ -15,7 +15,7 @@
             [clojure.test :refer [deftest is testing]]
             [ct.spools.bench :as bench]
             [ct.spools.bench.metrics :as metrics]
-            [skein.spools.test-support :as test-support])
+            [ct.spools.test-support :as test-support])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 

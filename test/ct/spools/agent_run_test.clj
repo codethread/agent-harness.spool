@@ -1,4 +1,4 @@
-(ns skein.agent-run-test
+(ns ct.spools.agent-run-test
   "Tests for the agent-run spawning spool against a real weaver runtime.
 
   Harness processes in these tests use the shipped `sh` harness (the prompt is
@@ -16,7 +16,7 @@
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
-            [skein.spools.test-support :as test-support :refer [await-phase]]))
+            [ct.spools.test-support :as test-support :refer [await-phase]]))
 
 (defn- with-shuttle
   "Run f with a fresh weaver runtime that has the agent-run engine installed.

@@ -1,4 +1,4 @@
-(ns skein.executors.subagent-test
+(ns ct.spools.subagent-test
   "Tests for the subagent executor: the workflow-gate to agent-run adapter."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
@@ -6,7 +6,7 @@
             [ct.spools.executors.subagent :as treadle]
             [ct.spools.delegation :as agents]
             [skein.spools.workflow :as workflow]
-            [skein.spools.test-support :as test-support :refer [with-runtime]]
+            [ct.spools.test-support :as test-support :refer [with-runtime]]
             [skein.core.db :as db]
             [skein.api.weaver.alpha :as weaver]
             [skein.api.events.alpha :as events]

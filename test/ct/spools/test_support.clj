@@ -1,4 +1,4 @@
-(ns skein.spools.test-support
+(ns ct.spools.test-support
   "Shared fixtures for spool and weaver tests: disposable temp config-dir
   workspaces, a started weaver runtime wrapper, the shared await-budget-ms
   poll-deadline knob, and the poll-until predicate poller that every

@@ -1,4 +1,4 @@
-(ns skein.bench-test
+(ns ct.spools.bench-test
   "Tests for the bench spool against real weaver runtimes.
 
   The whole container lifecycle is exercised with no docker/podman present by
@@ -19,7 +19,7 @@
             [ct.spools.bench :as bench]
             [ct.spools.bench.exec :as exec]
             [ct.spools.agent-run :as shuttle]
-            [skein.spools.test-support :as test-support]
+            [ct.spools.test-support :as test-support]
             [skein.test.alpha :as t])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]

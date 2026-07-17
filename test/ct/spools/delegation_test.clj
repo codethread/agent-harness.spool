@@ -1,4 +1,4 @@
-(ns skein.delegation-test
+(ns ct.spools.delegation-test
   "Tests for the delegation spool layered over the agent-run engine."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as sh]
@@ -12,7 +12,7 @@
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]
-            [skein.spools.test-support :as test-support :refer [await-phase]]
+            [ct.spools.test-support :as test-support :refer [await-phase]]
             [skein.test.alpha :as t]))
 
 (defn- with-agents
