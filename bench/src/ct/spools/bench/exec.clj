@@ -126,9 +126,9 @@
   racing an uncached `git clone --mirror` onto a shared destination path."
   [^File mirror]
   (.computeIfAbsent ^ConcurrentHashMap mirror-locks
-                     (.getCanonicalPath mirror)
-                     (reify Function
-                       (apply [_ _] (Object.)))))
+                    (.getCanonicalPath mirror)
+                    (reify Function
+                      (apply [_ _] (Object.)))))
 
 (defn- sanitize-url [repo]
   (let [slug (-> (str repo)
@@ -356,8 +356,8 @@
                           {:engine engine
                            :container-name name
                            :argv (:argv (compile-argv {:engine engine :run-id run-id :slug slug
-                                                        :image image :cmd cmd :env env :auth auth
-                                                        :entry-dir entry-dir :prompt-arg prompt-arg}))
+                                                       :image image :cmd cmd :env env :auth auth
+                                                       :entry-dir entry-dir :prompt-arg prompt-arg}))
                            :stdin stdin
                            :out-file log-file
                            :err-file log-file

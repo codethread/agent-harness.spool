@@ -159,12 +159,11 @@
               :phase-enum ["pending" "running" "done" "failed" "exhausted" "superseded"]
               :terminal-phases ["done" "failed" "exhausted" "superseded"]
               :active-terminal-phases ["failed" "exhausted"]}
-   :verbs {
-           :about {:group "memory-review"
-                    :help-topic "strand help agent"
-                    :verb "about"
-                    :semantics ["Return the agent coordination manual."]
-                    :returns {"manual" "string"}}
+   :verbs {:about {:group "memory-review"
+                   :help-topic "strand help agent"
+                   :verb "about"
+                   :semantics ["Return the agent coordination manual."]
+                   :returns {"manual" "string"}}
            :prime {:group "memory-review"
                    :help-topic "strand help agent"
                    :verb "prime"
@@ -688,21 +687,21 @@
         (fail! "task already has a successful run (verify + close it)" {:task (:id task) :run (:id r)})))
     (let [harness (harness-for task flags)
           run (agent-run/spawn-run! (cond-> {:harness harness
-                                           :prompt (prompt-for-task task (get flags "--prompt") interactive?)
-                                           :title (str "Delegate: " (:title task))
-                                           :parent (:id task)
-                                           :serves (:id task)
-                                           :cwd (or (get flags "--cwd")
-                                                    (attr task :agent-run/cwd)
-                                                    (workspace-root-dir))}
-                                    interactive? (assoc :mode :interactive
-                                                        :backend (or (get flags "--backend")
-                                                                     (attr task :agent-run/backend)
-                                                                     (fail! "delegate --interactive requires --backend or task agent-run/backend attribute" {:task (:id task)}))
-                                                        :reap (get flags "--reap"))
-                                    (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
-                                    (attr task :agent-run/max-attempts) (assoc :max-attempts (attr task :agent-run/max-attempts))
-                                    fanout (assoc :attrs fanout)))]
+                                             :prompt (prompt-for-task task (get flags "--prompt") interactive?)
+                                             :title (str "Delegate: " (:title task))
+                                             :parent (:id task)
+                                             :serves (:id task)
+                                             :cwd (or (get flags "--cwd")
+                                                      (attr task :agent-run/cwd)
+                                                      (workspace-root-dir))}
+                                      interactive? (assoc :mode :interactive
+                                                          :backend (or (get flags "--backend")
+                                                                       (attr task :agent-run/backend)
+                                                                       (fail! "delegate --interactive requires --backend or task agent-run/backend attribute" {:task (:id task)}))
+                                                          :reap (get flags "--reap"))
+                                      (get flags "--spawned-by") (assoc :spawned-by (get flags "--spawned-by"))
+                                      (attr task :agent-run/max-attempts) (assoc :max-attempts (attr task :agent-run/max-attempts))
+                                      fanout (assoc :attrs fanout)))]
       {:task (:id task) :run (select-keys (agent-run/run-summary run) [:id :phase :harness :attach])})))
 
 (defn- skip-reason
@@ -759,16 +758,16 @@
     ;; so a spawn --for a task carries parent-of placement alone with no serves
     ;; edge, and must not gate that task's later delegation.
     (agent-run/run-summary (agent-run/spawn-run! {:harness (or (get flags "--harness") (fail! "spawn requires --harness" {}))
-                                              :prompt (or (get flags "--prompt") (fail! "spawn requires --prompt" {}))
-                                              :title (get flags "--title")
-                                              :depends-on (get flags "--depends-on")
-                                              :parent (get flags "--for")
-                                              :spawned-by (get flags "--spawned-by")
-                                              :cwd (get flags "--cwd")
-                                              :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))
-                                              :mode (when (get flags "--interactive") :interactive)
-                                              :backend (get flags "--backend")
-                                              :reap (get flags "--reap")}))))
+                                                  :prompt (or (get flags "--prompt") (fail! "spawn requires --prompt" {}))
+                                                  :title (get flags "--title")
+                                                  :depends-on (get flags "--depends-on")
+                                                  :parent (get flags "--for")
+                                                  :spawned-by (get flags "--spawned-by")
+                                                  :cwd (get flags "--cwd")
+                                                  :max-attempts (some->> (get flags "--max-attempts") (parse-int! "--max-attempts"))
+                                                  :mode (when (get flags "--interactive") :interactive)
+                                                  :backend (get flags "--backend")
+                                                  :reap (get flags "--reap")}))))
 
 (defn- runs-under [root]
   (->> (parent-descendants root) (filter run?) (remove terminal-run?) (mapv :id)))
@@ -1550,8 +1549,8 @@
   Returns `{:panel :blackboard :turns [[run-ids...]...] :synthesizer? :pass}`."
   [panel opts]
   (let [opts (require-valid! :ct.spools.delegation/panel-input
-                              (reject-unknown-keys! "panel! options" #{:target :review-id :spawned-by :cwd :fanout-attrs} opts)
-                              "panel! options do not conform to spec")
+                             (reject-unknown-keys! "panel! options" #{:target :review-id :spawned-by :cwd :fanout-attrs} opts)
+                             "panel! options do not conform to spec")
         {:keys [target review-id spawned-by cwd fanout-attrs]} opts
         specs (panel-specs panel {:target target :review-id review-id})
         board-id (case (get-in specs [:blackboard :kind])
@@ -1562,8 +1561,8 @@
                                                   (weaver/show (rt) id))
                              id)
                    :fresh (:id (weaver/add (rt) {:title (truncate (str "Panel: " (:name (first (first (:turns specs))))) 72)
-                                              :attributes (cond-> {"panel/pass" (:pass specs)}
-                                                            spawned-by (assoc "agent-run/spawned-by" spawned-by))})))
+                                                 :attributes (cond-> {"panel/pass" (:pass specs)}
+                                                               spawned-by (assoc "agent-run/spawned-by" spawned-by))})))
         resolve-board (fn [s] (str/replace (str s) board-placeholder board-id))
         spawn-run (fn [spec resume-run extra]
                     (let [;; a resuming turn launches on the short continuation
@@ -1758,53 +1757,53 @@
   <run id>}`."
   [topic opts]
   (let [opts (require-valid! :ct.spools.delegation/council-input
-                              (cond-> (reject-unknown-keys! "council! options" #{:harness :seat-count :rounds :seats :synthesizer :spawned-by :cwd :fanout-attrs} opts)
-                                (contains? opts :seats)
-                                (update :seats #(mapv (partial reject-unknown-keys! "council! seat" council-seat-input-keys) %)))
-                              "council! options do not conform to spec")
+                             (cond-> (reject-unknown-keys! "council! options" #{:harness :seat-count :rounds :seats :synthesizer :spawned-by :cwd :fanout-attrs} opts)
+                               (contains? opts :seats)
+                               (update :seats #(mapv (partial reject-unknown-keys! "council! seat" council-seat-input-keys) %)))
+                             "council! options do not conform to spec")
         {:keys [harness seat-count rounds seats synthesizer spawned-by cwd fanout-attrs]
          :or {seat-count 2 rounds 2}} opts]
     (when (str/blank? topic)
-    (fail! "Council topic must be non-blank" {}))
-  (when (and (contains? opts :seats) (contains? opts :seat-count))
-    (fail! "Council takes :seat-count (scalar) or :seats (per-seat), not both"
-           {:seat-count seat-count :seats seats}))
-  (when-not (pos-int? rounds)
-    (fail! "Council :rounds must be a positive integer" {:rounds rounds}))
-  (let [resolve-harness (fn [seat-harness]
-                          (or seat-harness harness
-                              (fail! "Council seat requires a harness: pass a council-wide :harness or a per-seat :harness"
-                                     {:topic topic})))
-        panel-seats
-        (if (contains? opts :seats)
-          (do (when-not (and (vector? seats) (seq seats))
-                (fail! "Council :seats must be a non-empty vector" {:seats seats}))
-              (mapv (fn [{seat-name :name seat-harness :harness :keys [brief]}]
-                      {:name (if (non-blank? seat-name)
-                               seat-name
-                               (fail! "Council seat requires a non-blank :name" {:seat {:brief brief}}))
-                       :harness (resolve-harness seat-harness)
-                       :brief (council-seat-brief topic brief)})
-                    seats))
-          (do (when-not (pos-int? seat-count)
-                (fail! "Council :seat-count must be a positive integer" {:seat-count seat-count}))
-              (mapv (fn [n]
-                      {:name (str "seat-" n)
-                       :harness (resolve-harness nil)
-                       :brief (council-seat-brief topic nil)})
-                    (range 1 (inc seat-count)))))
-        panel {:seats panel-seats
-               :turns {:rounds rounds}
-               :blackboard :fresh
-               :synthesis {:harness (or synthesizer (:harness (first panel-seats)))
-                           :brief (str "Synthesize the council deliberation on:\n" topic)}}
-        result (panel! panel (cond-> {}
-                               spawned-by (assoc :spawned-by spawned-by)
-                               cwd (assoc :cwd cwd)
-                               fanout-attrs (assoc :fanout-attrs fanout-attrs)))]
-    (cond-> {:blackboard (:blackboard result)
-             :turns (:turns result)}
-      (:synthesizer result) (assoc :synthesizer (:synthesizer result))))))
+      (fail! "Council topic must be non-blank" {}))
+    (when (and (contains? opts :seats) (contains? opts :seat-count))
+      (fail! "Council takes :seat-count (scalar) or :seats (per-seat), not both"
+             {:seat-count seat-count :seats seats}))
+    (when-not (pos-int? rounds)
+      (fail! "Council :rounds must be a positive integer" {:rounds rounds}))
+    (let [resolve-harness (fn [seat-harness]
+                            (or seat-harness harness
+                                (fail! "Council seat requires a harness: pass a council-wide :harness or a per-seat :harness"
+                                       {:topic topic})))
+          panel-seats
+          (if (contains? opts :seats)
+            (do (when-not (and (vector? seats) (seq seats))
+                  (fail! "Council :seats must be a non-empty vector" {:seats seats}))
+                (mapv (fn [{seat-name :name seat-harness :harness :keys [brief]}]
+                        {:name (if (non-blank? seat-name)
+                                 seat-name
+                                 (fail! "Council seat requires a non-blank :name" {:seat {:brief brief}}))
+                         :harness (resolve-harness seat-harness)
+                         :brief (council-seat-brief topic brief)})
+                      seats))
+            (do (when-not (pos-int? seat-count)
+                  (fail! "Council :seat-count must be a positive integer" {:seat-count seat-count}))
+                (mapv (fn [n]
+                        {:name (str "seat-" n)
+                         :harness (resolve-harness nil)
+                         :brief (council-seat-brief topic nil)})
+                      (range 1 (inc seat-count)))))
+          panel {:seats panel-seats
+                 :turns {:rounds rounds}
+                 :blackboard :fresh
+                 :synthesis {:harness (or synthesizer (:harness (first panel-seats)))
+                             :brief (str "Synthesize the council deliberation on:\n" topic)}}
+          result (panel! panel (cond-> {}
+                                 spawned-by (assoc :spawned-by spawned-by)
+                                 cwd (assoc :cwd cwd)
+                                 fanout-attrs (assoc :fanout-attrs fanout-attrs)))]
+      (cond-> {:blackboard (:blackboard result)
+               :turns (:turns result)}
+        (:synthesizer result) (assoc :synthesizer (:synthesizer result))))))
 
 (defn- parse-attr-decoration
   "Parse repeatable `--attr key=value` specs into a decoration map of string
@@ -2254,7 +2253,7 @@
       "prime" prime-doc
       "spawn" (op-spawn (parsed->legacy-argv args []))
       "ps" (agent-run/runs (cond-> {:active (boolean (:active args))}
-                           (:for args) (assoc :for (:for args))))
+                             (:for args) (assoc :for (:for args))))
       "spend" (agent-run/spend (cond-> {}
                                  (:harness args) (assoc :harness (:harness args))
                                  (:since args) (assoc :since (:since args))
@@ -2361,12 +2360,12 @@
     {:installed true
      :namespace 'ct.spools.delegation
      :op (weaver/register-op! runtime 'agent
-                           {:doc (:doc agent-arg-spec)
-                            :arg-spec agent-arg-spec
-                            :returns agent-returns
+                              {:doc (:doc agent-arg-spec)
+                               :arg-spec agent-arg-spec
+                               :returns agent-returns
                             ;; await blocks for arbitrarily long coordination waits
-                            :deadline-class :unbounded}
-                           'ct.spools.delegation/agent-op)
+                               :deadline-class :unbounded}
+                              'ct.spools.delegation/agent-op)
      :pattern (patterns/register-pattern! runtime 'agent-plan
                                           "Create a feature strand plus task/review children for agent work."
                                           'ct.spools.delegation/agent-plan ::agent-plan-input)

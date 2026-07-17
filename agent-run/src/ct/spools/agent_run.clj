@@ -84,8 +84,6 @@
            [java.time Instant]
            [java.util.concurrent Executors ScheduledThreadPoolExecutor ThreadFactory TimeUnit]))
 
-
-
 (def ^:private default-max-attempts 3)
 
 (def ^:private default-fanout-ceiling
@@ -848,8 +846,6 @@
   []
   (str "env XDG_STATE_HOME=" (state-root) " strand --workspace " (workspace-dir)))
 
-
-
 (def ^:private generic-worker-contract
   "Worker contract every preamble-carrying headless run receives.
 
@@ -1295,7 +1291,7 @@
       (update-run! id {"agent-run/phase" "pending"
                        "agent-run/error" (str (ex-message t) (some->> (ex-data t) (str " ")))
                        "agent-run/recovery-deferred-until" (str (.plusMillis (Instant/now)
-                                                                            recovery-harness-retry-ms))}
+                                                                             recovery-harness-retry-ms))}
                    {})
       (schedule-deferred-recovery! (rt) id))))
 
@@ -1402,9 +1398,9 @@
                {:run (:id run) :harness harness-name
                 :predecessor-harness predecessor-harness :error-class "resume"}))
       (when-let [live (seq (->> (weaver/list (rt)
-                                          [:and [:= :state "active"] run-query
-                                           [:= [:attr "agent-run/resumes"] predecessor-id]]
-                                          {})
+                                             [:and [:= :state "active"] run-query
+                                              [:= [:attr "agent-run/resumes"] predecessor-id]]
+                                             {})
                                 (map :id)
                                 (remove #(= (:id run) %))))]
         (fail! "Another active run already continues this session"
@@ -1487,31 +1483,31 @@
     (swap! (in-flight) dissoc id)
     (when-not (= "failed" (sattr current "phase"))
       (if (zero? exit)
-      (let [{:keys [result session-id parse-error error usage]}
-            (try
-              (parse-output (:parse harness) stdout)
-              (catch Exception e
-                {:result (str/trim stdout)
-                 :parse-error (str (ex-message e))}))
+        (let [{:keys [result session-id parse-error error usage]}
+              (try
+                (parse-output (:parse harness) stdout)
+                (catch Exception e
+                  {:result (str/trim stdout)
+                   :parse-error (str (ex-message e))}))
             ;; a token-only parser (codex-json) yields no cost of its own; the
             ;; seat's rate card is what turns those tokens into cost-usd
-            usage (apply-cost-rates usage (:cost-rates harness))
-            usage-attrs (usage->attrs usage)]
-        (cond
+              usage (apply-cost-rates usage (:cost-rates harness))
+              usage-attrs (usage->attrs usage)]
+          (cond
           ;; exit 0 but the harness's own event stream reports a terminal
           ;; provider failure (usage limit, auth, transport): the process
           ;; exiting cleanly does not make the turn a success. Fail loudly and
           ;; retryably instead of closing a done run with no real report.
-          error
-          (let [stderr (str/trim (read-file-safe err-file))]
-            (mark-failed! id
-                          (str "harness exited 0 but the final turn errored: " error
-                               (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
-                          (merge (cond-> {"agent-run/exit-code" exit}
-                                   session-id (assoc "agent-run/session-id" session-id))
-                                 usage-attrs)))
+            error
+            (let [stderr (str/trim (read-file-safe err-file))]
+              (mark-failed! id
+                            (str "harness exited 0 but the final turn errored: " error
+                                 (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
+                            (merge (cond-> {"agent-run/exit-code" exit}
+                                     session-id (assoc "agent-run/session-id" session-id))
+                                   usage-attrs)))
 
-          (str/blank? result)
+            (str/blank? result)
           ;; exit 0 but no result text: the harness died silently (a transport
           ;; drop mid-turn writes nothing yet still exits 0). A run's result is
           ;; the worker's report, so an empty one is not success — record it
@@ -1521,24 +1517,24 @@
           ;; tool-only pi-json turn spent tokens even with no result text, so its
           ;; spend must not vanish; the failure is deliberately not resume-classed,
           ;; so a plain retry respawns fresh.
-          (let [stderr (str/trim (read-file-safe err-file))]
-            (mark-failed! id
-                          (str "harness exited 0 with an empty result"
-                               (when parse-error (str " (parse error: " parse-error ")"))
-                               (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
-                          (merge (cond-> {"agent-run/exit-code" exit}
-                                   session-id (assoc "agent-run/session-id" session-id))
-                                 usage-attrs)))
+            (let [stderr (str/trim (read-file-safe err-file))]
+              (mark-failed! id
+                            (str "harness exited 0 with an empty result"
+                                 (when parse-error (str " (parse error: " parse-error ")"))
+                                 (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
+                            (merge (cond-> {"agent-run/exit-code" exit}
+                                     session-id (assoc "agent-run/session-id" session-id))
+                                   usage-attrs)))
 
-          :else
-          (update-run! id (merge (cond-> {"agent-run/phase" "done"
-                                          "agent-run/exit-code" exit
-                                          "agent-run/result" result
-                                          "agent-run/finished-at" (now)}
-                                   session-id (assoc "agent-run/session-id" session-id)
-                                   parse-error (assoc "agent-run/parse-error" parse-error))
-                                 usage-attrs)
-                       {:state "closed"})))
+            :else
+            (update-run! id (merge (cond-> {"agent-run/phase" "done"
+                                            "agent-run/exit-code" exit
+                                            "agent-run/result" result
+                                            "agent-run/finished-at" (now)}
+                                     session-id (assoc "agent-run/session-id" session-id)
+                                     parse-error (assoc "agent-run/parse-error" parse-error))
+                                   usage-attrs)
+                         {:state "closed"})))
         (let [stderr (str/trim (read-file-safe err-file))
               detail (if (str/blank? stderr) (str/trim stdout) stderr)]
           (mark-failed! id (str "harness exited " exit ": " (tail detail 2000))
@@ -1985,7 +1981,7 @@
                      (if (>= attempt max-attempts)
                        (do (update-run! id {"agent-run/phase" "exhausted"
                                             "agent-run/error" (str "run exhausted " attempt " of " max-attempts
-                                                                 " attempts after weaver crash")}
+                                                                   " attempts after weaver crash")}
                                         {})
                            (update acc :exhausted conj id))
                        (do (update-run! id {"agent-run/phase" "pending"
@@ -2060,9 +2056,9 @@
       (fail! "Resume requires a harness that declares a :resume splice"
              {:resume predecessor-id :harness harness-name}))
     (when-let [live (seq (mapv :id (weaver/list (rt)
-                                             [:and [:= :state "active"] run-query
-                                              [:= [:attr "agent-run/resumes"] predecessor-id]]
-                                             {})))]
+                                                [:and [:= :state "active"] run-query
+                                                 [:= [:attr "agent-run/resumes"] predecessor-id]]
+                                                {})))]
       (fail! "Another active run already continues this session"
              {:resume predecessor-id :active live}))))
 
@@ -2130,10 +2126,10 @@
     (when (and serves (not (weaver/show (rt) serves)))
       (fail! "Run :serves target not found" {:id serves}))
     (let [run (weaver/add (rt) {:title (or title (truncate prompt 72))
-                             :attributes (merge attrs reserved)
-                             :edges (cond-> (mapv (fn [dep] {:type "depends-on" :to dep}) (distinct (or depends-on [])))
-                                      resume (conj {:type "resumes" :to resume})
-                                      serves (conj {:type "serves" :to serves}))})]
+                                :attributes (merge attrs reserved)
+                                :edges (cond-> (mapv (fn [dep] {:type "depends-on" :to dep}) (distinct (or depends-on [])))
+                                         resume (conj {:type "resumes" :to resume})
+                                         serves (conj {:type "serves" :to serves}))})]
       (doseq [parent-id parent-ids]
         (weaver/update (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
       run)))
@@ -2269,8 +2265,8 @@
     ;; predecessor untouched rather than half-succeeded.
     (weaver/update (rt) old-run-id {:state "closed" :attributes {"agent-run/phase" "superseded"}})
     (weaver/update (rt) (:id successor)
-                {:attributes {"agent-run/supersedes" old-run-id}
-                 :edges [{:type "supersedes" :to old-run-id}]})
+                   {:attributes {"agent-run/supersedes" old-run-id}
+                    :edges [{:type "supersedes" :to old-run-id}]})
     successor))
 
 (defn- attach-hint
@@ -2328,25 +2324,25 @@
   [opts incoming-edges-fn]
   (let [{:keys [active] for-target :for} opts]
     (try (supervise!) (catch Exception _ nil))
-   (let [run-strands (weaver/list (rt)
-                               (if active [:and [:= :state "active"] run-query] run-query)
-                               {})
+    (let [run-strands (weaver/list (rt)
+                                   (if active [:and [:= :state "active"] run-query] run-query)
+                                   {})
          ;; A run satisfies a --for filter two ways: a serving run has an
          ;; incoming `serves` edge from the target, and a helper has a structural
          ;; `parent-of` edge from it. Narrow to the union up front (two indexed
          ;; edge lookups) rather than summarising every run.
-         run-strands (if for-target
-                       (let [children (set (map :to_strand_id
-                                                (graph/outgoing-edges (rt) [for-target] "parent-of")))
-                             servers (set (map :from_strand_id
-                                               (graph/incoming-edges (rt) [for-target] "serves")))
-                             relevant (into children servers)]
-                         (filterv #(relevant (:id %)) run-strands))
-                       run-strands)
-         run-ids (mapv :id run-strands)
-         parents (parents-by-run run-ids incoming-edges-fn)
-         serving (serving-targets-by-run run-ids)
-         summaries (mapv #(run-summary % (get parents (:id %) []) (get serving (:id %))) run-strands)]
+          run-strands (if for-target
+                        (let [children (set (map :to_strand_id
+                                                 (graph/outgoing-edges (rt) [for-target] "parent-of")))
+                              servers (set (map :from_strand_id
+                                                (graph/incoming-edges (rt) [for-target] "serves")))
+                              relevant (into children servers)]
+                          (filterv #(relevant (:id %)) run-strands))
+                        run-strands)
+          run-ids (mapv :id run-strands)
+          parents (parents-by-run run-ids incoming-edges-fn)
+          serving (serving-targets-by-run run-ids)
+          summaries (mapv #(run-summary % (get parents (:id %) []) (get serving (:id %))) run-strands)]
       (if for-target
         (filterv #(= for-target (:for %)) summaries)
         summaries))))
@@ -2592,8 +2588,6 @@
    |references when applicable. Do not modify files or close strands. Append
    |your findings as a note on the target strand, then end with the same
    |findings as your final result."))
-
-
 
 (defn set-default-review-contract!
   "Set the workspace default review contract text; nil restores the generic one.

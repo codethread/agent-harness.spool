@@ -147,7 +147,7 @@
                             (str "gate " gate-id " is active but not ready")}))))
       (catch Throwable t
         (stamp! run-id {"gate/delivered" (str "error: " (ex-message t)
-                                                 (some->> (ex-data t) (str " ")))})))))
+                                              (some->> (ex-data t) (str " ")))})))))
 
 (defn- finished-undelivered-runs []
   ;; Only a genuinely successful run delivers a gate. A run's result is the
@@ -157,11 +157,11 @@
   ;; stale) result must never silently complete the gate; recovery supersedes it
   ;; with a fresh successor that inherits the `serves` edge.
   (weaver/list (rt)
-            [:and [:= :state "closed"]
-             [:= [:attr "agent-run/phase"] "done"]
-             [:edge/out "serves" [:= [:attr "workflow/gate"] "subagent"]]
-             [:missing [:attr "gate/delivered"]]]
-            {}))
+               [:and [:= :state "closed"]
+                [:= [:attr "agent-run/phase"] "done"]
+                [:edge/out "serves" [:= [:attr "workflow/gate"] "subagent"]]
+                [:missing [:attr "gate/delivered"]]]
+               {}))
 
 (defn- gate-prompt [gate]
   (or (non-blank (attr gate :agent-run/prompt))
@@ -207,7 +207,7 @@
                                  :attrs {"workflow/run-id" run-id}}))
         (catch Throwable t
           (stamp! (:id gate) {"gate/error" (str (ex-message t)
-                                                   (some->> (ex-data t) (str " ")))}))))))
+                                                (some->> (ex-data t) (str " ")))}))))))
 
 (defn- spawn-ready-gates! []
   (doseq [root (workflow/active-runs)
@@ -218,7 +218,7 @@
       (spawn-for-gate! run-id step)
       (catch Throwable t
         (stamp! (:id step) {"gate/error" (str (ex-message t)
-                                                 (some->> (ex-data t) (str " ")))})))))
+                                              (some->> (ex-data t) (str " ")))})))))
 
 (defn scan!
   "Deliver finished agent-run runs and spawn ready workflow subagent gates."
@@ -290,9 +290,9 @@
     ;; `stalled-gates-query` so composing readers share it without the registry.
     (graph/register-query! runtime 'stalled-subagent-gates stalled-gates-query)
     (graph/register-query! runtime 'blocked-deliveries
-                         [:and [:= :state "closed"]
-                          [:exists [:attr "gate/delivery-blocked"]]
-                          [:missing [:attr "gate/delivered"]]])
+                           [:and [:= :state "closed"]
+                            [:exists [:attr "gate/delivery-blocked"]]
+                            [:missing [:attr "gate/delivered"]]])
     (scan!)
     {:installed true
      :namespace 'ct.spools.executors.subagent}))

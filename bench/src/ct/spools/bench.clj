@@ -634,19 +634,19 @@
             {:slug slug :phase "aborted"}
             (do
               (weaver/update runtime entry-id
-                          {:state "closed"
-                           :attributes (merge {"bench/phase" "done"
-                                               "bench/image-digest" (:image-digest result)}
-                                              (metric-attrs metrics))})
+                             {:state "closed"
+                              :attributes (merge {"bench/phase" "done"
+                                                  "bench/image-digest" (:image-digest result)}
+                                                 (metric-attrs metrics))})
               {:slug slug :phase "done"}))))
       (catch Throwable t
         (if (aborted? runtime entry-id)
           {:slug slug :phase "aborted"}
           (let [detail (:err (ex-data t))]
             (weaver/update runtime entry-id
-                        {:attributes (cond-> {"bench/phase" "failed"
-                                              "bench/error" (ex-message t)}
-                                       (not (str/blank? detail)) (assoc "bench/error-detail" detail))})
+                           {:attributes (cond-> {"bench/phase" "failed"
+                                                 "bench/error" (ex-message t)}
+                                          (not (str/blank? detail)) (assoc "bench/error-detail" detail))})
             {:slug slug :phase "failed" :error (ex-message t)})))
       (finally
         (swap! (in-flight-atom runtime) dissoc entry-id)
@@ -810,16 +810,16 @@
       (:harness judge)
       (binding [agent-run/*runtime* runtime]
         (:id (agent-run/spawn-run! {:harness (:harness judge)
-                                  :prompt prompt
-                                  :title title
-                                  :depends-on (vec entry-ids)
-                                  :parent root-id
-                                  :attrs attrs})))
+                                    :prompt prompt
+                                    :title title
+                                    :depends-on (vec entry-ids)
+                                    :parent root-id
+                                    :attrs attrs})))
       :else
       (let [judge-strand (weaver/add runtime
-                                  {:title title
-                                   :attributes attrs
-                                   :edges (mapv (fn [e] {:type "depends-on" :to e}) entry-ids)})]
+                                     {:title title
+                                      :attributes attrs
+                                      :edges (mapv (fn [e] {:type "depends-on" :to e}) entry-ids)})]
         (weaver/update runtime root-id {:edges [{:type "parent-of" :to (:id judge-strand)}]})
         (:id judge-strand)))))
 
@@ -867,10 +867,10 @@
     (let [sha (or (:sha normalized)
                   (exec/resolve-rev! (data-root runtime) (:repo normalized) (:rev normalized)))
           root (weaver/add runtime {:title (str "Bench: " name)
-                                 :attributes {"bench/run" "true"
-                                              "bench/suite" name
-                                              "bench/repo" (:repo normalized)
-                                              "bench/sha" sha}})
+                                    :attributes {"bench/run" "true"
+                                                 "bench/suite" name
+                                                 "bench/repo" (:repo normalized)
+                                                 "bench/sha" sha}})
           run-id (:id root)
           data-dir (.getCanonicalPath (run-dir runtime run-id))]
       (when-let [parent (:for opts)]
@@ -880,16 +880,16 @@
                            (let [prompt-slug (if (:single-prompt? normalized) ::single (:prompt cell))
                                  prompt-text (resolve-prompt-text runtime (:prompts normalized) prompt-slug)
                                  entry (weaver/add runtime
-                                                {:title (str "Bench entry: " (:slug cell))
-                                                 :attributes (cond-> {"bench/entry" "true"
-                                                                      "bench/slug" (:slug cell)
-                                                                      "bench/harness" (clojure.core/name (:harness cell))
-                                                                      "bench/phase" "pending"
-                                                                      "bench/attempt" 1}
-                                                               (:model cell) (assoc "bench/model" (:model cell))
-                                                               (:thinking cell) (assoc "bench/thinking" (:thinking cell))
-                                                               (and (not (:single-prompt? normalized)) (:prompt cell))
-                                                               (assoc "bench/prompt-slug" (clojure.core/name (:prompt cell))))})]
+                                                   {:title (str "Bench entry: " (:slug cell))
+                                                    :attributes (cond-> {"bench/entry" "true"
+                                                                         "bench/slug" (:slug cell)
+                                                                         "bench/harness" (clojure.core/name (:harness cell))
+                                                                         "bench/phase" "pending"
+                                                                         "bench/attempt" 1}
+                                                                  (:model cell) (assoc "bench/model" (:model cell))
+                                                                  (:thinking cell) (assoc "bench/thinking" (:thinking cell))
+                                                                  (and (not (:single-prompt? normalized)) (:prompt cell))
+                                                                  (assoc "bench/prompt-slug" (clojure.core/name (:prompt cell))))})]
                              (weaver/update runtime run-id {:edges [{:type "parent-of" :to (:id entry)}]})
                              {:slug (:slug cell) :entry-id (:id entry) :cell cell
                               :prompt-text prompt-text :prompt-slug prompt-slug
@@ -960,9 +960,9 @@
           prompt-text (resolve-prompt-text runtime (:prompts (:suite ctx)) prompt-slug)
           attempt (or (attr-get entry "bench/attempt") 1)]
       (weaver/update runtime entry-id
-                  {:attributes {"bench/phase" "pending"
-                                "bench/error" nil
-                                "bench/attempt" (inc attempt)}})
+                     {:attributes {"bench/phase" "pending"
+                                   "bench/error" nil
+                                   "bench/attempt" (inc attempt)}})
       (queue-entry! runtime ctx {:slug slug :entry-id entry-id :cell cell :prompt-text prompt-text})
       {:retried entry-id :attempt (inc attempt)})))
 
@@ -994,7 +994,7 @@
                            ;; can't race the aborted marking (abort wins).
                            (when marked?
                              (weaver/update runtime (:id entry)
-                                         {:attributes {"bench/phase" "failed" "bench/error" "aborted"}}))
+                                            {:attributes {"bench/phase" "failed" "bench/error" "aborted"}}))
                            (when eng (exec/kill-container! eng (exec/container-name run-id slug)))
                            (when-let [{:keys [process]} (get @(in-flight-atom runtime) (:id entry))]
                              (when process (.destroyForcibly ^Process process)))
@@ -1008,9 +1008,9 @@
                    first)]
     (when judge
       (weaver/update runtime (:id judge)
-                  {:state "closed"
-                   :attributes (cond-> {"bench/error" "aborted"}
-                                 (attr-get judge "agent-run/run") (assoc "agent-run/phase" "superseded"))}))
+                     {:state "closed"
+                      :attributes (cond-> {"bench/error" "aborted"}
+                                    (attr-get judge "agent-run/run") (assoc "agent-run/phase" "superseded"))}))
     (drop-semaphore! runtime run-id)
     {:aborted run-id :failed failed :judge (:id judge)}))
 
@@ -1343,8 +1343,8 @@
 (def ^:private bench-returns
   {:subcommands
    {"run" {:type :map :required {:operation :string :run :string
-                                  :entries {:type :map :extra :string}
-                                  :judge :json}}
+                                 :entries {:type :map :extra :string}
+                                 :judge :json}}
     "list" {:type :collection
             :items {:type :map
                     :required {:run :string :suite :string :sha :string :state :string
@@ -1436,8 +1436,8 @@
         (when-let [root (root-of runtime (:id entry))]
           (exec/kill-container! eng (exec/container-name root (attr-get entry "bench/slug")))))
       (weaver/update runtime (:id entry)
-                  {:attributes {"bench/phase" "failed"
-                                "bench/error" "orphaned by weaver restart"}}))
+                     {:attributes {"bench/phase" "failed"
+                                   "bench/error" "orphaned by weaver restart"}}))
     (mapv :id orphans)))
 
 (def ^:private bench-namespace-declaration
@@ -1486,12 +1486,12 @@
        :suites (mapv :name (suites runtime))
        :reconciled reconciled
        :op (weaver/register-op! runtime 'bench
-                             {:doc (:doc bench-arg-spec)
-                              :arg-spec bench-arg-spec
-                              :returns bench-returns
+                                {:doc (:doc bench-arg-spec)
+                                 :arg-spec bench-arg-spec
+                                 :returns bench-returns
                               ;; run/reconcile may fetch a git mirror synchronously
-                              :deadline-class :unbounded
-                              :hook-class :mutating}
-                             'ct.spools.bench/bench-op)
+                                 :deadline-class :unbounded
+                                 :hook-class :mutating}
+                                'ct.spools.bench/bench-op)
        :query (graph/register-query! runtime 'bench-runs
-                                   [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]])})))
+                                     [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]])})))

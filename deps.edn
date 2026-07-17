@@ -1,0 +1,22 @@
+{:paths []
+ :aliases
+ {:test {;; Keep every Skein root on the same sibling checkout. The workflow
+         ;; spool is outside Skein's base classpath and joins the test JVM
+         ;; explicitly because the subagent executor requires it.
+         :extra-paths ["test"
+                       "agent-run/src"
+                       "delegation/src"
+                       "bench/src"
+                       "../skein-src/test"
+                       "../skein-src/spools/workflow/src"]
+         :extra-deps {io.skein/skein {:local/root "../skein-src"}}
+         :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "ct.spools.test-runner"]}
+  :format {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
+           :main-opts ["-m" "cljfmt.main" "check" "agent-run/src" "delegation/src" "bench/src" "test"]}
+  :format/fix {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
+               :main-opts ["-m" "cljfmt.main" "fix" "agent-run/src" "delegation/src" "bench/src" "test"]}
+  :lint/clj-kondo {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
+                   :main-opts ["-m" "clj-kondo.main" "--lint" "agent-run/src" "delegation/src" "bench/src" "test"]}
+  :lint/splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
+                :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "agent-run/src" "delegation/src" "bench/src" "test"]}}}
