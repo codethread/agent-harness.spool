@@ -108,12 +108,11 @@
 
 (s/def :bench.harness/image ::non-blank)
 (s/def :bench.harness/argv (s/and ::string-vec seq))
-;; `:prompt-via` is agent-run's key and enum verbatim, but bench's default
-;; DIVERGES: bench defaults :stdin where `agent-run/register-harness!` defaults
-;; :arg. Container entries are non-interactive and prompts routinely exceed a
-;; safe argv, so :stdin is the safe default here; an entry that needs :arg says
-;; so explicitly. Read `(or (:prompt-via harness-def) :stdin)` in `run-entry!`.
-(s/def :bench.harness/prompt-via #{:stdin :arg})
+;; `:prompt-via` is agent-run's key and enum verbatim. Bench harnesses must state
+;; it explicitly because container agents differ in whether they consume the
+;; prompt from stdin or argv; registration rejects an omitted or unknown mode.
+(def ^:private prompt-via-values #{:stdin :arg})
+(s/def :bench.harness/prompt-via prompt-via-values)
 (s/def :bench.harness/model-flag string?)
 (s/def :bench.harness/thinking-flag string?)
 (s/def :bench.harness/env (s/map-of string? string?))
@@ -129,9 +128,10 @@
 (def ^:private harness-def-keys
   #{:image :argv :prompt-via :model-flag :thinking-flag :env :auth :extractor :doc})
 (s/def ::harness-def
-  (s/keys :req-un [:bench.harness/image :bench.harness/argv]
-          :opt-un [:bench.harness/prompt-via :bench.harness/model-flag :bench.harness/thinking-flag
-                   :bench.harness/env :bench.harness/auth :bench.harness/extractor :bench.harness/doc]))
+  (s/keys :req-un [:bench.harness/image :bench.harness/argv :bench.harness/prompt-via
+                   :bench.harness/extractor]
+          :opt-un [:bench.harness/model-flag :bench.harness/thinking-flag
+                   :bench.harness/env :bench.harness/auth :bench.harness/doc]))
 
 (s/def :bench.cell/harness keyword?)
 (s/def :bench.cell/model string?)
@@ -188,6 +188,17 @@
 ;; ---------------------------------------------------------------------------
 ;; Agent + suite + extractor registries
 
+(declare resolve-extractor!)
+
+(defn- require-prompt-via!
+  "Return an explicit valid prompt transport or fail with registration/run context."
+  [harness-def context]
+  (let [prompt-via (:prompt-via harness-def)]
+    (if (contains? prompt-via-values prompt-via)
+      prompt-via
+      (fail! "bench harness :prompt-via must be explicit and allowed"
+             (merge context {:prompt-via prompt-via :allowed prompt-via-values})))))
+
 (defn- reg-key [k]
   (cond
     (keyword? k) k
@@ -197,15 +208,17 @@
 (defn register-harness!
   "Register a bench harness definition under `k` for this `runtime`.
 
-  Says how one tool runs inside a container: `:image` and `:argv` are required;
-  `:prompt-via`, `:model-flag`, `:thinking-flag`, `:env`, `:auth`, `:extractor`,
-  and `:doc` are optional. Fails loudly on unknown keys (TEN-003) or a shape the
-  spec rejects. Returns the stored definition.
+  Says how one tool runs inside a container: `:image`, `:argv`, and
+  `:prompt-via`, and `:extractor` are required; `:extractor` must name a
+  registered extractor; `:model-flag`, `:thinking-flag`, `:env`, `:auth`, and
+  `:doc` are optional.
+  Fails loudly on unknown keys (TEN-003), an unknown extractor, an
+  omitted or invalid prompt transport, or a shape the spec rejects. Returns the
+  stored definition.
 
   `:prompt-via` is `agent-run/register-harness!`'s key and `#{:stdin :arg}` enum
-  verbatim, but its DEFAULT diverges: bench defaults `:stdin`, agent-run
-  defaults `:arg`. Container entries are non-interactive and prompts routinely
-  exceed a safe argv, so a definition that needs `:arg` must say so explicitly.
+  verbatim. Bench requires an explicit value so registrations cannot guess how
+  a container agent consumes its prompt.
 
   A bench harness is NOT a `ct.spools.agent-run` harness, and the two
   registries are not interchangeable. A bench harness is a *container*
@@ -218,8 +231,10 @@
   the suite's `:judge :harness` resolves agent-run's registry."
   [runtime k definition]
   (reject-unknown-keys! "bench/register-harness!" harness-def-keys definition)
-  (require-valid! ::harness-def definition "bench harness definition is invalid")
   (let [key (reg-key k)]
+    (require-prompt-via! definition {:harness key})
+    (require-valid! ::harness-def definition "bench harness definition is invalid")
+    (resolve-extractor! runtime (:extractor definition))
     (swap! (harnesses-atom runtime) assoc key (assoc definition :name key))
     (get @(harnesses-atom runtime) key)))
 
@@ -357,6 +372,13 @@
   [runtime]
   (->> @(extractors-atom runtime) keys (sort-by str) vec))
 
+(defn- resolve-extractor!
+  "Resolve an explicitly named extractor, failing loudly when it is unavailable."
+  [runtime requested]
+  (or (get @(extractors-atom runtime) requested)
+      (fail! "bench harness references an unknown extractor"
+             {:requested requested :available (extractors runtime)})))
+
 (defn cross
   "Return the cross-product of axis maps as an explicit vector of entry cells.
 
@@ -379,7 +401,8 @@
   "The `:generic` metrics extractor: exit, duration, diff, and validation only.
 
   Those already ride in the engine's post-exit collection, so this contributes
-  no extra keys; it exists so every harness def resolves an extractor by key."
+  no extra keys. Harness definitions select it explicitly with
+  `:extractor :generic`."
   [_ctx]
   {})
 
@@ -581,6 +604,7 @@
   (let [{:keys [run-id engine suite semaphore]} ctx
         {:keys [entry-id slug cell prompt-text]} entry
         harness-def (get @(harnesses-atom runtime) (:harness cell))
+        prompt-via (require-prompt-via! harness-def {:harness (:harness cell) :cell cell})
         entry-dir (io/file (run-dir runtime run-id) slug)
         container (exec/container-name run-id slug)]
     (.acquire ^Semaphore semaphore)
@@ -595,8 +619,7 @@
                                       :remove-paths (:remove suite)
                                       :workspace-root (workspace-root runtime)})]
         (set-phase! runtime entry-id "running")
-        (let [prompt-via (or (:prompt-via harness-def) :stdin)
-              on-start (fn [proc]
+        (let [on-start (fn [proc]
                          (swap! (in-flight-atom runtime) assoc entry-id
                                 {:container container :process proc :run-id run-id}))
               result (exec/execute-entry!
@@ -616,7 +639,7 @@
                        :overlay overlay
                        :sha (:sha ctx)
                        :on-start on-start})
-              extractor (get @(extractors-atom runtime) (or (:extractor harness-def) :generic) generic-extractor)
+              extractor (resolve-extractor! runtime (:extractor harness-def))
               extracted (sanitize-extracted (extractor {:entry-dir entry-dir
                                                         :home (io/file entry-dir "home")
                                                         :workspace workspace

@@ -936,6 +936,15 @@
                    :ct.spools.delegation.review-specs/reviewers
                    :ct.spools.delegation.review-specs/synthesizer]))
 
+(defn- validate-builder-output!
+  [caller spec value]
+  (if (s/valid? spec value)
+    value
+    (fail! (str caller " output does not conform to spec")
+           {:spec spec
+            :value value
+            :explain (s/explain-data spec value)})))
+
 (def ^:private roster-seat-keys #{:name :harness :brief :scope})
 (def ^:private roster-keys #{:seats :synthesis})
 (def ^:private roster-synthesis-keys #{:harness})
@@ -1244,27 +1253,30 @@
         shared-attrs {"panel/blackboard" target
                       "review/roster" (name roster-id)
                       "panel/pass" pass-id}]
-    {:roster roster-id
-     :target target
-     :pass pass-id
-     :reviewers (mapv (fn [{seat-name :name :keys [harness brief scope]}]
-                        {:name seat-name
-                         :harness harness
-                         :prompt (review-prompt {:target-id target
-                                                 :focus seat-name
-                                                 :contract (str base "\n\n[reviewer: " seat-name "]\n" brief)
-                                                 :scope scope
-                                                 :note-tag pass-id
-                                                 :change-context change-context})
-                         :attrs (assoc shared-attrs "review/focus" seat-name)})
-                      (:seats roster-def))
-     ;; the synthesizer weighs findings roster-independently, so it receives
-     ;; the base contract, never a per-reviewer one
-     :synthesizer {:name "synthesis"
-                   :harness (or (get-in roster-def [:synthesis :harness])
-                                (:harness (first (:seats roster-def))))
-                   :prompt (review-synthesis-prompt {:target-id target :contract base :note-tag pass-id})
-                   :attrs (assoc shared-attrs "panel/synthesis" "true")}}))
+    (validate-builder-output!
+     "roster-review-specs"
+     :ct.spools.delegation/review-specs
+     {:roster roster-id
+      :target target
+      :pass pass-id
+      :reviewers (mapv (fn [{seat-name :name :keys [harness brief scope]}]
+                         {:name seat-name
+                          :harness harness
+                          :prompt (review-prompt {:target-id target
+                                                  :focus seat-name
+                                                  :contract (str base "\n\n[reviewer: " seat-name "]\n" brief)
+                                                  :scope scope
+                                                  :note-tag pass-id
+                                                  :change-context change-context})
+                          :attrs (assoc shared-attrs "review/focus" seat-name)})
+                       (:seats roster-def))
+      ;; the synthesizer weighs findings roster-independently, so it receives
+      ;; the base contract, never a per-reviewer one
+      :synthesizer {:name "synthesis"
+                    :harness (or (get-in roster-def [:synthesis :harness])
+                                 (:harness (first (:seats roster-def))))
+                    :prompt (review-synthesis-prompt {:target-id target :contract base :note-tag pass-id})
+                    :attrs (assoc shared-attrs "panel/synthesis" "true")}})))
 
 ;; ---------------------------------------------------------------------------
 ;; Panel primitive (PLAN-Pnl-001.A4/A5)
@@ -1512,19 +1524,22 @@
                                 (and (> turn 1) (= continuity :resume)) (assoc :resume-ref idx))))
                           (range) seats))
         turns (mapv row-specs (range 1 (inc rounds)))]
-    (cond-> {:blackboard (case blackboard
-                           :target {:kind :target :id target}
-                           :fresh {:kind :fresh})
-             :pass pass-id
-             :turns turns}
-      (and synthesis (not= :none synthesis))
-      (assoc :synthesizer
-             {:name "synthesis"
-              :harness (:harness synthesis)
-              :prompt (panel-synthesis-prompt {:board-id board-ref :brief (:brief synthesis) :note-tag pass-id})
-              :attrs {"panel/blackboard" board-ref
-                      "panel/pass" pass-id
-                      "panel/synthesis" "true"}}))))
+    (validate-builder-output!
+     "panel-specs"
+     :ct.spools.delegation/panel-specs
+     (cond-> {:blackboard (case blackboard
+                            :target {:kind :target :id target}
+                            :fresh {:kind :fresh})
+              :pass pass-id
+              :turns turns}
+       (and synthesis (not= :none synthesis))
+       (assoc :synthesizer
+              {:name "synthesis"
+               :harness (:harness synthesis)
+               :prompt (panel-synthesis-prompt {:board-id board-ref :brief (:brief synthesis) :note-tag pass-id})
+               :attrs {"panel/blackboard" board-ref
+                       "panel/pass" pass-id
+                       "panel/synthesis" "true"}})))))
 
 (defn panel!
   "Spawn a panel from an inline panel value.

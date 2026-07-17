@@ -284,6 +284,8 @@ Data shape, validated loudly at registration against the **`:ct.spools.delegatio
 ;;     :synthesizer {:name "synthesis" :harness :review-gpt :prompt "..." :attrs {...}}}
 ```
 
+The builder validates the assembled value against **`:ct.spools.delegation/review-specs`** and fails loudly with `:spec`, `:value`, and `:explain` data if its own output drifts.
+
 **Change context.** `roster-review-specs` (and `review!`'s `:change-context`) take an optional `:ct.spools.delegation/change-context` value — `{:commit-range "main..HEAD" :files ["a.clj" "b.clj"] :windows [{:path "a.clj" :lines "40-90"}]}` — that is injected into every reviewer prompt as the authoritative diff surface so reviewers read the changed files instead of re-deriving the diff. It is validated against its spec and fails loudly when malformed; the synthesizer never carries it. The `agent review` CLI builds this from `--commit-range`/`--changed-files`; trusted Clojure can also pass cheap code windows.
 
 Each specs call mints a `:pass` tag (override with `:review-id`): reviewers prefix their notes with it, the synthesizer filters on it, and every run/gate carries it as `panel/pass` — so repeated rounds on one target stay separable without run ids, which don't exist at workflow-definition time. The single-prompt-source property is test-enforced; the gate→subagent-executor mapping itself is deliberately untested here in phase 1 (the subagent executor owns gate consumption and fails loudly on a missing `agent-run/harness`/`agent-run/prompt`).
@@ -380,6 +382,8 @@ A panel is plain data, validated loudly against the **`:ct.spools.delegation/pan
 ```
 
 `panel-specs` compiles a panel into fully-built run specs (output specced as **`:ct.spools.delegation/panel-specs`**); `panel!` spawns from them. Both apply the defaults above. `panel!` validates its option map against **`:ct.spools.delegation/panel-input`**.
+
+The builder validates the assembled value against its output spec and fails loudly with `:spec`, `:value`, and `:explain` data if its own output drifts.
 
 - **Turn-as-run.** Seat *s* on turn *r* is one run, stamped `panel/seat`, `panel/turn`, `panel/blackboard`, and `panel/pass`, so the deliberation structure is queryable from *run* attributes. Seats post with their turn as the note's `--round`, so `agent notes <board> --round r` reads one round of the deliberation.
 - **Barriers.** Turn row *r* `depends-on` every seat's turn *r−1* run, so a round completes before the next opens.

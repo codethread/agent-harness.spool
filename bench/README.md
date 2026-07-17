@@ -52,14 +52,14 @@ A bench harness definition says how one tool runs *inside a container*: image, a
 (bench/register-harness! runtime :claude
   {:image "ghcr.io/me/bench-claude:1.0"       ; digest refs recommended for strict pinning
    :argv ["claude" "-p" "--dangerously-skip-permissions" "--output-format" "json"]
-   :prompt-via :stdin                          ; :stdin (bench default; agent-run defaults :arg) | :arg (appended last)
+   :prompt-via :stdin                          ; required: :stdin | :arg (appended last)
    :model-flag "--model"                       ; splices an entry's :model
    :thinking-flag "--effort"                   ; splices an entry's :thinking
    :env {"CLAUDE_CONFIG_DIR" "/bench/home/.claude"}
    :auth {:env ["ANTHROPIC_API_KEY"]           ; host env passed through at launch
           :mounts [{:host "~/.claude/.credentials.json"
                     :container "/bench/home/.claude/.credentials.json"}]} ; always read-only
-   :extractor :claude                          ; extractor key, see §7; default :generic
+   :extractor :claude                          ; required registered extractor key; see §7
    :doc "Claude Code headless in a container"})
 
 (bench/register-harness! runtime :codex
@@ -79,7 +79,7 @@ A bench harness definition says how one tool runs *inside a container*: image, a
    :extractor :pi})
 ```
 
-Required: `:image`, `:argv`. `(bench/harnesses runtime)` lists registered definitions.
+Required: `:image`, `:argv`, `:prompt-via`, and `:extractor`. The extractor must already be registered; `:generic` is available but must be selected explicitly. `(bench/harnesses runtime)` lists registered definitions.
 
 Images are userland-owned: build them with the agent CLI plus your project toolchain preinstalled. The spool never builds images; a missing image fails the entry loudly at launch with the engine's own error.
 
@@ -190,7 +190,7 @@ Entry phases (`bench/phase`): `pending → preparing → running → done | fail
 
 ## 7. Metrics (deterministic, code-owned)
 
-Extraction runs in the weaver JVM after the container exits — Clojure JSON parsing over the mounted `home/` and captured stdout; no jq, no model involvement. Extractors are a registry keyed by the harness def's `:extractor`; shipped: `:claude`, `:codex`, `:pi`, `:generic`. Userland may register more with `(register-extractor! runtime k f)` where `f` is `(fn [ctx] -> partial metrics map)` and `ctx` carries the entry dir paths and parsed stdout.
+Extraction runs in the weaver JVM after the container exits — Clojure JSON parsing over the mounted `home/` and captured stdout; no jq, no model involvement. Extractors are a registry keyed by the harness def's required, explicit `:extractor`; the key must resolve at harness registration. Shipped: `:claude`, `:codex`, `:pi`, `:generic` (`:generic` is explicit-only, never a default). Userland may register more with `(register-extractor! runtime k f)` where `f` is `(fn [ctx] -> partial metrics map)` and `ctx` carries the entry dir paths and parsed stdout.
 
 Normalized schema (written to `metrics.json`, flattened onto the entry strand as `bench/*` attrs):
 

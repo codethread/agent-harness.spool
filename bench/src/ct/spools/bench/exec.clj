@@ -15,6 +15,7 @@
   error."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.spool.alpha :refer [fail!]])
   (:import [java.io File]
@@ -49,15 +50,79 @@
         (.delete out)
         (.delete err)))))
 
+(s/def :ct.spools.bench.exec.kill-container.success/exit int?)
+(s/def :ct.spools.bench.exec.kill-container.success/out string?)
+(s/def :ct.spools.bench.exec.kill-container.success/err string?)
+(s/def :ct.spools.bench.exec.kill-container.success/engine vector?)
+(s/def :ct.spools.bench.exec.kill-container.success/container string?)
+(s/def ::kill-container-success
+  (s/and
+   (s/keys :req-un [:ct.spools.bench.exec.kill-container.success/exit
+                    :ct.spools.bench.exec.kill-container.success/out
+                    :ct.spools.bench.exec.kill-container.success/err
+                    :ct.spools.bench.exec.kill-container.success/engine
+                    :ct.spools.bench.exec.kill-container.success/container])
+   #(= #{:exit :out :err :engine :container} (set (keys %)))))
+(s/def :ct.spools.bench.exec.kill-container.error/engine any?)
+(s/def :ct.spools.bench.exec.kill-container.error/container any?)
+(s/def :ct.spools.bench.exec.kill-container.error/error #(instance? Throwable %))
+(s/def ::kill-container-error
+  (s/and
+   (s/keys :req-un [:ct.spools.bench.exec.kill-container.error/engine
+                    :ct.spools.bench.exec.kill-container.error/container
+                    :ct.spools.bench.exec.kill-container.error/error])
+   #(= #{:engine :container :error} (set (keys %)))))
+(s/def ::kill-container-result
+  (s/or :success ::kill-container-success :error ::kill-container-error))
+
+(defn- validated-kill-result [result]
+  (if (s/valid? ::kill-container-result result)
+    result
+    {:engine (:engine result)
+     :container (:container result)
+     :error (ex-info "kill-container! produced an invalid result"
+                     {:spec ::kill-container-result
+                      :value result
+                      :explain (s/explain-data ::kill-container-result result)})}))
+
+(defn- warn-kill-failure! [details]
+  (try
+    (binding [*out* *err*]
+      (println (str "[bench] WARN kill-container! failed " (pr-str details))))
+    (catch Throwable _)))
+
+(defn- kill-error-result [context error]
+  (let [result (assoc context :error error)]
+    (warn-kill-failure! (assoc context :error (str error)))
+    (validated-kill-result result)))
+
 (defn kill-container!
-  "Best-effort `<engine> kill <container-name>`; swallow any failure.
+  "Best-effort `<engine> kill <container-name>`; never throw.
 
   Used on timeout, abort, and reconciliation where a container may already be
-  gone (`--rm`); the kill is opportunistic, never load-bearing."
+  gone (`--rm`); the kill is opportunistic, never load-bearing. Non-zero exits
+  and invocation Throwables emit a warning with their captured diagnostics.
+  Returns a value
+  conforming to `:ct.spools.bench.exec/kill-container-result`: the capture
+  result with `:engine` and `:container` context, or the Throwable as `:error`
+  with the same context."
   [engine container-name]
-  (try
-    (capture! (into (vec engine) ["kill" container-name]) {})
-    (catch Throwable _ nil)))
+  (let [normalized (try
+                     {:engine (vec engine)}
+                     (catch Throwable error
+                       {:engine engine :normalization-error error}))
+        context {:engine (:engine normalized) :container container-name}]
+    (if-let [error (:normalization-error normalized)]
+      (kill-error-result context error)
+      (try
+        (let [result (validated-kill-result
+                      (merge (capture! (into (:engine context) ["kill" container-name]) {})
+                             context))]
+          (when (and (contains? result :exit) (not (zero? (:exit result))))
+            (warn-kill-failure! (select-keys result [:engine :container :exit :err])))
+          result)
+        (catch Throwable error
+          (kill-error-result context error))))))
 
 (defn- run-redirected!
   "Run `argv`, redirecting stdout/stderr to `out-file`/`err-file`, with a

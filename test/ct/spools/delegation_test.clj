@@ -565,6 +565,24 @@
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Roster not found"
                                 (agents/roster-review-specs :missing {:target (:id target)}))))))))
 
+(deftest roster-review-specs-validates-assembled-output
+  (with-agents
+    (fn [_]
+      (let [review-prompt-var (ns-resolve 'ct.spools.delegation 'review-prompt)
+            ex (with-redefs-fn {review-prompt-var (constantly nil)}
+                 #(try
+                    (agents/roster-review-specs
+                     {:seats [{:name "reviewer" :harness :sh :brief "Review."}]}
+                     {:target "target-1" :review-id "pass-1"})
+                    (catch clojure.lang.ExceptionInfo e
+                      e)))
+            data (ex-data ex)]
+        (is (instance? clojure.lang.ExceptionInfo ex))
+        (is (str/includes? (ex-message ex) "roster-review-specs output"))
+        (is (= :ct.spools.delegation/review-specs (:spec data)))
+        (is (nil? (get-in data [:value :reviewers 0 :prompt])))
+        (is (= (s/explain-data (:spec data) (:value data)) (:explain data)))))))
+
 (deftest roster-review-fails-loudly
   (with-agents
     (fn [rt]
@@ -795,6 +813,25 @@
             (is (s/valid? :ct.spools.delegation/panel-specs bare))))
         (testing ":review-id overrides the minted pass tag"
           (is (= "pass-x" (:pass (agents/panel-specs panel {:target (:id target) :review-id "pass-x"})))))))))
+
+(deftest panel-specs-validates-assembled-output
+  (with-agents
+    (fn [_]
+      (let [panel-seat-prompt-var (ns-resolve 'ct.spools.delegation 'panel-seat-prompt)
+            ex (with-redefs-fn {panel-seat-prompt-var (constantly nil)}
+                 #(try
+                    (agents/panel-specs
+                     {:seats [{:name "seat" :harness :sh :brief "Deliberate."}]
+                      :blackboard :fresh}
+                     {:review-id "pass-1"})
+                    (catch clojure.lang.ExceptionInfo e
+                      e)))
+            data (ex-data ex)]
+        (is (instance? clojure.lang.ExceptionInfo ex))
+        (is (str/includes? (ex-message ex) "panel-specs output"))
+        (is (= :ct.spools.delegation/panel-specs (:spec data)))
+        (is (nil? (get-in data [:value :turns 0 0 :prompt])))
+        (is (= (s/explain-data (:spec data) (:value data)) (:explain data)))))))
 
 (deftest panel-specs-multi-round-wires-barriers-and-prompt-forms
   (with-agents

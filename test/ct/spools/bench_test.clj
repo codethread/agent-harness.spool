@@ -11,6 +11,7 @@
             [clojure.java.io :as io]
             [clojure.java.shell :refer [sh]]
             [clojure.set :as set]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.graph.alpha :as graph]
@@ -21,7 +22,8 @@
             [ct.spools.agent-run :as shuttle]
             [ct.spools.test-support :as test-support]
             [skein.test.alpha :as t])
-  (:import [java.nio.file Files]
+  (:import [java.io StringWriter]
+           [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.util.concurrent CyclicBarrier Semaphore]))
 
@@ -202,11 +204,30 @@ esac
   (with-bench
     (fn [rt _]
       (testing "required keys and closed key set"
-        (is (thrown-with-msg? Exception #"invalid" (bench/register-harness! rt :x {:image "i"})))
+        (is (thrown-with-msg? Exception #"invalid"
+                              (bench/register-harness! rt :x {:image "i" :prompt-via :stdin})))
+        (let [without-extractor {:image "i" :argv ["a"] :prompt-via :stdin}]
+          (is (false? (s/valid? ::bench/harness-def without-extractor)))
+          (is (thrown-with-msg? Exception #"invalid"
+                                (bench/register-harness! rt :x without-extractor))))
         (is (thrown-with-msg? Exception #"unknown keys" (bench/register-harness! rt :x {:image "i" :argv ["a"] :nope 1})))
-        (is (thrown-with-msg? Exception #"invalid" (bench/register-harness! rt :x {:image "i" :argv ["a"] :prompt-via :pipe}))))
-      (testing "a valid agent is stored"
-        (bench/register-harness! rt :ok {:image "i" :argv ["run"]})
+        (doseq [definition [{:image "i" :argv ["a"]}
+                            {:image "i" :argv ["a"] :prompt-via :pipe}]]
+          (let [failure (try (bench/register-harness! rt :x definition) nil (catch Exception e e))]
+            (is (some? failure))
+            (is (= :x (:harness (ex-data failure))))
+            (is (= #{:stdin :arg} (:allowed (ex-data failure)))))))
+      (testing "unknown extractors fail at registration and resolution"
+        (doseq [resolve! [#(bench/register-harness! rt :x {:image "i" :argv ["a"]
+                                                           :prompt-via :stdin :extractor :missing})
+                          #(#'bench/resolve-extractor! rt :missing)]]
+          (let [failure (try (resolve!) nil (catch Exception e e))]
+            (is (some? failure))
+            (is (= :missing (:requested (ex-data failure))))
+            (is (= [:claude :codex :generic :pi] (:available (ex-data failure)))))))
+      (testing "explicit :generic is stored"
+        (bench/register-harness! rt :ok
+                                 {:image "i" :argv ["run"] :prompt-via :stdin :extractor :generic})
         (is (= [:ok] (mapv :name (bench/harnesses rt))))))))
 
 (deftest register-suite-validates
@@ -276,6 +297,52 @@ esac
 
 ;; ---------------------------------------------------------------------------
 ;; Argv compilation / redaction (unit)
+
+(deftest kill-container-preserves-failure-diagnostics
+  (let [failure (ex-info "engine unavailable" {:reason :missing})
+        stderr (StringWriter.)
+        result (binding [*err* stderr]
+                 (with-redefs [exec/capture! (fn [_ _] (throw failure))]
+                   (exec/kill-container! ["podman" "--remote"] "bench-cell")))]
+    (is (= ["podman" "--remote"] (:engine result)))
+    (is (= "bench-cell" (:container result)))
+    (is (identical? failure (:error result)))
+    (is (= (str "[bench] WARN kill-container! failed "
+                "{:engine [\"podman\" \"--remote\"], "
+                ":container \"bench-cell\", "
+                ":error \"clojure.lang.ExceptionInfo: engine unavailable "
+                "{:reason :missing}\"}\n")
+           (str stderr)))))
+
+(deftest kill-container-malformed-engine-never-throws
+  (let [stderr (StringWriter.)
+        result (binding [*err* stderr]
+                 (exec/kill-container! 42 "bench-cell"))]
+    (is (= 42 (:engine result)))
+    (is (= "bench-cell" (:container result)))
+    (is (instance? Throwable (:error result)))
+    (is (str/includes? (str stderr) "kill-container! failed"))))
+
+(deftest kill-container-warns-on-non-zero-exit
+  (let [stderr (StringWriter.)
+        result (binding [*err* stderr]
+                 (with-redefs [exec/capture! (constantly {:exit 125 :out "" :err "engine refused"})]
+                   (exec/kill-container! ["podman"] "bench-cell")))]
+    (is (= {:exit 125 :out "" :err "engine refused"
+            :engine ["podman"] :container "bench-cell"}
+           result))
+    (is (= (str "[bench] WARN kill-container! failed "
+                "{:engine [\"podman\"], :container \"bench-cell\", "
+                ":exit 125, :err \"engine refused\"}\n")
+           (str stderr)))))
+
+(deftest kill-container-is-quiet-on-zero-exit
+  (let [stderr (StringWriter.)
+        result (binding [*err* stderr]
+                 (with-redefs [exec/capture! (constantly {:exit 0 :out "killed" :err ""})]
+                   (exec/kill-container! ["podman"] "bench-cell")))]
+    (is (= 0 (:exit result)))
+    (is (= "" (str stderr)))))
 
 (deftest compile-argv-redacts-auth-env
   ;; HOME is reliably present in the host env, so it exercises the auth-env
@@ -448,7 +515,8 @@ esac
       (let [{:keys [engine]} (fake-engine!)
             {:keys [path sha]} (fixture-repo!)]
         (bench/set-engine! rt engine)
-        (bench/register-harness! rt :slow {:image "i" :argv ["SLEEP"] :prompt-via :stdin})
+        (bench/register-harness! rt :slow
+                                 {:image "i" :argv ["SLEEP"] :prompt-via :stdin :extractor :generic})
         (bench/register-suite! rt :slowsuite
                                {:repo path :sha sha :prompt "p"
                                 :entries [{:harness :slow}]
@@ -465,7 +533,8 @@ esac
       (let [{:keys [engine]} (fake-engine!)
             {:keys [path sha]} (fixture-repo!)]
         (bench/set-engine! rt engine)
-        (bench/register-harness! rt :slow {:image "i" :argv ["SLEEP"] :prompt-via :stdin})
+        (bench/register-harness! rt :slow
+                                 {:image "i" :argv ["SLEEP"] :prompt-via :stdin :extractor :generic})
         (bench/register-suite! rt :longsuite
                                {:repo path :sha sha :prompt "p"
                                 :entries [{:harness :slow}]
@@ -525,7 +594,8 @@ esac
   (with-bench
     (fn [rt _]
       (bench/set-engine! rt ["docker"])
-      (bench/register-harness! rt :noflags {:image "i" :argv ["AGENT"] :prompt-via :stdin})
+      (bench/register-harness! rt :noflags
+                               {:image "i" :argv ["AGENT"] :prompt-via :stdin :extractor :generic})
       (let [base {:repo "r" :sha (str/join (repeat 40 "a")) :prompt "p" :judge :none}]
         (testing ":model without :model-flag fails loudly before any strand"
           (bench/register-suite! rt :m (assoc base :entries [{:harness :noflags :model "opus"}]))
@@ -801,7 +871,8 @@ esac
       (let [{:keys [engine]} (fake-engine!)
             {:keys [path sha]} (fixture-repo!)]
         (bench/set-engine! rt engine)
-        (bench/register-harness! rt :slow {:image "i" :argv ["SLEEP"] :prompt-via :stdin})
+        (bench/register-harness! rt :slow
+                                 {:image "i" :argv ["SLEEP"] :prompt-via :stdin :extractor :generic})
         (bench/register-suite! rt :longsuite
                                {:repo path :sha sha :prompt "p" :entries [{:harness :slow}]
                                 :parallel 1 :timeout-secs 120 :judge :none})
@@ -971,7 +1042,8 @@ esac
       (let [{:keys [engine]} (fake-engine!)
             {:keys [path sha]} (fixture-repo!)]
         (bench/set-engine! rt engine)
-        (bench/register-harness! rt :slow {:image "i" :argv ["SLEEP"] :prompt-via :stdin})
+        (bench/register-harness! rt :slow
+                                 {:image "i" :argv ["SLEEP"] :prompt-via :stdin :extractor :generic})
         (bench/register-suite! rt :extlong
                                {:repo path :sha sha :prompt "p"
                                 :entries [{:harness :slow}]
