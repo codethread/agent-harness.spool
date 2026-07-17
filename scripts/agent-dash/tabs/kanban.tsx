@@ -57,9 +57,10 @@ const prioDim = (p: string): boolean => p === "p4";
 // Board lane order is review-first urgency, not the spool's lifecycle order:
 // claimed work in flight, then the cards under review that a coordinator should
 // clear next (in_review), then the actionable queue (pending), then ideas still
-// in refinement. Closed strands sink regardless of their kanban/status — migrated
-// cards can carry a stale lane attr after close — and show their outcome
-// (done/abandoned/...) dimmed.
+// in refinement. Closed strands sink regardless of their lane column — the
+// vocabulary-reset cutover leaves closed cards on historic kanban/status while
+// live cards carry kanban/lane and freshly closed ones kanban/outcome — and
+// show their outcome (done/abandoned/...) dimmed.
 const LANE_RANK: Record<string, number> = { claimed: 0, in_review: 1, pending: 2, refinement: 3 };
 const laneRank = (r: KanbanRow): number => (r.state === "closed" ? 4 : (LANE_RANK[r.lane] ?? 4));
 
@@ -102,7 +103,7 @@ async function fetchKanban(all: boolean): Promise<KanbanRow[]> {
       title: s.title,
       state: s.state,
       branch: str(attrs["branch"], "-"),
-      lane: str(attrs["kanban/status"], "?"),
+      lane: str(attrs["kanban/lane"], "") || str(attrs["kanban/outcome"], "") || str(attrs["kanban/status"], "?"),
       type: s.type,
       owner: str(attrs["owner"], "-"),
       priority: str(attrs["kanban/priority"], "p3"),
