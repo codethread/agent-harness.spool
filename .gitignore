@@ -1,16 +1,3 @@
 .cpcache/
-*.sqlite
-*.sqlite-*
-*.sqlite.repl*
-.nrepl-port
-.test-repl-port
-.test-repl.pid
-
-cli/bin/
-/bin/
-site/
-
-scripts/agent-dash/node_modules/
-
 .lsp/
 .clj-kondo/
