@@ -511,7 +511,7 @@ esac
            ;; two SETUP-FAIL invocations recorded proves the cell re-executed
             (is (<= 2 (count (re-seq #"SETUP-FAIL" (slurp (io/file record "calls.log")))))))
           (testing "retrying a non-failed entry fails loudly"
-            (weaver/update rt entry-id {:attributes {"bench/phase" "done"}})
+            (weaver/update! rt entry-id {:attributes {"bench/phase" "done"}})
             (is (thrown-with-msg? Exception #"only applies to failed" (bench/retry! rt entry-id)))))))))
 
 (deftest timeout-fails-entry-loudly
@@ -561,11 +561,11 @@ esac
   (with-bench
     (fn [rt _]
       (bench/set-engine! rt (:engine (fake-engine!)))
-      (let [root (weaver/add rt {:title "run" :attributes {"bench/run" "true"}})
-            entry (weaver/add rt {:title "entry"
-                                  :attributes {"bench/entry" "true" "bench/slug" "s"
-                                               "bench/phase" "running"}})]
-        (weaver/update rt (:id root) {:edges [{:type "parent-of" :to (:id entry)}]})
+      (let [root (weaver/add! rt {:title "run" :attributes {"bench/run" "true"}})
+            entry (weaver/add! rt {:title "entry"
+                                   :attributes {"bench/entry" "true" "bench/slug" "s"
+                                                "bench/phase" "running"}})]
+        (weaver/update! rt (:id root) {:edges [{:type "parent-of" :to (:id entry)}]})
         (is (= [(:id entry)] (bench/reconcile! rt)))
         (let [reconciled (weaver/show rt (:id entry))]
           (is (= "failed" (get-in reconciled [:attributes :bench/phase])))
@@ -656,7 +656,7 @@ esac
               entry-id (get entries "block")]
           (await-phase rt entry-id #{"running"})
           ;; mark aborted mid-run, exactly as abort! would, before the worker finalizes
-          (weaver/update rt entry-id {:attributes {"bench/phase" "failed" "bench/error" "aborted"}})
+          (weaver/update! rt entry-id {:attributes {"bench/phase" "failed" "bench/error" "aborted"}})
           ;; release the blocked agent so its worker proceeds to finalize
           (spit (io/file record "release") "go")
           ;; the worker reaches finalization (writes metrics.json) but must not
@@ -967,8 +967,8 @@ esac
               (is (= (get (:attrs spec) "bench/run-id") (get-in js [:attributes :bench/run-id])))))
           (testing "manual fulfilment: stamp bench/verdict + close completes the run"
             (await-phase rt entry-id #{"done"})
-            (weaver/update rt judge {:state "closed"
-                                     :attributes {"bench/verdict" "winner: fake-opus (manual)"}})
+            (weaver/update! rt judge {:state "closed"
+                                      :attributes {"bench/verdict" "winner: fake-opus (manual)"}})
             (let [rep (bench/report rt run)]
               (is (= "winner: fake-opus (manual)" (get-in rep [:judge :verdict])))
               (is (= "attr" (get-in rep [:judge :verdict-source]))))
@@ -1036,7 +1036,7 @@ esac
           (test-support/await-phase rt judge #{"done"})
           (testing "bench/verdict attr wins over the run result"
             ;; the judge worker stamps its verdict on its own run strand
-            (weaver/update rt judge {:attributes {"bench/verdict" "winner via attr"}})
+            (weaver/update! rt judge {:attributes {"bench/verdict" "winner via attr"}})
             (let [rep (bench/report rt run)]
               (is (= "winner via attr" (get-in rep [:judge :verdict])))
               (is (= "attr" (get-in rep [:judge :verdict-source]))))))))))

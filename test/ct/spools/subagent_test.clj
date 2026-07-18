@@ -9,7 +9,7 @@
             [ct.spools.test-support :as test-support :refer [with-runtime]]
             [skein.core.db :as db]
             [skein.api.weaver.alpha :as weaver]
-            [skein.api.events.alpha :as events]
+            [skein.test.alpha :as test-alpha]
             [skein.api.vocab.alpha :as vocab]))
 
 (defn- with-treadle [f]
@@ -49,7 +49,7 @@
   ([rt id pred timeout-ms]
    (await-eventually #(let [s (weaver/show rt id)]
                         (when (pred s)
-                          (events/await-quiescent! rt)
+                          (test-alpha/await-quiescent! rt)
                           (weaver/show rt id)))
                      timeout-ms)))
 
@@ -108,7 +108,7 @@
       ;; can already be delivered and gone from next-steps by the time the
       ;; event lane settles.
       (let [gate-id (:id (ready-subagent-gate "happy"))
-            _ (events/await-quiescent! rt)
+            _ (test-alpha/await-quiescent! rt)
             run-id (:id (run-for-gate rt gate-id))
             run (await-delivered rt run-id)
             gate (weaver/show rt gate-id)
@@ -137,15 +137,15 @@
                         (workflow/step :after "After" :self :depends-on [:delegate]))
                        {})
       (let [gate-id (:id (ready-subagent-gate "invalid-result"))
-            run (weaver/add rt {:title "Malformed successful run"
-                                :state "closed"
-                                :attributes {:agent-run/run "true"
-                                             :agent-run/phase "done"
-                                             :agent-run/result 42
-                                             :workflow/run-id "invalid-result"}
-                                :edges [{:type "serves" :to gate-id}]})]
+            run (weaver/add! rt {:title "Malformed successful run"
+                                 :state "closed"
+                                 :attributes {:agent-run/run "true"
+                                              :agent-run/phase "done"
+                                              :agent-run/result 42
+                                              :workflow/run-id "invalid-result"}
+                                 :edges [{:type "serves" :to gate-id}]})]
         (treadle/install!)
-        (events/await-quiescent! rt)
+        (test-alpha/await-quiescent! rt)
         (let [run (weaver/show rt (:id run))
               gate (weaver/show rt gate-id)]
           (is (str/starts-with? (attr run :gate/delivered)
@@ -168,13 +168,13 @@
                                        :attributes {"agent-run/harness" "sh-tail"
                                                     "agent-run/prompt" "echo later"}))]
         (workflow/start! "blocked" definition {})
-        (events/await-quiescent! rt)
+        (test-alpha/await-quiescent! rt)
         (let [gate-id (:id (first (weaver/list rt [:= :title "Delegate"] {})))]
           (is (some? gate-id))
           (is (nil? (run-for-gate rt gate-id)))
           (let [[blocker] (workflow/ready "blocked")]
             (workflow/complete! "blocked" {:step (:id blocker)}))
-          (events/await-quiescent! rt)
+          (test-alpha/await-quiescent! rt)
           (is (some? (run-for-gate rt gate-id))))))))
 
 (deftest missing-harness-stamps-error-and-does-not-retry
@@ -184,13 +184,13 @@
                                   "Missing"
                                   (workflow/gate :delegate "Delegate" :subagent
                                                  :attributes {"agent-run/prompt" "echo no"})) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "missing"))
             gate (weaver/show rt gate-id)]
         (is (str/includes? (attr gate :gate/error) "agent-run/harness"))
         (is (nil? (run-for-gate rt gate-id)))
-        (weaver/add rt {:title "unrelated"})
-        (events/await-quiescent! rt)
+        (weaver/add! rt {:title "unrelated"})
+        (test-alpha/await-quiescent! rt)
         (is (nil? (run-for-gate rt gate-id)))))))
 
 (deftest failed-run-stays-ready-and-agent-retry-recovers-the-gate
@@ -202,7 +202,7 @@
                                                :attributes {"agent-run/harness" "sh-tail"
                                                             "agent-run/prompt" "exit 7"})
                                 (workflow/step :after "After" :self :depends-on [:delegate])) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "retry"))
             run-id (:id (run-for-gate rt gate-id))
             failed (await-run-phase rt run-id #{"failed"})]
@@ -237,7 +237,7 @@
                                                :attributes {"agent-run/harness" "sh-tail"
                                                             "agent-run/prompt" "true"})
                                 (workflow/step :after "After" :self :depends-on [:delegate])) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "blank"))
             run-id (:id (run-for-gate rt gate-id))
             failed (await-run-phase rt run-id #{"failed"})]
@@ -279,7 +279,7 @@
                                                   :attributes {"agent-run/harness" "sh-tail"
                                                                "agent-run/prompt" "true"})
                                    (workflow/step :after "After" :self :depends-on [:delegate])) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "lockstep"))
             run-id (:id (run-for-gate rt gate-id))
             failed (await-run-phase rt run-id #{"failed"})]
@@ -315,7 +315,7 @@
                                                :attributes {"agent-run/harness" "sh-tail"
                                                             "agent-run/prompt" "true"})
                                 (workflow/step :after "After" :self :depends-on [:delegate])) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "stale"))
             run-id (:id (run-for-gate rt gate-id))
             failed (await-run-phase rt run-id #{"failed"})
@@ -344,10 +344,10 @@
                                  (workflow/gate :delegate "Delegate" :subagent
                                                 :attributes {"agent-run/harness" "sh-tail"
                                                              "agent-run/prompt" "sleep 1; echo too-late"})) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "routed"))
             run-id (:id (run-for-gate rt gate-id))]
-        (weaver/update rt gate-id {:state "closed"})
+        (weaver/update! rt gate-id {:state "closed"})
         (let [done (await-delivered rt run-id)]
           (is (= "gate-closed" (attr done :gate/delivered))))))))
 
@@ -359,18 +359,18 @@
                                (workflow/gate :delegate "Delegate" :subagent
                                               :attributes {"agent-run/harness" "sh-tail"
                                                            "agent-run/prompt" "sleep 1; echo held-result"})) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [gate-id (:id (ready-subagent-gate "held"))
             run-id (:id (run-for-gate rt gate-id))
-            hold (weaver/add rt {:title "Hold delivery"})]
+            hold (weaver/add! rt {:title "Hold delivery"})]
         ;; un-ready the gate while its run is in flight: delivery must park
         ;; loudly (write-once gate/delivery-blocked), not stamp terminal
         ;; state or spin
-        (weaver/update rt gate-id {:edges [{:type "depends-on" :to (:id hold)}]})
+        (weaver/update! rt gate-id {:edges [{:type "depends-on" :to (:id hold)}]})
         (let [blocked (await-settled rt run-id #(attr % :gate/delivery-blocked))]
           (is (= "closed" (:state blocked)))
           (is (nil? (attr blocked :gate/delivered))))
-        (weaver/update rt (:id hold) {:state "closed"})
+        (weaver/update! rt (:id hold) {:state "closed"})
         (let [delivered (await-delivered rt run-id)]
           (is (= "true" (attr delivered :gate/delivered)))
           (is (= "held-result" (attr (weaver/show rt gate-id) :workflow/outcome-notes))))))))
@@ -395,7 +395,7 @@
                                         (workflow/gate :delegate "Running delegate" :subagent
                                                        :attributes {"agent-run/harness" "sh-tail"
                                                                     "agent-run/prompt" "sleep 1; echo ok"})) {})
-      (events/await-quiescent! rt)
+      (test-alpha/await-quiescent! rt)
       (let [running-gate-id (:id (ready-subagent-gate "query-running"))
             running-run-id (:id (run-for-gate rt running-gate-id))]
         (await-run-phase rt running-run-id #{"running"})
@@ -414,7 +414,7 @@
                                        (workflow/gate :delegate "Dead delegate" :subagent
                                                       :attributes {"agent-run/harness" "sh-tail"
                                                                    "agent-run/prompt" "true"})) {})
-        (events/await-quiescent! rt)
+        (test-alpha/await-quiescent! rt)
         (let [error-gate-id (:id (ready-subagent-gate "query-error"))
               dead-gate-id (:id (ready-subagent-gate "query-dead"))
               dead-run-id (:id (run-for-gate rt dead-gate-id))]
@@ -432,7 +432,7 @@
                                             :attributes {"agent-run/harness" "sh-tail"
                                                          "agent-run/prompt" "echo ignored"})) {})
       (let [gate-id (:id (first (workflow/ready "ci")))]
-        (events/await-quiescent! rt)
+        (test-alpha/await-quiescent! rt)
         (is (nil? (run-for-gate rt gate-id)))))))
 
 (deftest install-declares-gate-vocabulary

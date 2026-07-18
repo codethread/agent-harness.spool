@@ -40,15 +40,15 @@
   aggregation reads. A nil cost-usd/tokens-total/tokens value is omitted, so the
   seeded run models a format that reported no figure for that dimension."
   [rt {:keys [harness phase cost-usd tokens-total tokens started finished]}]
-  (weaver/add rt {:title (str harness " run")
-                  :attributes (cond-> {:agent-run/run "true"
-                                       :agent-run/harness harness
-                                       :agent-run/phase (or phase "done")
-                                       :agent-run/started-at started
-                                       :agent-run/finished-at finished}
-                                (some? cost-usd) (assoc :agent-run/cost-usd cost-usd)
-                                (some? tokens-total) (assoc :agent-run/tokens-total tokens-total)
-                                (some? tokens) (assoc :agent-run/tokens tokens))}))
+  (weaver/add! rt {:title (str harness " run")
+                   :attributes (cond-> {:agent-run/run "true"
+                                        :agent-run/harness harness
+                                        :agent-run/phase (or phase "done")
+                                        :agent-run/started-at started
+                                        :agent-run/finished-at finished}
+                                 (some? cost-usd) (assoc :agent-run/cost-usd cost-usd)
+                                 (some? tokens-total) (assoc :agent-run/tokens-total tokens-total)
+                                 (some? tokens) (assoc :agent-run/tokens tokens))}))
 
 (defn- wire-value [value]
   (json/read-str (json/write-str value) :key-fn keyword))
@@ -141,7 +141,7 @@
     (fn [rt]
       (try
         (shuttle/set-default-task-contract! agents/worker-contract)
-        (let [task (weaver/add rt {:title "Serve me" :attributes {:body "body" :agent-run/harness "sh"}})
+        (let [task (weaver/add! rt {:title "Serve me" :attributes {:body "body" :agent-run/harness "sh"}})
               delegated (agents/agent-op {:op/argv ["delegate" (:id task)]})
               run (weaver/show rt (get-in delegated [:run :id]))
               prompt (#'shuttle/effective-prompt {:preamble? true} run)]
@@ -235,7 +235,7 @@
   (with-agents
     (fn [rt]
       (testing "--attr decorates the note strand and reads back intact beside --by"
-        (let [target (weaver/add rt {:title "note target"})]
+        (let [target (weaver/add! rt {:title "note target"})]
           (agents/agent-op {:op/argv ["note" (:id target) "decision recorded"
                                       "--attr" "note/kind=decision"
                                       "--attr" "panel/pass=p1"
@@ -247,11 +247,11 @@
             (is (= "decision" (get-in strand [:attributes :note/kind])))
             (is (= "p1" (get-in strand [:attributes :panel/pass]))))))
       (testing "a --attr spec without key=value fails loudly"
-        (let [target (weaver/add rt {:title "bad attr target"})]
+        (let [target (weaver/add! rt {:title "bad attr target"})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Malformed --attr"
                                 (agents/agent-op {:op/argv ["note" (:id target) "x" "--attr" "novalue"]})))))
       (testing "a repeated --attr key fails loudly, matching strand note's contract"
-        (let [target (weaver/add rt {:title "dup attr target"})]
+        (let [target (weaver/add! rt {:title "dup attr target"})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate attribute key in --attr"
                                 (agents/agent-op {:op/argv ["note" (:id target) "x"
                                                             "--attr" "note/kind=a"
@@ -324,7 +324,7 @@
 (deftest spawn-for-creates-task-edge
   (with-agents
     (fn [rt]
-      (let [task (weaver/add rt {:title "served task"})
+      (let [task (weaver/add! rt {:title "served task"})
             run (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo ok" "--for" (:id task)]})]
         (is (= (:id task) (:for run)))
         (is (some #(and (= "parent-of" (:edge_type %)) (= (:id run) (:to_strand_id %)))
@@ -342,7 +342,7 @@
 (deftest review-spawns-independent-reviewers
   (with-agents
     (fn [rt]
-      (let [target (weaver/add rt {:title "Review target" :attributes {:body "Inspect me"}})
+      (let [target (weaver/add! rt {:title "Review target" :attributes {:body "Inspect me"}})
             review (agents/review! (:id target) {:reviewers [{:harness :sh :focus "correctness"}
                                                              {:harness :sh :focus "tests"}]
                                                  :contract "Review contract"})]
@@ -367,11 +367,11 @@
   ;; handover, so a card-targeted review must fail toward the card's task tier
   (with-agents
     (fn [rt]
-      (let [card (weaver/add rt {:title "Feature card"
-                                 :attributes {:kanban/card "true"
-                                              :kanban/lane "claimed"}})
-            task (weaver/add rt {:title "Review-bearing task"
-                                 :attributes {:kanban/task "true"}})]
+      (let [card (weaver/add! rt {:title "Feature card"
+                                  :attributes {:kanban/card "true"
+                                               :kanban/lane "claimed"}})
+            task (weaver/add! rt {:title "Review-bearing task"
+                                  :attributes {:kanban/task "true"}})]
         (let [rejected (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                              #"never a kanban card"
                                              (agents/review! (:id card)
@@ -396,7 +396,7 @@
     (fn [rt]
       (try
         (shuttle/set-default-review-contract! "Workspace policy contract")
-        (let [target (weaver/add rt {:title "Default-contract target"})
+        (let [target (weaver/add! rt {:title "Default-contract target"})
               review (agents/review! (:id target) {:reviewers [{:harness :sh :focus "policy"}]})
               run (weaver/show rt (first (:reviewers review)))]
           (is (str/includes? (get-in run [:attributes :agent-run/prompt])
@@ -472,7 +472,7 @@
                   :scope "test files"}
                  {:name "docs" :harness :sh :brief "Judge documentation drift."}]
          :synthesis {:harness :sh}})
-      (let [target (weaver/add rt {:title "Roster target" :attributes {:body "Inspect me"}})
+      (let [target (weaver/add! rt {:title "Roster target" :attributes {:body "Inspect me"}})
             review (agents/review! (:id target) {:roster :repo :cwd "/tmp/claude/roster-cwd"})
             runs (mapv #(weaver/show rt %) (:reviewers review))
             synth (weaver/show rt (:synthesizer review))]
@@ -515,7 +515,7 @@
         {:seats [{:name "a" :harness :sh :brief "Brief A." :scope "src"}
                  {:name "b" :harness :sh :brief "Brief B."}]
          :synthesis {:harness :sh}})
-      (let [target (weaver/add rt {:title "Spec target"})
+      (let [target (weaver/add! rt {:title "Spec target"})
             review (agents/review! (:id target) {:roster :composed})
             specs (agents/roster-review-specs :composed {:target (:id target)
                                                          :review-id (:pass review)})
@@ -592,7 +592,7 @@
   (with-agents
     (fn [rt]
       (agents/defroster! :repo {:seats [{:name "solo" :harness :sh :brief "One pass."}]})
-      (let [target (weaver/add rt {:title "Roster failure target"})]
+      (let [target (weaver/add! rt {:title "Roster failure target"})]
         (testing "unknown roster"
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Roster not found"
                                 (agents/review! (:id target) {:roster :nope}))))
@@ -699,7 +699,7 @@
         {:seats [{:name "a" :harness :sh :brief "Brief A."}
                  {:name "b" :harness :sh :brief "Brief B."}]
          :synthesis {:harness :sh}})
-      (let [target (weaver/add rt {:title "ctx target"})
+      (let [target (weaver/add! rt {:title "ctx target"})
             change-context {:commit-range "main..HEAD" :files ["src/a.clj" "test/a_test.clj"]}
             specs (agents/roster-review-specs :ctx {:target (:id target)
                                                     :change-context change-context})]
@@ -720,7 +720,7 @@
 (deftest review-validates-change-context-on-the-ad-hoc-path
   (with-agents
     (fn [rt]
-      (let [target (weaver/add rt {:title "ad-hoc ctx target"})]
+      (let [target (weaver/add! rt {:title "ad-hoc ctx target"})]
         (testing "a direct :reviewers caller with no :roster fails loudly on a malformed change context"
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"change-context does not conform"
                                 (agents/review! (:id target)
@@ -783,7 +783,7 @@
 (deftest panel-specs-compiles-conformant-run-specs
   (with-agents
     (fn [rt]
-      (let [target (weaver/add rt {:title "Panel target" :attributes {:body "Inspect me"}})
+      (let [target (weaver/add! rt {:title "Panel target" :attributes {:body "Inspect me"}})
             panel {:seats [{:name "correctness" :harness :sh :brief "Judge correctness." :scope "src"}
                            {:name "tests" :harness "sh" :brief "Judge the tests."}]
                    :synthesis {:harness :sh :brief "Weigh both."}}
@@ -924,7 +924,7 @@
   (with-agents
     (fn [rt]
       (shuttle/register-harness! :session-fix-no-resume session-fix-no-resume)
-      (let [target (weaver/add rt {:title "panel fail target"})]
+      (let [target (weaver/add! rt {:title "panel fail target"})]
         (testing "malformed and structurally invalid panels fail via the spec"
           (doseq [bad [[:not-a-map]
                        {:seats []}
@@ -997,7 +997,7 @@
                             {:name "docs" :harness "sh" :brief "Judge the docs."}]
                     :synthesis {:harness :sh}}
             panel (agents/roster->panel roster)
-            target (weaver/add rt {:title "roster-panel target"})]
+            target (weaver/add! rt {:title "roster-panel target"})]
         (testing "each roster seat becomes an independent panel seat"
           (is (= [{:name "tests" :harness :sh :brief "Judge the tests." :continuity :fresh :scope "test files"}
                   {:name "docs" :harness "sh" :brief "Judge the docs." :continuity :fresh}]
@@ -1088,13 +1088,13 @@
 (deftest delegate-fails-loudly-for-contract-violations
   (with-agents
     (fn [rt]
-      (let [blocker (weaver/add rt {:title "blocker"})
-            blocked (weaver/add rt {:title "blocked" :attributes {:body "body" :agent-run/harness "sh"}
-                                    :edges [{:type "depends-on" :to (:id blocker)}]})
-            no-harness (weaver/add rt {:title "no harness" :attributes {:body "body"}})
-            hitl (weaver/add rt {:title "hitl" :attributes {:body "body" :agent-run/harness "sh" :hitl true}})
-            active (weaver/add rt {:title "active" :attributes {:body "body" :agent-run/harness "sh"}})
-            cwd-task (weaver/add rt {:title "cwd fallback" :attributes {:body "body" :agent-run/harness "cwd-sh"}})]
+      (let [blocker (weaver/add! rt {:title "blocker"})
+            blocked (weaver/add! rt {:title "blocked" :attributes {:body "body" :agent-run/harness "sh"}
+                                     :edges [{:type "depends-on" :to (:id blocker)}]})
+            no-harness (weaver/add! rt {:title "no harness" :attributes {:body "body"}})
+            hitl (weaver/add! rt {:title "hitl" :attributes {:body "body" :agent-run/harness "sh" :hitl true}})
+            active (weaver/add! rt {:title "active" :attributes {:body "body" :agent-run/harness "sh"}})
+            cwd-task (weaver/add! rt {:title "cwd fallback" :attributes {:body "body" :agent-run/harness "cwd-sh"}})]
         (shuttle/register-harness! :cwd-sh {:argv ["sh" "-c"]
                                             :parse :raw
                                             :preamble? false
@@ -1112,7 +1112,7 @@
                      .getCanonicalPath)
                  (get-in run [:attributes :agent-run/cwd]))
               "agents supplies workspace root explicitly, so harness :cwd cannot win"))
-        (let [gate (weaver/add rt {:title "gate"})]
+        (let [gate (weaver/add! rt {:title "gate"})]
           (shuttle/spawn-run! {:harness :sh :prompt "echo later" :parent (:id active) :serves (:id active) :depends-on [(:id gate)]})
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ACTIVE run"
                                 (agents/agent-op {:op/argv ["delegate" (:id active)]}))))))))
@@ -1120,11 +1120,11 @@
 (deftest agent-op-fail-loudly-matrix
   (with-agents
     (fn [rt]
-      (let [task (weaver/add rt {:title "empty task" :attributes {:agent-run/harness "sh"}})
-            closed (weaver/add rt {:title "closed" :state "closed" :attributes {:body "body" :agent-run/harness "sh"}})
-            plan (weaver/add rt {:title "plan"})
-            missing-harness (weaver/add rt {:title "ready missing harness" :attributes {:body "body"}})]
-        (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id missing-harness)}]})
+      (let [task (weaver/add! rt {:title "empty task" :attributes {:agent-run/harness "sh"}})
+            closed (weaver/add! rt {:title "closed" :state "closed" :attributes {:body "body" :agent-run/harness "sh"}})
+            plan (weaver/add! rt {:title "plan"})
+            missing-harness (weaver/add! rt {:title "ready missing harness" :attributes {:body "body"}})]
+        (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id missing-harness)}]})
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"body or --prompt"
                               (agents/agent-op {:op/argv ["delegate" (:id task)]})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"task must be active"
@@ -1147,14 +1147,14 @@
 (deftest delegate-guards-all-non-superseded-runs
   (with-agents
     (fn [rt]
-      (let [active-task (weaver/add rt {:title "active run task" :attributes {:body "body" :agent-run/harness "sh"}})
-            failed-task (weaver/add rt {:title "failed run task" :attributes {:body "body" :agent-run/harness "sh"}})
-            done-task (weaver/add rt {:title "done run task" :attributes {:body "body" :agent-run/harness "sh"}})
-            plan (weaver/add rt {:title "plan"})
-            gate (weaver/add rt {:title "gate"})]
-        (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id active-task)}
-                                              {:type "parent-of" :to (:id failed-task)}
-                                              {:type "parent-of" :to (:id done-task)}]})
+      (let [active-task (weaver/add! rt {:title "active run task" :attributes {:body "body" :agent-run/harness "sh"}})
+            failed-task (weaver/add! rt {:title "failed run task" :attributes {:body "body" :agent-run/harness "sh"}})
+            done-task (weaver/add! rt {:title "done run task" :attributes {:body "body" :agent-run/harness "sh"}})
+            plan (weaver/add! rt {:title "plan"})
+            gate (weaver/add! rt {:title "gate"})]
+        (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id active-task)}
+                                               {:type "parent-of" :to (:id failed-task)}
+                                               {:type "parent-of" :to (:id done-task)}]})
         (shuttle/spawn-run! {:harness :sh :prompt "echo later" :parent (:id active-task) :serves (:id active-task) :depends-on [(:id gate)]})
         (let [failed (shuttle/spawn-run! {:harness :sh :prompt "exit 7" :parent (:id failed-task) :serves (:id failed-task)})
               done (shuttle/spawn-run! {:harness :sh :prompt "echo ok" :parent (:id done-task) :serves (:id done-task)})]
@@ -1180,11 +1180,11 @@
   ;; pending run — is never ALSO reported in :skipped as has-active-run.
   (with-agents
     (fn [rt]
-      (let [plan (weaver/add rt {:title "plan"})
-            tasks (mapv (fn [n] (weaver/add rt {:title (str "task " n)
-                                                :attributes {:body "body" :agent-run/harness "sh"}}))
+      (let [plan (weaver/add! rt {:title "plan"})
+            tasks (mapv (fn [n] (weaver/add! rt {:title (str "task " n)
+                                                 :attributes {:body "body" :agent-run/harness "sh"}}))
                         (range 3))]
-        (weaver/update rt (:id plan) {:edges (mapv (fn [t] {:type "parent-of" :to (:id t)}) tasks)})
+        (weaver/update! rt (:id plan) {:edges (mapv (fn [t] {:type "parent-of" :to (:id t)}) tasks)})
         (let [ready (agents/agent-op {:op/argv ["delegate" "--ready" (:id plan)]})]
           (is (= (set (map :id tasks)) (set (map :task (:delegated ready))))
               "every ready task is delegated exactly once")
@@ -1207,7 +1207,7 @@
                   {:groups (set (map #(get-in % [:attributes :agent-run/fanout-group]) runs))
                    :caps (set (map #(get-in % [:attributes :agent-run/fanout-cap]) runs))}))]
         (testing "review stamps one group across reviewers and the synthesizer"
-          (let [target (weaver/add rt {:title "review target" :attributes {:body "x"}})
+          (let [target (weaver/add! rt {:title "review target" :attributes {:body "x"}})
                 review (agents/agent-op {:op/argv ["review" (:id target)
                                                    "--seats" "2" "--synthesize"
                                                    "--fanout-cap" "3"]})
@@ -1226,11 +1226,11 @@
             (is (not (contains? groups nil)) "no council run is left ungrouped")
             (is (= #{2} caps) "every council run carries the requested cap")))
         (testing "delegate --ready stamps one group across the classified batch"
-          (let [plan (weaver/add rt {:title "plan"})
-                tasks (mapv (fn [n] (weaver/add rt {:title (str "task " n)
-                                                    :attributes {:body "body" :agent-run/harness "sh"}}))
+          (let [plan (weaver/add! rt {:title "plan"})
+                tasks (mapv (fn [n] (weaver/add! rt {:title (str "task " n)
+                                                     :attributes {:body "body" :agent-run/harness "sh"}}))
                             (range 3))
-                _ (weaver/update rt (:id plan) {:edges (mapv (fn [t] {:type "parent-of" :to (:id t)}) tasks)})
+                _ (weaver/update! rt (:id plan) {:edges (mapv (fn [t] {:type "parent-of" :to (:id t)}) tasks)})
                 ready (agents/agent-op {:op/argv ["delegate" "--ready" (:id plan) "--fanout-cap" "2"]})
                 run-ids (mapv #(get-in % [:run :id]) (:delegated ready))
                 {:keys [groups caps]} (fan run-ids)]
@@ -1240,11 +1240,11 @@
             (is (= #{2} caps) "every delegated run carries the requested cap")))
         (testing "raw spawn and single delegate carry no fan-out group"
           (let [spawned (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo x"]})
-                task (weaver/add rt {:title "single" :attributes {:body "body" :agent-run/harness "sh"}})
+                task (weaver/add! rt {:title "single" :attributes {:body "body" :agent-run/harness "sh"}})
                 single (agents/agent-op {:op/argv ["delegate" (:id task)]})
                 ;; --fanout-cap on a single delegate is inert: one run is
                 ;; governed by W alone and never joins a group (MI3)
-                capped (weaver/add rt {:title "single capped" :attributes {:body "body" :agent-run/harness "sh"}})
+                capped (weaver/add! rt {:title "single capped" :attributes {:body "body" :agent-run/harness "sh"}})
                 single-capped (agents/agent-op {:op/argv ["delegate" (:id capped) "--fanout-cap" "5"]})]
             (doseq [id [(:id spawned) (get-in single [:run :id]) (get-in single-capped [:run :id])]]
               (let [run (weaver/show rt id)]
@@ -1253,7 +1253,7 @@
                 (is (nil? (get-in run [:attributes :agent-run/fanout-cap]))
                     "a single run carries no fan-out cap")))))
         (testing "--fanout-cap must be a positive integer"
-          (let [target (weaver/add rt {:title "bad-cap target" :attributes {:body "x"}})]
+          (let [target (weaver/add! rt {:title "bad-cap target" :attributes {:body "x"}})]
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"
                                   (agents/agent-op {:op/argv ["review" (:id target) "--fanout-cap" "0"]})))
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"
@@ -1300,11 +1300,11 @@
   ;; skip it as has-active-run.
   (with-agents
     (fn [rt]
-      (let [spawn-task (weaver/add rt {:title "recon then delegate" :attributes {:body "body" :agent-run/harness "sh"}})
-            review-task (weaver/add rt {:title "review then delegate" :attributes {:body "body" :agent-run/harness "sh"}})
-            plan (weaver/add rt {:title "plan"})]
-        (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id spawn-task)}
-                                              {:type "parent-of" :to (:id review-task)}]})
+      (let [spawn-task (weaver/add! rt {:title "recon then delegate" :attributes {:body "body" :agent-run/harness "sh"}})
+            review-task (weaver/add! rt {:title "review then delegate" :attributes {:body "body" :agent-run/harness "sh"}})
+            plan (weaver/add! rt {:title "plan"})]
+        (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id spawn-task)}
+                                               {:type "parent-of" :to (:id review-task)}]})
         (testing "a spawn --for helper carries no serves edge and does not block delegate"
           (let [helper (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo recon" "--for" (:id spawn-task)]})]
             (is (not (serves? rt (:id helper) (:id spawn-task)))
@@ -1326,9 +1326,9 @@
 (deftest retry-run-id-preserves-provenance-and-dependencies
   (with-agents
     (fn [rt]
-      (let [task (weaver/add rt {:title "served" :attributes {:body "body" :agent-run/harness "sh"}})
+      (let [task (weaver/add! rt {:title "served" :attributes {:body "body" :agent-run/harness "sh"}})
             spawner (shuttle/spawn-run! {:harness :sh :prompt "echo parent"})
-            blocker (weaver/add rt {:title "retry blocker"})
+            blocker (weaver/add! rt {:title "retry blocker"})
             failed (shuttle/spawn-run! {:harness :sh
                                         :prompt "exit 3"
                                         :parent (:id task)
@@ -1337,7 +1337,7 @@
                                         :depends-on [(:id blocker)]
                                         :cwd "/tmp/retry-cwd"
                                         :max-attempts 5})]
-        (weaver/update rt (:id blocker) {:state "closed"})
+        (weaver/update! rt (:id blocker) {:state "closed"})
         (await-phase rt (:id failed) #{"failed"})
         (let [retried (agents/agent-op {:op/argv ["retry" (:id failed) "--prompt" "echo recovered"]})
               new-id (get-in retried [:run :id])
@@ -1362,7 +1362,7 @@
   ;; staying a helper — no serves edge on the successor.
   (with-agents
     (fn [rt]
-      (let [task (weaver/add rt {:title "reconned"})
+      (let [task (weaver/add! rt {:title "reconned"})
             helper (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task)})]
         (await-phase rt (:id helper) #{"failed"})
         (let [retried (agents/agent-op {:op/argv ["retry" (:id helper) "--prompt" "echo recovered"]})
@@ -1379,7 +1379,7 @@
   ;; read-only helper (recon/review, no serves edge) shadow it.
   (with-agents
     (fn [rt]
-      (let [task (weaver/add rt {:title "served + reconned" :attributes {:body "body" :agent-run/harness "sh"}})
+      (let [task (weaver/add! rt {:title "served + reconned" :attributes {:body "body" :agent-run/harness "sh"}})
             helper (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task)})
             serving (shuttle/spawn-run! {:harness :sh :prompt "exit 3" :parent (:id task) :serves (:id task)})]
         (await-phase rt (:id helper) #{"failed"})
@@ -1400,22 +1400,22 @@
   (with-agents
     (fn [rt]
       (shuttle/register-harness! :session-fix session-fix)
-      (let [make-pred (fn [] (:id (weaver/add rt {:title "predecessor turn"
-                                                  :state "closed"
-                                                  :attributes {"agent-run/run" "true"
-                                                               "agent-run/harness" "session-fix"
-                                                               "agent-run/session-id" "sess-abc"
-                                                               "agent-run/phase" "done"}})))
+      (let [make-pred (fn [] (:id (weaver/add! rt {:title "predecessor turn"
+                                                   :state "closed"
+                                                   :attributes {"agent-run/run" "true"
+                                                                "agent-run/harness" "session-fix"
+                                                                "agent-run/session-id" "sess-abc"
+                                                                "agent-run/phase" "done"}})))
             make-failed (fn [pred extra]
-                          (:id (weaver/add rt {:title "resuming turn"
-                                               :attributes (merge {"agent-run/run" "true"
-                                                                   "agent-run/harness" "session-fix"
-                                                                   "agent-run/prompt" "CONTINUATION prompt"
-                                                                   "agent-run/fresh-prompt" "FULLBRIEF prompt"
-                                                                   "agent-run/resumes" pred
-                                                                   "agent-run/session-id" "sess-def"
-                                                                   "agent-run/phase" "failed"}
-                                                                  extra)})))]
+                          (:id (weaver/add! rt {:title "resuming turn"
+                                                :attributes (merge {"agent-run/run" "true"
+                                                                    "agent-run/harness" "session-fix"
+                                                                    "agent-run/prompt" "CONTINUATION prompt"
+                                                                    "agent-run/fresh-prompt" "FULLBRIEF prompt"
+                                                                    "agent-run/resumes" pred
+                                                                    "agent-run/session-id" "sess-def"
+                                                                    "agent-run/phase" "failed"}
+                                                                   extra)})))]
         (testing "a plain retry continues the failed turn's own session on the continuation prompt"
           (let [pred (make-pred)
                 failed (make-failed pred {})
@@ -1451,19 +1451,19 @@
   ;; the deliberation queryable from run attrs, not just the prompt.
   (with-agents
     (fn [rt]
-      (let [failed (:id (weaver/add rt {:title "panel seat turn"
-                                        :attributes {"agent-run/run" "true"
-                                                     "agent-run/harness" "sh"
-                                                     "agent-run/prompt" "seat brief"
-                                                     "agent-run/phase" "failed"
-                                                     "panel/blackboard" "tgt-1"
-                                                     "panel/pass" "panel-abc123"
-                                                     "review/roster" "repo"
-                                                     "review/focus" "skeptic"
-                                                     "panel/seat" "skeptic"
-                                                     "panel/turn" "2"
+      (let [failed (:id (weaver/add! rt {:title "panel seat turn"
+                                         :attributes {"agent-run/run" "true"
+                                                      "agent-run/harness" "sh"
+                                                      "agent-run/prompt" "seat brief"
+                                                      "agent-run/phase" "failed"
+                                                      "panel/blackboard" "tgt-1"
+                                                      "panel/pass" "panel-abc123"
+                                                      "review/roster" "repo"
+                                                      "review/focus" "skeptic"
+                                                      "panel/seat" "skeptic"
+                                                      "panel/turn" "2"
                                                   ;; a lifecycle attr the engine re-derives; it must NOT ride along
-                                                     "agent-run/result" "stale old result"}}))
+                                                      "agent-run/result" "stale old result"}}))
             retried (agents/agent-op {:op/argv ["retry" failed]})
             attrs (:attributes (weaver/show rt (get-in retried [:run :id])))]
         (is (= "tgt-1" (:panel/blackboard attrs)))
@@ -1478,26 +1478,26 @@
 (deftest await-under-and-retry-workflow
   (with-agents
     (fn [rt]
-      (let [plan (weaver/add rt {:title "plan"})
-            task (weaver/add rt {:title "task" :attributes {:body "body" :agent-run/harness "sh"}})
-            gate (weaver/add rt {:title "await gate"})
-            _ (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id task)}]})
+      (let [plan (weaver/add! rt {:title "plan"})
+            task (weaver/add! rt {:title "task" :attributes {:body "body" :agent-run/harness "sh"}})
+            gate (weaver/add! rt {:title "await gate"})
+            _ (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id task)}]})
             delegated {:run (select-keys (shuttle/run-summary
                                           (shuttle/spawn-run! {:harness :sh :prompt "echo first"
                                                                :parent (:id task) :depends-on [(:id gate)]}))
                                          [:id :phase :harness])}]
-        (weaver/update rt (:id gate) {:state "closed"})
+        (weaver/update! rt (:id gate) {:state "closed"})
         (let [{:keys [timed-out runs]} (agents/agent-op {:op/argv ["await" "--under" (:id plan) "--timeout-secs" (str (test-support/await-budget-secs))]})]
           (is (false? timed-out))
           (is (= (:id (get delegated :run)) (:id (first runs)))))
-        (let [failed-task (weaver/add rt {:title "fails" :attributes {:body "exit 2" :agent-run/harness "sh"}})
-              _ (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id failed-task)}]})
+        (let [failed-task (weaver/add! rt {:title "fails" :attributes {:body "exit 2" :agent-run/harness "sh"}})
+              _ (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id failed-task)}]})
               d (agents/agent-op {:op/argv ["delegate" (:id failed-task)]})]
           (await-phase rt (get-in d [:run :id]) #{"failed"})
           (let [retried (agents/agent-op {:op/argv ["retry" (:id failed-task) "--prompt" "echo recovered"]})]
             (is (= (get-in d [:run :id]) (:superseded retried)))
             (is (= (:id failed-task) (:task retried))))
-          (let [fresh (weaver/add rt {:title "fresh" :attributes {:body "body" :agent-run/harness "sh"}})]
+          (let [fresh (weaver/add! rt {:title "fresh" :attributes {:body "body" :agent-run/harness "sh"}})]
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"nothing to supersede"
                                   (agents/agent-op {:op/argv ["retry" (:id fresh)]})))))))))
 
@@ -1507,8 +1507,8 @@
 (deftest status-triage-lists-ready-running-failed-and-verification
   (with-agents
     (fn [rt]
-      (let [ready-task (weaver/add rt {:title "ready" :attributes {:body "body" :agent-run/harness "sh"}})
-            implemented (weaver/add rt {:title "implemented" :attributes {:status "implemented"}})
+      (let [ready-task (weaver/add! rt {:title "ready" :attributes {:body "body" :agent-run/harness "sh"}})
+            implemented (weaver/add! rt {:title "implemented" :attributes {:status "implemented"}})
             failed-run (shuttle/spawn-run! {:harness :sh :prompt "exit 9" :parent (:id ready-task)})]
         (await-phase rt (:id failed-run) #{"failed"})
         (let [status (agents/agent-op {:op/argv ["status"]})]
@@ -1518,17 +1518,17 @@
 (deftest status-ignores-closed-tasks-in-triage-and-tree
   (with-agents
     (fn [rt]
-      (let [plan (weaver/add rt {:title "plan"})
-            blocker (weaver/add rt {:title "closed blocker" :state "closed"})
-            closed-implemented (weaver/add rt {:title "closed implemented"
-                                               :state "closed"
-                                               :attributes {:status "implemented" :body "body" :agent-run/harness "sh"}})
-            closed-blocked (weaver/add rt {:title "closed blocked"
-                                           :state "closed"
-                                           :attributes {:body "body" :agent-run/harness "sh"}
-                                           :edges [{:type "depends-on" :to (:id blocker)}]})]
-        (weaver/update rt (:id plan) {:edges [{:type "parent-of" :to (:id closed-implemented)}
-                                              {:type "parent-of" :to (:id closed-blocked)}]})
+      (let [plan (weaver/add! rt {:title "plan"})
+            blocker (weaver/add! rt {:title "closed blocker" :state "closed"})
+            closed-implemented (weaver/add! rt {:title "closed implemented"
+                                                :state "closed"
+                                                :attributes {:status "implemented" :body "body" :agent-run/harness "sh"}})
+            closed-blocked (weaver/add! rt {:title "closed blocked"
+                                            :state "closed"
+                                            :attributes {:body "body" :agent-run/harness "sh"}
+                                            :edges [{:type "depends-on" :to (:id blocker)}]})]
+        (weaver/update! rt (:id plan) {:edges [{:type "parent-of" :to (:id closed-implemented)}
+                                               {:type "parent-of" :to (:id closed-blocked)}]})
         (let [status (agents/agent-op {:op/argv ["status" (:id plan)]})]
           (is (not-any? #{(:id closed-implemented)} (:awaiting_verification status))
               "closed implemented tasks are already verified")
@@ -1574,9 +1574,9 @@
   (with-agents
     (fn [rt]
       (shuttle/register-backend! :fake-mux fake-mux)
-      (let [task (weaver/add rt {:title "pair on the plan"
-                                 :attributes {:body "Discuss and agree the plan with the user."
-                                              :agent-run/harness "sh" :hitl "true"}})]
+      (let [task (weaver/add! rt {:title "pair on the plan"
+                                  :attributes {:body "Discuss and agree the plan with the user."
+                                               :agent-run/harness "sh" :hitl "true"}})]
         (testing "headless delegation of a hitl task fails loudly"
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"hitl"
                                 (agents/agent-op {:op/argv ["delegate" (:id task)]}))))
@@ -1601,7 +1601,7 @@
               (is (clojure.string/includes? (get-in running [:attributes :agent-run/prompt])
                                             "working WITH the user")))
             (testing "closing the task reaps the session run"
-              (weaver/update rt (:id task) {:state "closed"})
+              (weaver/update! rt (:id task) {:state "closed"})
               (let [done (await-phase rt run-id #{"done"})]
                 (is (= "closed" (:state done)))))))))))
 
@@ -1609,8 +1609,8 @@
   (with-agents
     (fn [rt]
       (shuttle/register-backend! :fake-mux fake-mux)
-      (let [task (weaver/add rt {:title "session task"
-                                 :attributes {:body "work with the user" :agent-run/harness "sh" :hitl "true"}})
+      (let [task (weaver/add! rt {:title "session task"
+                                  :attributes {:body "work with the user" :agent-run/harness "sh" :hitl "true"}})
             d (agents/agent-op {:op/argv ["delegate" (:id task) "--interactive" "--backend" "fake-mux"]})
             run-id (get-in d [:run :id])]
         (await-handle-pid rt run-id)

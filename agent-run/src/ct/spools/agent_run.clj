@@ -1232,7 +1232,7 @@
     (.mkdirs)))
 
 (defn- update-run! [id attributes patch]
-  (weaver/update (rt) id (merge patch {:attributes attributes})))
+  (weaver/update! (rt) id (merge patch {:attributes attributes})))
 
 (defn- mark-failed!
   "Mark a run failed with `error`. `extra` merges additional terminal attributes
@@ -2125,13 +2125,13 @@
         (fail! "Run parent strand not found" {:id parent-id})))
     (when (and serves (not (weaver/show (rt) serves)))
       (fail! "Run :serves target not found" {:id serves}))
-    (let [run (weaver/add (rt) {:title (or title (truncate prompt 72))
-                                :attributes (merge attrs reserved)
-                                :edges (cond-> (mapv (fn [dep] {:type "depends-on" :to dep}) (distinct (or depends-on [])))
-                                         resume (conj {:type "resumes" :to resume})
-                                         serves (conj {:type "serves" :to serves}))})]
+    (let [run (weaver/add! (rt) {:title (or title (truncate prompt 72))
+                                 :attributes (merge attrs reserved)
+                                 :edges (cond-> (mapv (fn [dep] {:type "depends-on" :to dep}) (distinct (or depends-on [])))
+                                          resume (conj {:type "resumes" :to resume})
+                                          serves (conj {:type "serves" :to serves}))})]
       (doseq [parent-id parent-ids]
-        (weaver/update (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
+        (weaver/update! (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
       run)))
 
 (defn- parent-of-sources
@@ -2263,10 +2263,10 @@
     ;; Close the predecessor and record lineage only once the successor exists,
     ;; so a spawn that throws (resume validation, missing target) leaves the
     ;; predecessor untouched rather than half-succeeded.
-    (weaver/update (rt) old-run-id {:state "closed" :attributes {"agent-run/phase" "superseded"}})
-    (weaver/update (rt) (:id successor)
-                   {:attributes {"agent-run/supersedes" old-run-id}
-                    :edges [{:type "supersedes" :to old-run-id}]})
+    (weaver/update! (rt) old-run-id {:state "closed" :attributes {"agent-run/phase" "superseded"}})
+    (weaver/update! (rt) (:id successor)
+                    {:attributes {"agent-run/supersedes" old-run-id}
+                     :edges [{:type "supersedes" :to old-run-id}]})
     successor))
 
 (defn- attach-hint
@@ -2629,11 +2629,11 @@
                      :owner :skein/spools-shuttle
                      :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
                      :doc "Agent-run engine control attributes reserved by spawn-run! and the supervision engine, plus usage attributes finish-run! records at completion and the prompt forms higher-level spools carry onto a run."})
-    (events/register! runtime :agent-run/engine
-                      #{:strand/added :strand/updated :batch/applied
-                        :strand/burned :strand/superseded}
-                      'ct.spools.agent-run/on-event
-                      {:spool "agent-run"})
+    (events/register-handler! runtime :agent-run/engine
+                              #{:strand/added :strand/updated :batch/applied
+                                :strand/burned :strand/superseded}
+                              'ct.spools.agent-run/on-event
+                              {:spool "agent-run"})
     (let [recovered (reconcile!)]
       {:installed true
        :namespace 'ct.spools.agent-run

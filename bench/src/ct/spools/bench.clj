@@ -581,7 +581,7 @@
 ;; Entry execution (on the spool executor, bounded by the run semaphore)
 
 (defn- set-phase! [runtime entry-id phase]
-  (weaver/update runtime entry-id {:attributes {"bench/phase" phase}}))
+  (weaver/update! runtime entry-id {:attributes {"bench/phase" phase}}))
 
 (defn- aborted?
   "True when `entry-id` has already been marked aborted. A worker finalizing an
@@ -656,20 +656,20 @@
           (if (aborted? runtime entry-id)
             {:slug slug :phase "aborted"}
             (do
-              (weaver/update runtime entry-id
-                             {:state "closed"
-                              :attributes (merge {"bench/phase" "done"
-                                                  "bench/image-digest" (:image-digest result)}
-                                                 (metric-attrs metrics))})
+              (weaver/update! runtime entry-id
+                              {:state "closed"
+                               :attributes (merge {"bench/phase" "done"
+                                                   "bench/image-digest" (:image-digest result)}
+                                                  (metric-attrs metrics))})
               {:slug slug :phase "done"}))))
       (catch Throwable t
         (if (aborted? runtime entry-id)
           {:slug slug :phase "aborted"}
           (let [detail (:err (ex-data t))]
-            (weaver/update runtime entry-id
-                           {:attributes (cond-> {"bench/phase" "failed"
-                                                 "bench/error" (ex-message t)}
-                                          (not (str/blank? detail)) (assoc "bench/error-detail" detail))})
+            (weaver/update! runtime entry-id
+                            {:attributes (cond-> {"bench/phase" "failed"
+                                                  "bench/error" (ex-message t)}
+                                           (not (str/blank? detail)) (assoc "bench/error-detail" detail))})
             {:slug slug :phase "failed" :error (ex-message t)})))
       (finally
         (swap! (in-flight-atom runtime) dissoc entry-id)
@@ -839,11 +839,11 @@
                                     :parent root-id
                                     :attrs attrs})))
       :else
-      (let [judge-strand (weaver/add runtime
-                                     {:title title
-                                      :attributes attrs
-                                      :edges (mapv (fn [e] {:type "depends-on" :to e}) entry-ids)})]
-        (weaver/update runtime root-id {:edges [{:type "parent-of" :to (:id judge-strand)}]})
+      (let [judge-strand (weaver/add! runtime
+                                      {:title title
+                                       :attributes attrs
+                                       :edges (mapv (fn [e] {:type "depends-on" :to e}) entry-ids)})]
+        (weaver/update! runtime root-id {:edges [{:type "parent-of" :to (:id judge-strand)}]})
         (:id judge-strand)))))
 
 ;; ---------------------------------------------------------------------------
@@ -889,31 +889,31 @@
         (agent-run/resolve-harness (:harness judge))))
     (let [sha (or (:sha normalized)
                   (exec/resolve-rev! (data-root runtime) (:repo normalized) (:rev normalized)))
-          root (weaver/add runtime {:title (str "Bench: " name)
-                                    :attributes {"bench/run" "true"
-                                                 "bench/suite" name
-                                                 "bench/repo" (:repo normalized)
-                                                 "bench/sha" sha}})
+          root (weaver/add! runtime {:title (str "Bench: " name)
+                                     :attributes {"bench/run" "true"
+                                                  "bench/suite" name
+                                                  "bench/repo" (:repo normalized)
+                                                  "bench/sha" sha}})
           run-id (:id root)
           data-dir (.getCanonicalPath (run-dir runtime run-id))]
       (when-let [parent (:for opts)]
-        (weaver/update runtime parent {:edges [{:type "parent-of" :to run-id}]}))
-      (weaver/update runtime run-id {:attributes {"bench/data-dir" data-dir}})
+        (weaver/update! runtime parent {:edges [{:type "parent-of" :to run-id}]}))
+      (weaver/update! runtime run-id {:attributes {"bench/data-dir" data-dir}})
       (let [poured (mapv (fn [cell]
                            (let [prompt-slug (if (:single-prompt? normalized) ::single (:prompt cell))
                                  prompt-text (resolve-prompt-text runtime (:prompts normalized) prompt-slug)
-                                 entry (weaver/add runtime
-                                                   {:title (str "Bench entry: " (:slug cell))
-                                                    :attributes (cond-> {"bench/entry" "true"
-                                                                         "bench/slug" (:slug cell)
-                                                                         "bench/harness" (clojure.core/name (:harness cell))
-                                                                         "bench/phase" "pending"
-                                                                         "bench/attempt" 1}
-                                                                  (:model cell) (assoc "bench/model" (:model cell))
-                                                                  (:thinking cell) (assoc "bench/thinking" (:thinking cell))
-                                                                  (and (not (:single-prompt? normalized)) (:prompt cell))
-                                                                  (assoc "bench/prompt-slug" (clojure.core/name (:prompt cell))))})]
-                             (weaver/update runtime run-id {:edges [{:type "parent-of" :to (:id entry)}]})
+                                 entry (weaver/add! runtime
+                                                    {:title (str "Bench entry: " (:slug cell))
+                                                     :attributes (cond-> {"bench/entry" "true"
+                                                                          "bench/slug" (:slug cell)
+                                                                          "bench/harness" (clojure.core/name (:harness cell))
+                                                                          "bench/phase" "pending"
+                                                                          "bench/attempt" 1}
+                                                                   (:model cell) (assoc "bench/model" (:model cell))
+                                                                   (:thinking cell) (assoc "bench/thinking" (:thinking cell))
+                                                                   (and (not (:single-prompt? normalized)) (:prompt cell))
+                                                                   (assoc "bench/prompt-slug" (clojure.core/name (:prompt cell))))})]
+                             (weaver/update! runtime run-id {:edges [{:type "parent-of" :to (:id entry)}]})
                              {:slug (:slug cell) :entry-id (:id entry) :cell cell
                               :prompt-text prompt-text :prompt-slug prompt-slug
                               :entry-dir (str (io/file data-dir (:slug cell)))}))
@@ -982,10 +982,10 @@
           prompt-slug (if (:single-prompt? (:suite ctx)) ::single (:prompt cell))
           prompt-text (resolve-prompt-text runtime (:prompts (:suite ctx)) prompt-slug)
           attempt (or (attr-get entry "bench/attempt") 1)]
-      (weaver/update runtime entry-id
-                     {:attributes {"bench/phase" "pending"
-                                   "bench/error" nil
-                                   "bench/attempt" (inc attempt)}})
+      (weaver/update! runtime entry-id
+                      {:attributes {"bench/phase" "pending"
+                                    "bench/error" nil
+                                    "bench/attempt" (inc attempt)}})
       (queue-entry! runtime ctx {:slug slug :entry-id entry-id :cell cell :prompt-text prompt-text})
       {:retried entry-id :attempt (inc attempt)})))
 
@@ -1016,8 +1016,8 @@
                            ;; Mark BEFORE killing so a kill-triggered worker error
                            ;; can't race the aborted marking (abort wins).
                            (when marked?
-                             (weaver/update runtime (:id entry)
-                                            {:attributes {"bench/phase" "failed" "bench/error" "aborted"}}))
+                             (weaver/update! runtime (:id entry)
+                                             {:attributes {"bench/phase" "failed" "bench/error" "aborted"}}))
                            (when eng (exec/kill-container! eng (exec/container-name run-id slug)))
                            (when-let [{:keys [process]} (get @(in-flight-atom runtime) (:id entry))]
                              (when process (.destroyForcibly ^Process process)))
@@ -1030,10 +1030,10 @@
                    (filter #(= "true" (str (attr-get % "bench/judge"))))
                    first)]
     (when judge
-      (weaver/update runtime (:id judge)
-                     {:state "closed"
-                      :attributes (cond-> {"bench/error" "aborted"}
-                                    (attr-get judge "agent-run/run") (assoc "agent-run/phase" "superseded"))}))
+      (weaver/update! runtime (:id judge)
+                      {:state "closed"
+                       :attributes (cond-> {"bench/error" "aborted"}
+                                     (attr-get judge "agent-run/run") (assoc "agent-run/phase" "superseded"))}))
     (drop-semaphore! runtime run-id)
     {:aborted run-id :failed failed :judge (:id judge)}))
 
@@ -1458,9 +1458,9 @@
       (when eng
         (when-let [root (root-of runtime (:id entry))]
           (exec/kill-container! eng (exec/container-name root (attr-get entry "bench/slug")))))
-      (weaver/update runtime (:id entry)
-                     {:attributes {"bench/phase" "failed"
-                                   "bench/error" "orphaned by weaver restart"}}))
+      (weaver/update! runtime (:id entry)
+                      {:attributes {"bench/phase" "failed"
+                                    "bench/error" "orphaned by weaver restart"}}))
     (mapv :id orphans)))
 
 (def ^:private bench-namespace-declaration

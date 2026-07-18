@@ -1575,9 +1575,9 @@
                              (reject-card-target! "A :target-blackboard panel" id
                                                   (weaver/show (rt) id))
                              id)
-                   :fresh (:id (weaver/add (rt) {:title (truncate (str "Panel: " (:name (first (first (:turns specs))))) 72)
-                                                 :attributes (cond-> {"panel/pass" (:pass specs)}
-                                                               spawned-by (assoc "agent-run/spawned-by" spawned-by))})))
+                   :fresh (:id (weaver/add! (rt) {:title (truncate (str "Panel: " (:name (first (first (:turns specs))))) 72)
+                                                  :attributes (cond-> {"panel/pass" (:pass specs)}
+                                                                spawned-by (assoc "agent-run/spawned-by" spawned-by))})))
         resolve-board (fn [s] (str/replace (str s) board-placeholder board-id))
         spawn-run (fn [spec resume-run extra]
                     (let [;; a resuming turn launches on the short continuation

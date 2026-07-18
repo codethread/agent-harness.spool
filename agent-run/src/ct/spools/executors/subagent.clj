@@ -85,7 +85,7 @@
   (when (and (string? s) (not (str/blank? s))) s))
 
 (defn- stamp! [id attributes]
-  (weaver/update (rt) id {:attributes attributes}))
+  (weaver/update! (rt) id {:attributes attributes}))
 
 (defn- current-serving-run
   "The gate's current delegated run, or nil: the single non-superseded run with a
@@ -282,9 +282,9 @@
                            |delegated run's result to its gate. gate/error is wider: any gate
                            |executor's durable failure stamp, written by both the subagent and shell
                            |executors.")})
-    (events/register! runtime :subagent/engine event-types
-                      'ct.spools.executors.subagent/on-event
-                      {:spool "subagent"})
+    (events/register-handler! runtime :subagent/engine event-types
+                              'ct.spools.executors.subagent/on-event
+                              {:spool "subagent"})
     (workflow/register-executor! :subagent gate-stalled?)
     ;; The human attention surface for stuck gates; the rule lives on
     ;; `stalled-gates-query` so composing readers share it without the registry.
