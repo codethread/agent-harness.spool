@@ -75,6 +75,12 @@
                   :attributes gate-attrs)
    (workflow/step :after "After" :self :depends-on [:delegate])))
 
+(defn- workflow-with-task-gate [gate-attrs]
+  (workflow/workflow
+   "Strict treadle test"
+   (treadle/task-gate :delegate "Delegate task" :attributes gate-attrs)
+   (workflow/step :after "After" :self :depends-on [:delegate])))
+
 (defn- run-for-gate [rt gate-id]
   (first (weaver/list rt [:edge/out "serves" [:= :id gate-id]] {})))
 
@@ -156,6 +162,66 @@
           (is (nil? (attr gate :workflow/outcome-notes)))
           (is (= [gate-id]
                  (mapv :id (workflow/ready "invalid-result")))))))))
+
+(deftest generic-gate-default-remains-run-done
+  (with-runtime
+    (fn [rt _]
+      (shuttle/install!)
+      (workflow/start! "default-policy"
+                       (workflow/workflow
+                        "Default policy"
+                        (workflow/gate :delegate "Delegate" :subagent
+                                       :attributes {"status" "blocked"})
+                        (workflow/step :after "After" :self :depends-on [:delegate]))
+                       {})
+      (let [gate-id (:id (ready-subagent-gate "default-policy"))
+            run (weaver/add! rt {:title "Completed generic run"
+                                 :state "closed"
+                                 :attributes {:agent-run/run "true"
+                                              :agent-run/phase "done"
+                                              :agent-run/result "generic result"
+                                              :workflow/run-id "default-policy"}
+                                 :edges [{:type "serves" :to gate-id}]})]
+        (treadle/install!)
+        (test-alpha/await-quiescent! rt)
+        (is (= "true" (attr (weaver/show rt (:id run)) :gate/delivered)))
+        (is (= "closed" (:state (weaver/show rt gate-id))))
+        (is (= "After" (:title (first (workflow/ready "default-policy")))))))))
+
+(deftest task-gate-emits-strict-policy-and-blocks-completed-red-run
+  (with-runtime
+    (fn [rt _]
+      (shuttle/install!)
+      (workflow/start! "strict-policy"
+                       (workflow-with-task-gate {"status" "blocked"})
+                       {})
+      (let [gate-id (:id (ready-subagent-gate "strict-policy"))
+            run (weaver/add! rt {:title "Completed red task run"
+                                 :state "closed"
+                                 :attributes {:agent-run/run "true"
+                                              :agent-run/phase "done"
+                                              :agent-run/result "honest red"
+                                              :workflow/run-id "strict-policy"}
+                                 :edges [{:type "serves" :to gate-id}]})]
+        (treadle/install!)
+        (test-alpha/await-quiescent! rt)
+        (let [gate (weaver/show rt gate-id)
+              run (weaver/show rt (:id run))]
+          (is (= "status-implemented" (attr gate :gate/completion-policy)))
+          (is (= "active" (:state gate)))
+          (is (str/includes? (attr gate :gate/error) "expected \"implemented\""))
+          (is (nil? (attr run :gate/delivered)))
+          (is (= [gate-id] (mapv :id (workflow/ready "strict-policy"))))
+          (is (= gate-id (:gate (treadle/gate-stalled? (ready-subagent-gate "strict-policy")))))
+          (is (some #(= gate-id (:id %))
+                    (weaver/list-query rt 'stalled-subagent-gates {})))
+          ;; Correcting acceptance state and clearing the durable failure lets
+          ;; the same completed run deliver; no worker rerun is necessary.
+          (weaver/update! rt gate-id {:attributes {"status" "implemented"
+                                                   "gate/error" ""}})
+          (let [delivered (await-delivered rt (:id run))]
+            (is (= "true" (attr delivered :gate/delivered)))
+            (is (= "closed" (:state (weaver/show rt gate-id))))))))))
 
 (deftest blocked-gate-spawns-only-after-blocker-closes
   (with-treadle
@@ -444,6 +510,7 @@
         (is (= :attr-namespace (:kind decl)))
         (is (= "gate" (:name decl)))
         (is (= :skein/spools-treadle (:owner decl)))
+        (is (contains? (set (:keys decl)) "gate/completion-policy"))
         (is (contains? (set (:keys decl)) "gate/delivered"))))))
 
 (deftest state-shape-matches-declared-version

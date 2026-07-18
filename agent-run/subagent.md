@@ -56,12 +56,19 @@ independently and never block each other.
 | `agent-run/prompt` | no | Run prompt. If absent, derives one from `workflow/instruction`, `description`, then title; if none exists, stamps `gate/error`. |
 | `agent-run/cwd` | no | Passed through as the run working directory. |
 | `agent-run/max-attempts` | no | Crash-recovery attempt bound. Accepts an integer or integer string; anything else stamps `gate/error`. |
+| `gate/completion-policy` | no | Completion acceptance: `run-done` (default) closes on a successful non-blank run; `status-implemented` additionally requires the gate task's `status` to be `implemented`. Unknown values fail loudly through `gate/error`. |
+
+Generic gates deliberately retain `run-done` semantics. Build task-aware AFK gates with
+`ct.spools.executors.subagent/task-gate`; it accepts the same keyword options as `workflow/gate`
+after the id and title, fixes the waiter to `:subagent`, and always emits the strict
+`status-implemented` policy. Thus task constructors own the safe default rather than their callers.
 
 ## Gate attributes
 
 | Attribute | On | Meaning |
 |---|---|---|
-| `gate/error` | gate step | Durable spawn-side failure detail; the gate is skipped until a coordinator clears it. |
+| `gate/error` | gate step | Durable spawn- or completion-policy failure detail; the gate is skipped until a coordinator clears it. |
+| `gate/completion-policy` | gate step | `run-done` or `status-implemented`; absent means `run-done` for compatibility. |
 | `workflow/run-id` | run strand | Workflow `run-id` owning the gate. Workflow's own key, stamped onto the run as-is: the executor inherits it rather than declaring a synonym. |
 | `gate/delivered` | run strand | `"true"`, `"gate-closed"`, or `"error: …"`; presence means delivery is terminal for this run. |
 | `gate/delivery-blocked` | run strand | Written once when a finished run's gate is active but not ready; delivery retries when the gate becomes ready. |
@@ -103,6 +110,12 @@ result is recorded `failed` by agent-run (see the README blank-result paragraph)
 completes the gate. A silently dead worker must not satisfy a subagent gate. Instead the failed run
 keeps its `serves` edge to the gate. The ready gate is discoverable via the stall predicate and
 `stalled-subagent-gates` query below and, as a delegated run, via `agent-failures`.
+
+Under `status-implemented`, a completed run whose served gate task does not carry
+`status=implemented` remains undelivered. The executor leaves the gate active and stamps
+`gate/error`, so workflow await and `stalled-subagent-gates` surface the red gate instead of
+advancing downstream work. After correcting the task status, clear `gate/error`; the next scan
+reconsiders the same completed run. The default `run-done` policy does not inspect task status.
 
 A coordinator recovers such a gate with `agent retry <run-id>` on the failed or exhausted
 gate-serving run. Retry marks the dead run superseded and spawns a successor that inherits the run's
