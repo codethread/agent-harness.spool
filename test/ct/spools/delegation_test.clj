@@ -30,6 +30,11 @@
       (agents/install!)
       (f rt))))
 
+(defn- attr-namespace-declaration [rt name]
+  (->> (vocab/declarations rt {:kind :attr-namespace})
+       (filter #(= name (:name %)))
+       first))
+
 (defn- seed-run!
   "Add a completed agent-run strand carrying the usage attributes the spend
   aggregation reads. A nil cost-usd/tokens-total/tokens value is omitted, so the
@@ -150,8 +155,8 @@
 (deftest agents-install-declares-review-and-panel-vocab
   (with-agents
     (fn [rt]
-      (let [review (vocab/declaration rt :attr-namespace "review")
-            panel (vocab/declaration rt :attr-namespace "panel")]
+      (let [review (attr-namespace-declaration rt "review")
+            panel (attr-namespace-declaration rt "panel")]
         (is (= :skein/spools-delegation (:owner review))
             "review/* is owned by the delegation spool's use-key")
         (is (= :skein/spools-delegation (:owner panel))
@@ -164,7 +169,7 @@
 (deftest agent-run-install-declares-agent-run-vocab
   (with-agents
     (fn [rt]
-      (let [decl (vocab/declaration rt :attr-namespace "agent-run")]
+      (let [decl (attr-namespace-declaration rt "agent-run")]
         (is (= :attr-namespace (:kind decl)))
         (is (= :skein/spools-shuttle (:owner decl))
             "agent-run/* is owned by the agent-run spool's use-key")

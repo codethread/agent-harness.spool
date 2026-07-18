@@ -24,6 +24,11 @@
       (treadle/install!)
       (f rt))))
 
+(defn- attr-namespace-declaration [rt name]
+  (->> (vocab/declarations rt {:kind :attr-namespace})
+       (filter #(= name (:name %)))
+       first))
+
 (defn- await-eventually
   ([pred] (await-eventually pred (test-support/await-budget-ms)))
   ([pred timeout-ms]
@@ -435,7 +440,7 @@
   ;; durable survivor — under the single use-key :skein/spools-treadle.
   (with-treadle
     (fn [rt]
-      (let [decl (vocab/declaration rt :attr-namespace "gate")]
+      (let [decl (attr-namespace-declaration rt "gate")]
         (is (= :attr-namespace (:kind decl)))
         (is (= "gate" (:name decl)))
         (is (= :skein/spools-treadle (:owner decl)))

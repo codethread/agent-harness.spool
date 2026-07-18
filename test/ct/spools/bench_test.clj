@@ -30,6 +30,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Fixtures
 
+(defn- attr-namespace-declaration [rt name]
+  (->> (vocab/declarations rt {:kind :attr-namespace})
+       (filter #(= name (:name %)))
+       first))
+
 (defn- temp-dir [prefix]
   (.toFile (Files/createTempDirectory (.toPath (io/file "/tmp")) prefix
                                       (make-array FileAttribute 0))))
@@ -278,7 +283,7 @@ esac
 (deftest install-declares-the-bench-attribute-namespace
   (with-bench
     (fn [rt _]
-      (let [decl (vocab/declaration rt :attr-namespace "bench")
+      (let [decl (attr-namespace-declaration rt "bench")
             keys (set (:keys decl))]
         (is (some? decl))
         (is (= :skein/spools-bench (:owner decl)))

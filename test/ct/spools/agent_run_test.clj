@@ -32,6 +32,11 @@
       (shuttle/install!)
       (f rt))))
 
+(defn- attr-namespace-declaration [rt name]
+  (->> (vocab/declarations rt {:kind :attr-namespace})
+       (filter #(= name (:name %)))
+       first))
+
 (defn- await-attr-matching
   "Poll until attribute `k` satisfies `pred` or timeout; return the strand."
   ([rt id k pred] (await-attr-matching rt id k pred (test-support/await-budget-ms)))
@@ -46,7 +51,7 @@
 (deftest install-declares-usage-attrs-in-agent-run-vocab
   (with-shuttle
     (fn [rt]
-      (let [decl (vocab/declaration rt :attr-namespace "agent-run")
+      (let [decl (attr-namespace-declaration rt "agent-run")
             keys (set (:keys decl))]
         (is (= :skein/spools-shuttle (:owner decl))
             "the agent-run namespace stays owned by :skein/spools-shuttle")
@@ -56,7 +61,7 @@
             (is (contains? keys k) (str k " is listed in the agent-run vocab"))))
         (testing "re-installing is idempotent for the same owner (survives reload!)"
           (shuttle/install!)
-          (is (= decl (vocab/declaration rt :attr-namespace "agent-run"))))))))
+          (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
 
 (deftest harness-registry-validates-and-resolves-aliases
   (with-shuttle
