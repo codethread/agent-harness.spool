@@ -445,10 +445,17 @@
                                  |reviewer count, harnesses, and contracts, so
                                  |--seats/--harness/--contract are rejected with it.
                                  |
-                                 |--commit-range names the diff surface (e.g. main..HEAD): its
-                                 |changed files are expanded via git at --cwd and injected into
-                                 |every reviewer prompt so reviewers stop re-deriving the diff.
-                                 |--changed-files overrides the file list explicitly (csv).
+                                 |--base <ref> names the base the work forked from and is the
+                                 |preferred diff surface: the review pins merge-base(<ref>,
+                                 |HEAD)..HEAD at spawn, so the surface cannot drift when the base
+                                 |advances mid-review nor show its commits as phantom reversions.
+                                 |--commit-range names an explicit range instead (mutually
+                                 |exclusive with --base); a two-dot range whose base is not an
+                                 |ancestor of its tip is refused for the same phantom-reversion
+                                 |reason. Either surface's changed files are expanded via git at
+                                 |--cwd and injected into every reviewer prompt so reviewers stop
+                                 |re-deriving the diff. --changed-files overrides the file list
+                                 |explicitly (csv).
                                  |
                                  |--fanout-cap K stamps one shared fan-out group on every
                                  |reviewer and the synthesizer so the agent-run window bounds them
@@ -456,7 +463,9 @@
                     :fails ["target not found" "target is a kanban card" "no reviewers"
                             "reviewer missing harness" "unknown roster"
                             "--roster with --seats/--harness/--contract"
-                            "commit range not expandable at --cwd"]
+                            "commit range not expandable at --cwd"
+                            "--base with --commit-range" "--base without --cwd"
+                            "two-dot commit range base not an ancestor of its tip"]
                     :returns {"target" "target id" "reviewers" ["run ids"] "synthesizer" "optional run id"}}
            :rosters {:group "memory-review"
                      :help-topic "strand help agent"
@@ -1872,17 +1881,82 @@
       (fail! "Could not expand commit range in worktree"
              {:cwd cwd :commit-range commit-range :exit exit :git-error (str/trim (str err))}))))
 
+(defn- git-merge-base
+  "Resolve the merge base of `base-ref` and HEAD within a worktree.
+
+  The returned sha pins the review surface: unlike a symbolic ref it cannot
+  drift when the base branch advances mid-review, and as a common ancestor it
+  can never show the base branch's own commits as phantom reversions. Fails
+  loudly when git cannot resolve it (unknown ref, no common ancestor, missing
+  worktree)."
+  [cwd base-ref]
+  (let [{:keys [exit out err]} (shell/sh "git" "-C" cwd "merge-base" base-ref "HEAD")]
+    (if (zero? exit)
+      (str/trim out)
+      (fail! "Could not resolve the merge base pinning the review surface"
+             {:cwd cwd :base base-ref :exit exit :git-error (str/trim (str err))}))))
+
+(defn- assert-two-dot-base-is-ancestor!
+  "Reject a two-dot commit range whose left side is not an ancestor of its right.
+
+  `git diff a..b` compares the two trees directly, so when `a` carries commits
+  `b` lacks — a branch reviewed against a base that advanced past its fork
+  point — the surface shows the base's own work as phantom reversions and
+  reviewers hunt regressions the branch never made. Three-dot ranges use
+  merge-base semantics and are skipped; `--base` computes the pinned
+  equivalent. A left side git cannot compare fails loudly rather than passing
+  an uncheckable range through as authoritative."
+  [cwd commit-range]
+  (when-not (str/includes? commit-range "...")
+    (when-let [dots (str/index-of commit-range "..")]
+      (let [left (subs commit-range 0 dots)
+            right (subs commit-range (+ dots 2))
+            right (if (non-blank? right) right "HEAD")]
+        (when (non-blank? left)
+          (let [{:keys [exit err]} (shell/sh "git" "-C" cwd "merge-base" "--is-ancestor" left right)]
+            (case (long exit)
+              0 nil
+              1 (fail! (str "Two-dot commit range base is not an ancestor of its tip: the diff "
+                            "would show the base's own commits as phantom reversions. Use "
+                            "--base <ref> for merge-base semantics, or a three-dot range.")
+                       {:cwd cwd :commit-range commit-range :base left :tip right})
+              (fail! "Could not verify the commit range base is an ancestor of its tip"
+                     {:cwd cwd :commit-range commit-range :exit exit
+                      :git-error (str/trim (str err))}))))))))
+
 (defn- change-context-from-flags
   "Build a `:ct.spools.delegation/change-context` value from review flags, or nil
-  when the caller supplied no diff surface. An explicit `--changed-files` list
-  wins; otherwise `--commit-range` is expanded to its files via git at `--cwd`.
-  A commit range that cannot be expanded fails loudly — a missing `--cwd`, or a
-  git failure via `git-changed-files` — so a range is never emitted without its
-  file list, and reviewers never receive a partial diff surface the prompt still
-  frames as authoritative."
+  when the caller supplied no diff surface. `--base <ref>` names the base the
+  work forked from: the surface becomes the pinned `merge-base(<ref>, HEAD)..HEAD`
+  range, resolved via git at `--cwd`, so it stays stable even when `<ref>`
+  advances mid-review. An explicit `--commit-range` is taken as authored, but a
+  two-dot range is refused when its base is not an ancestor of its tip (see
+  `assert-two-dot-base-is-ancestor!`); combining it with `--base` fails loudly.
+  An explicit `--changed-files` list wins over git expansion; otherwise the
+  range is expanded to its files via git at `--cwd`. A range that cannot be
+  expanded fails loudly — a missing `--cwd`, or a git failure via
+  `git-changed-files` — so a range is never emitted without its file list, and
+  reviewers never receive a partial diff surface the prompt still frames as
+  authoritative."
   [flags]
-  (let [commit-range (get flags "--commit-range")
+  (let [base (get flags "--base")
+        explicit-range (get flags "--commit-range")
         cwd (get flags "--cwd")
+        commit-range
+        (cond
+          (and (non-blank? base) (non-blank? explicit-range))
+          (fail! "--base and --commit-range are mutually exclusive: --base computes the range"
+                 {:base base :commit-range explicit-range})
+
+          (non-blank? base)
+          (do (when-not (non-blank? cwd)
+                (fail! "--base requires --cwd to resolve the merge base" {:base base}))
+              (str (git-merge-base cwd base) "..HEAD"))
+
+          :else
+          (do (when (and (non-blank? explicit-range) (non-blank? cwd))
+                (assert-two-dot-base-is-ancestor! cwd explicit-range))
+              explicit-range))
         files (or (split-csv (get flags "--changed-files"))
                   (when (non-blank? commit-range)
                     (when-not (non-blank? cwd)
@@ -1898,8 +1972,8 @@
   (let [{:keys [positional flags]}
         (parse-argv argv {"--seats" :single "--harness" :single "--synthesize" :bool
                           "--contract" :single "--spawned-by" :single "--cwd" :single
-                          "--roster" :single "--commit-range" :single "--changed-files" :single
-                          "--fanout-cap" :single})]
+                          "--roster" :single "--base" :single "--commit-range" :single
+                          "--changed-files" :single "--fanout-cap" :single})]
     (when-not (= 1 (count positional))
       (fail! "review requires <target-id>" {:got positional}))
     (let [change-context (change-context-from-flags flags)
@@ -2135,7 +2209,8 @@
                       :cwd {:doc "Reviewer working directory."}
                       :spawned-by {:doc "Caller run id for provenance."}
                       :roster {:doc "Named declarative reviewer roster."}
-                      :commit-range {:doc "Git commit range under review."}
+                      :base {:doc "Base ref the work forked from; pins merge-base(<ref>, HEAD)..HEAD as the review surface."}
+                      :commit-range {:doc "Explicit git commit range under review; prefer --base."}
                       :changed-files {:doc "Comma-separated changed files under review."}
                       :fanout-cap {:type :int :doc "Cap this review fan-out to K concurrent runs (min(W, K))."}}
               :positionals [{:name :target-id :required? true :doc "Target strand id."}]}

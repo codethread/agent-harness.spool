@@ -736,7 +736,62 @@
     (is (nil? (#'agents/change-context-from-flags {"--cwd" "/tmp"}))))
   (testing "a commit range with no --cwd to expand it fails loudly instead of emitting a partial surface"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--commit-range requires --cwd"
-                          (#'agents/change-context-from-flags {"--commit-range" "main..HEAD"})))))
+                          (#'agents/change-context-from-flags {"--commit-range" "main..HEAD"}))))
+  (testing "--base with an explicit range is ambiguous and fails loudly"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
+                          (#'agents/change-context-from-flags {"--base" "origin/main"
+                                                               "--commit-range" "main..HEAD"
+                                                               "--cwd" "/tmp"}))))
+  (testing "--base with no --cwd to resolve the merge base fails loudly"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--base requires --cwd"
+                          (#'agents/change-context-from-flags {"--base" "origin/main"})))))
+
+(deftest base-flag-pins-the-merge-base-review-surface
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory
+                      (.toPath (io/file "/tmp")) "skein-agents-base"
+                      (make-array java.nio.file.attribute.FileAttribute 0)))
+        path (.getCanonicalPath dir)
+        git (fn [& args] (apply sh/sh "git" "-C" path args))]
+    (try
+      ;; main gains base.txt after the branch forks, so main's tip is NOT an
+      ;; ancestor of the branch HEAD — the phantom-reversion shape.
+      (git "init" "-q" "-b" "main")
+      (git "config" "user.email" "t@example.com")
+      (git "config" "user.name" "t")
+      (spit (io/file dir "shared.txt") "one\n")
+      (git "add" "-A")
+      (git "commit" "-q" "-m" "fork point")
+      (let [fork-sha (str/trim (:out (git "rev-parse" "HEAD")))]
+        (git "checkout" "-q" "-b" "feature")
+        (spit (io/file dir "feature.txt") "work\n")
+        (git "add" "-A")
+        (git "commit" "-q" "-m" "feature work")
+        (git "checkout" "-q" "main")
+        (spit (io/file dir "base.txt") "advance\n")
+        (git "add" "-A")
+        (git "commit" "-q" "-m" "main advances")
+        (git "checkout" "-q" "feature")
+        (testing "--base resolves to a pinned sha range covering only the branch's own work"
+          (is (= {:commit-range (str fork-sha "..HEAD") :files ["feature.txt"]}
+                 (#'agents/change-context-from-flags {"--base" "main" "--cwd" path}))))
+        (testing "a two-dot range against the advanced base is refused as phantom reversions"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not an ancestor"
+                                (#'agents/change-context-from-flags {"--commit-range" "main..HEAD"
+                                                                     "--cwd" path}))))
+        (testing "a three-dot range keeps merge-base semantics and passes"
+          (is (= {:commit-range "main...HEAD" :files ["feature.txt"]}
+                 (#'agents/change-context-from-flags {"--commit-range" "main...HEAD"
+                                                      "--cwd" path}))))
+        (testing "a two-dot range whose base is a real ancestor still passes"
+          (is (= {:commit-range "HEAD~1..HEAD" :files ["feature.txt"]}
+                 (#'agents/change-context-from-flags {"--commit-range" "HEAD~1..HEAD"
+                                                      "--cwd" path}))))
+        (testing "an unresolvable base ref fails loudly"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Could not resolve the merge base"
+                                (#'agents/change-context-from-flags {"--base" "no-such-ref"
+                                                                     "--cwd" path})))))
+      (finally
+        (sh/sh "rm" "-rf" path)))))
 
 (deftest git-changed-files-expands-a-commit-range
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
