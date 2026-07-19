@@ -223,6 +223,41 @@
             (is (= "true" (attr delivered :gate/delivered)))
             (is (= "closed" (:state (weaver/show rt gate-id))))))))))
 
+(deftest unknown-completion-policy-fails-loudly-and-recovers
+  (with-runtime
+    (fn [rt _]
+      (shuttle/install!)
+      (workflow/start! "unknown-policy"
+                       (workflow/workflow
+                        "Unknown policy"
+                        (workflow/gate :delegate "Delegate" :subagent
+                                       :attributes {"gate/completion-policy" "bogus"})
+                        (workflow/step :after "After" :self :depends-on [:delegate]))
+                       {})
+      (let [gate-id (:id (ready-subagent-gate "unknown-policy"))
+            run (weaver/add! rt {:title "Completed unknown-policy run"
+                                 :state "closed"
+                                 :attributes {:agent-run/run "true"
+                                              :agent-run/phase "done"
+                                              :agent-run/result "completed result"
+                                              :workflow/run-id "unknown-policy"}
+                                 :edges [{:type "serves" :to gate-id}]})]
+        (treadle/install!)
+        (test-alpha/await-quiescent! rt)
+        (let [gate (weaver/show rt gate-id)
+              run (weaver/show rt (:id run))]
+          (is (= "active" (:state gate)))
+          (is (str/includes? (attr gate :gate/error)
+                             "unknown gate/completion-policy"))
+          (is (nil? (attr run :gate/delivered)))
+          (is (= [gate-id] (mapv :id (workflow/ready "unknown-policy"))))
+          (weaver/update! rt gate-id
+                          {:attributes {"gate/completion-policy" "run-done"
+                                        "gate/error" ""}})
+          (let [delivered (await-delivered rt (:id run))]
+            (is (= "true" (attr delivered :gate/delivered)))
+            (is (= "closed" (:state (weaver/show rt gate-id))))))))))
+
 (deftest blocked-gate-spawns-only-after-blocker-closes
   (with-treadle
     (fn [rt]
