@@ -32,6 +32,9 @@
   rules agree by construction on \"the current serving run is dead.\""
   ["failed" "exhausted"])
 
+(def ^:private run-done-policy "run-done")
+(def ^:private status-implemented-policy "status-implemented")
+
 (def stalled-gates-query
   "Query definition behind the registered `stalled-subagent-gates` query: an
   active subagent gate whose spawn errored (non-blank `gate/error`), or whose
@@ -115,6 +118,31 @@
   [run-id]
   (first (map :to_strand_id (graph/outgoing-edges (rt) [run-id] "serves"))))
 
+(defn task-gate
+  "Build a task-aware workflow subagent gate.
+
+  Accepts the same keyword options as `skein.spools.workflow/gate`, after `id`
+  and `title`, and always emits `gate/completion-policy status-implemented`.
+  Use raw `workflow/gate` for generic run-completion semantics."
+  [id title & options]
+  (let [options (apply hash-map options)
+        attributes (assoc (or (:attributes options) {})
+                          "gate/completion-policy" status-implemented-policy)]
+    (apply workflow/gate id title :subagent
+           (mapcat identity (assoc options :attributes attributes)))))
+
+(defn- completion-policy [gate]
+  (or (non-blank (attr gate :gate/completion-policy)) run-done-policy))
+
+(defn- completion-error [gate]
+  (case (completion-policy gate)
+    "run-done" nil
+    "status-implemented"
+    (when-not (= "implemented" (attr gate :status))
+      (str "completed run cannot close strict gate: served task " (:id gate)
+           " has status " (pr-str (attr gate :status)) ", expected \"implemented\""))
+    (str "unknown gate/completion-policy " (pr-str (completion-policy gate)))))
+
 (defn- deliver-run! [run]
   (let [run-id (:id run)
         gate-id (run-served-gate run-id)
@@ -129,12 +157,18 @@
           (stamp! run-id {"gate/delivered" "gate-closed"})
 
           (ready-gate? workflow-run-id gate-id)
-          (let [result (attr run :agent-run/result)
-                completion (cond-> {:step gate-id :by run-id}
-                             (non-blank result) (assoc :notes result))]
-            (return-shape/check! :string result)
-            (workflow/complete! workflow-run-id completion)
-            (stamp! run-id {"gate/delivered" "true"}))
+          (if-let [error (completion-error gate)]
+            ;; Keep the completed run undelivered so correcting the task status
+            ;; and clearing gate/error lets a later scan deliver it. The gate's
+            ;; existing durable error surface makes the blocked queue loud.
+            (when-not (non-blank (attr gate :gate/error))
+              (stamp! gate-id {"gate/error" error}))
+            (let [result (attr run :agent-run/result)
+                  completion (cond-> {:step gate-id :by run-id}
+                               (non-blank result) (assoc :notes result))]
+              (return-shape/check! :string result)
+              (workflow/complete! workflow-run-id completion)
+              (stamp! run-id {"gate/delivered" "true"})))
 
           :else
           ;; Gate is active but not currently ready (e.g. userland added a
@@ -275,13 +309,13 @@
                     {:kind :attr-namespace
                      :name "gate"
                      :owner :skein/spools-treadle
-                     :keys ["gate/delivered" "gate/delivery-blocked" "gate/error"]
+                     :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
                      :doc (fmt/reflow "
-                           |Workflow-gate delivery and spawn control attributes. gate/delivered and
-                           |gate/delivery-blocked are the subagent executor's record of handing a
-                           |delegated run's result to its gate. gate/error is wider: any gate
-                           |executor's durable failure stamp, written by both the subagent and shell
-                           |executors.")})
+                           |Workflow-gate completion, delivery, and spawn control attributes.
+                           |gate/completion-policy selects run-done or status-implemented delivery.
+                           |gate/delivered and gate/delivery-blocked record handing a delegated run's
+                           |result to its gate. gate/error is wider: any gate executor's durable
+                           |failure stamp, written by both the subagent and shell executors.")})
     (events/register-handler! runtime :subagent/engine event-types
                               'ct.spools.executors.subagent/on-event
                               {:spool "subagent"})
