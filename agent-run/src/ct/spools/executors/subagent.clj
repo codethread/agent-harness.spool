@@ -50,6 +50,11 @@
   [:and [:= :state "active"]
    [:= [:attr "workflow/gate"] "subagent"]
    [:or
+    ;; Absence of gate/error is the canonical cleared state (a nil patch / JSON
+    ;; null removes the key). The `!= ""` arm keeps a blank gate/error tolerated
+    ;; as cleared too — accepted v1 input preserved for back-compat, not the
+    ;; documented way to clear; `subagent_test` pins the blank tolerance so the
+    ;; compat alarm catches any regression.
     [:and [:exists [:attr "gate/error"]]
      [:not [:= [:attr "gate/error"] ""]]]
     [:edge/in "serves"

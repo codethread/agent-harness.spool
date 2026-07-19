@@ -121,9 +121,11 @@ A coordinator recovers such a gate with `agent retry <run-id>` on the failed or 
 gate-serving run. Retry marks the dead run superseded and spawns a successor that inherits the run's
 `serves` edge, dependency edges, and run metadata. The subagent executor then observes the successor
 as the gate's current serving run and delivers it when it succeeds. For spawn-side failures, clear
-the gate's `gate/error` attribute after fixing the bad request. A CLI clearing idiom is `--attr
-gate/error=` (empty string, since there is no attribute-delete flag); the next scan can spawn the
-gate's first serving run.
+the gate's `gate/error` attribute after fixing the bad request. Clear it by making the key absent
+with a typed JSON-null merge patch — `strand update <gate-id> --attributes '{"gate/error": null}'` —
+and the next scan can spawn the gate's first serving run. Absence is the canonical cleared state; a
+blank `gate/error` is still tolerated as cleared for back-compat, but an empty string is data, not a
+delete, so do not reach for `--attr gate/error=`.
 
 If a gate is closed or routed away while its agent-run run is in flight, the completed run is
 stamped `gate/delivered "gate-closed"` and the result remains on the run strand for audit. If the

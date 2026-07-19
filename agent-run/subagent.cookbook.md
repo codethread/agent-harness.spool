@@ -152,8 +152,10 @@ gate is stuck. You want to find it and get a fresh agent onto it.
 **Composition.** Discovery is the `stalled-subagent-gates` named query (or the `gate-stalled?` predicate on a
 gate view). Recovery for a dead serving run is `agent retry <run-id>`. Retry supersedes the dead run
 and spawns a successor that inherits the `serves` edge to the gate. For spawn-side errors, fix the
-bad request and clear `gate/error`; from the CLI, use `strand update <gate-id> --attr gate/error=`.
-An empty string is treated as cleared.
+bad request and clear `gate/error` by making the key absent — from the CLI, a typed JSON-null merge
+patch: `strand update <gate-id> --attributes '{"gate/error": null}'`. Absence is the canonical
+cleared state; a blank `gate/error` stays tolerated as cleared for back-compat, but an empty string
+is data, not a delete.
 
 ```clojure
 (require '[skein.api.weaver.alpha :as weaver]
@@ -171,7 +173,8 @@ An empty string is treated as cleared.
                                   {:prompt "echo recovered"
                                    :carry-attrs {"workflow/run-id" workflow-run-id}})
 
-;; recover a spawn-side request error after fixing the bad request.
+;; recover a spawn-side request error after fixing the bad request. A nil patch
+;; value removes gate/error (the canonical cleared state); never stamp "".
 (weaver/update rt gate-id {:attributes {"gate/error" nil
                                      "agent-run/prompt" "echo recovered"}})
 ```

@@ -216,9 +216,10 @@
           (is (some #(= gate-id (:id %))
                     (weaver/list-query rt 'stalled-subagent-gates {})))
           ;; Correcting acceptance state and clearing the durable failure lets
-          ;; the same completed run deliver; no worker rerun is necessary.
+          ;; the same completed run deliver; no worker rerun is necessary. The
+          ;; canonical clear is a nil patch removing gate/error, not a blank.
           (weaver/update! rt gate-id {:attributes {"status" "implemented"
-                                                   "gate/error" ""}})
+                                                   "gate/error" nil}})
           (let [delivered (await-delivered rt (:id run))]
             (is (= "true" (attr delivered :gate/delivered)))
             (is (= "closed" (:state (weaver/show rt gate-id))))))))))
@@ -253,10 +254,38 @@
           (is (= [gate-id] (mapv :id (workflow/ready "unknown-policy"))))
           (weaver/update! rt gate-id
                           {:attributes {"gate/completion-policy" "run-done"
-                                        "gate/error" ""}})
+                                        "gate/error" nil}})
           (let [delivered (await-delivered rt (:id run))]
             (is (= "true" (attr delivered :gate/delivered)))
             (is (= "closed" (:state (weaver/show rt gate-id))))))))))
+
+(deftest blank-gate-error-tolerated-as-cleared-for-v1-compat
+  ;; Absence of gate/error is the canonical cleared state (a nil patch / JSON
+  ;; null removes the key), but a blank gate/error stays accepted as cleared —
+  ;; v1 input this spool keeps tolerating rather than rejecting. Pinned here so
+  ;; the compat alarm catches any future regression that would strand a gate a
+  ;; v1 consumer cleared with a blank.
+  (with-runtime
+    (fn [rt _]
+      (shuttle/install!)
+      (treadle/install!)
+      (let [gate-id (:id (weaver/add! rt {:title "Errored gate"
+                                          :state "active"
+                                          :attributes {:workflow/gate "subagent"
+                                                       :gate/error "bad request"}}))
+            stalled? #(boolean (some (fn [g] (= gate-id (:id g)))
+                                     (weaver/list-query rt 'stalled-subagent-gates {})))]
+        ;; a non-blank gate/error is a stall on both discovery paths
+        (is (stalled?))
+        (is (= gate-id (:gate (treadle/gate-stalled? {:id gate-id}))))
+        ;; a blank gate/error is tolerated as cleared (legacy v1 input)
+        (weaver/update! rt gate-id {:attributes {:gate/error ""}})
+        (is (not (stalled?)))
+        (is (nil? (treadle/gate-stalled? {:id gate-id})))
+        ;; removing the key — the canonical clear — is equally not stalled
+        (weaver/update! rt gate-id {:attributes {:gate/error nil}})
+        (is (not (stalled?)))
+        (is (nil? (treadle/gate-stalled? {:id gate-id})))))))
 
 (deftest blocked-gate-spawns-only-after-blocker-closes
   (with-treadle
