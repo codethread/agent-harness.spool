@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.graph.alpha :as graph]
+            [skein.api.patterns.alpha :as patterns]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
@@ -114,6 +115,33 @@
               (str "arg-spec subcommands missing from about-doc: " (sort (set/difference declared-verbs manual-verbs))))
           (is (contains? review-flags :commit-range))
           (is (contains? review-flags :changed-files)))))))
+
+(deftest agent-plan-rejects-unknown-input-keys
+  (with-agents
+    (fn [rt]
+      (let [base {:feature "closed-input" :title "Closed input"
+                  :tasks [{:key "implementation" :title "Implement"}]}
+            top-level (try
+                        (patterns/weave! rt :agent-plan (assoc base :feature_slug "typo"))
+                        (catch clojure.lang.ExceptionInfo e e))
+            nested (try
+                     (patterns/weave! rt :agent-plan
+                                      (assoc-in base [:tasks 0 :depends-on] []))
+                     (catch clojure.lang.ExceptionInfo e e))]
+        (testing "top-level pattern input is closed"
+          (is (instance? clojure.lang.ExceptionInfo top-level))
+          (is (str/includes? (ex-message top-level) ":feature_slug"))
+          (is (str/includes? (ex-message top-level) ":feature"))
+          (is (= [:feature_slug] (:unknown (ex-data top-level))))
+          (is (= [:body :feature :tasks :title] (:allowed (ex-data top-level)))))
+        (testing "nested task maps are closed"
+          (is (instance? clojure.lang.ExceptionInfo nested))
+          (is (str/includes? (ex-message nested) ":depends-on"))
+          (is (str/includes? (ex-message nested) ":depends_on"))
+          (is (= [:depends-on] (:unknown (ex-data nested))))
+          (is (= [:body :cwd :depends_on :harness :hitl :key :kind :max-attempts
+                  :title :validation]
+                 (:allowed (ex-data nested)))))))))
 
 (deftest agents-install-claims-neither-preamble-slot
   ;; PROP-Wct-001@2.S4: injected worker text is the workspace's call, so
@@ -715,7 +743,23 @@
         (testing "malformed change context fails loudly against its spec"
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"change-context does not conform"
                                 (agents/roster-review-specs :ctx {:target (:id target)
-                                                                  :change-context {:files "not-a-vector"}}))))))))
+                                                                  :change-context {:files "not-a-vector"}}))))
+        (testing "change context and its windows reject unknown keys"
+          (let [top-level (try
+                            (agents/roster-review-specs :ctx
+                                                        {:target (:id target)
+                                                         :change-context {:commit_range "main..HEAD"}})
+                            (catch clojure.lang.ExceptionInfo e e))
+                window (try
+                         (agents/roster-review-specs :ctx
+                                                     {:target (:id target)
+                                                      :change-context {:windows [{:path "src/a.clj"
+                                                                                  :line "10-20"}]}})
+                         (catch clojure.lang.ExceptionInfo e e))]
+            (is (= [:commit_range] (:unknown (ex-data top-level))))
+            (is (= [:commit-range :files :windows] (:allowed (ex-data top-level))))
+            (is (= [:line] (:unknown (ex-data window))))
+            (is (= [:lines :path] (:allowed (ex-data window))))))))))
 
 (deftest review-validates-change-context-on-the-ad-hoc-path
   (with-agents

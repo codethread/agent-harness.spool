@@ -310,6 +310,8 @@ printf '%s' '{"feature":"<slug>","title":"...","body":"...?","tasks":[
 
 Task fields: `key`, `title`, `body` (the full worker contract: scope, owned files, validation commands, commit policy), `depends_on?` (sibling **keys**, resolved to strand ids at weave time), `harness?` (set it here — `delegate --ready` requires it), `cwd?`, `validation?` (list of commands), `max-attempts?`, `hitl?` (true = human-in-the-loop work; headless `delegate` refuses it, `delegate --interactive` opens it as a live session), `kind?` (`task` or `review`). Harness and validation are independent axes: harness picks **who** does the work; validation lists the commands that **prove** it.
 
+Contract change: pre-Skein-v1, sole-consumer window; specs closed under existing names. `change-context`, its nested `windows`, `agent-plan` input, and nested task maps reject unknown keys rather than silently ignoring them.
+
 ---
 
 ## 4. DAG conventions

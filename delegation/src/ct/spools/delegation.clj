@@ -13,7 +13,7 @@
             [skein.api.weaver.alpha :as weaver]
             [skein.api.format.alpha :as fmt]
             [ct.spools.agent-run :as agent-run]
-            [skein.api.spool.alpha :refer [fail! attr-get reject-unknown-keys! require-valid!]]))
+            [skein.api.spool.alpha :refer [fail! attr-get require-valid!]]))
 
 (defn- rt
   []
@@ -22,6 +22,21 @@
 (defn- non-blank?
   [v]
   (and (string? v) (not (str/blank? v))))
+
+(defn- reject-unknown-keys!
+  "Return `m`, failing loudly when it carries keys outside `allowed`.
+
+  This is local because delegation owns these public input contracts. `s/keys`
+  maps are deliberately open, so their structural spec must be paired with this
+  boundary check to keep a typo from being silently ignored."
+  [context allowed m]
+  (when-let [unknown (seq (remove allowed (keys m)))]
+    (let [unknown (vec unknown)
+          allowed (vec (sort allowed))]
+      (fail! (str context " received unknown keys " (pr-str unknown)
+                  "; allowed keys " (pr-str allowed))
+             {:unknown unknown :allowed allowed})))
+  m)
 
 (defn- attr
   [s k]
@@ -908,6 +923,11 @@
 ;; files, plus cheap code windows) injected into every reviewer prompt so
 ;; reviewers stop re-deriving the diff. Distinct from dynamic reviewer
 ;; *selection* from git changes, which remains deferred to a future RFC.
+(def ^:private change-context-keys
+  #{:commit-range :files :windows})
+(def ^:private change-context-window-keys
+  #{:path :lines})
+
 (s/def :ct.spools.delegation.change-context/commit-range non-blank?)
 (s/def :ct.spools.delegation.change-context/files (s/coll-of non-blank? :kind vector? :min-count 1))
 (s/def :ct.spools.delegation.change-context.window/path non-blank?)
@@ -1165,6 +1185,14 @@
   malformed diff surface can never reach a reviewer prompt. `caller` names the
   seam for the failure message."
   [caller change-context]
+  (when (map? change-context)
+    (reject-unknown-keys! (str caller " :change-context") change-context-keys change-context)
+    (when (vector? (:windows change-context))
+      (doseq [window (:windows change-context)]
+        (when (map? window)
+          (reject-unknown-keys! (str caller " :change-context window")
+                                change-context-window-keys
+                                window)))))
   (when (and (some? change-context)
              (not (s/valid? :ct.spools.delegation/change-context change-context)))
     (fail! (str caller " :change-context does not conform to spec")
@@ -2379,14 +2407,31 @@
 (s/def ::harness ::non-blank-string)
 (s/def ::cwd ::non-blank-string)
 (s/def ::max-attempts pos-int?)
+(def ^:private agent-plan-task-keys
+  #{:key :title :body :kind :hitl :depends_on :validation :harness :cwd :max-attempts})
+(def ^:private agent-plan-input-keys
+  #{:feature :title :body :tasks})
+
+;; s/keys maps are open. These predicates deliberately throw instead of merely
+;; returning false so the public pattern seam reports the offending and allowed
+;; keys before a typo can be obscured by a related missing-required-key error.
+(defn- closed-map-keys?
+  [context allowed value]
+  (reject-unknown-keys! context allowed value)
+  true)
+
 (s/def ::task
-  (s/keys :req-un [::key ::title]
-          :opt-un [::body ::kind ::hitl ::depends_on ::validation
-                   ::harness ::cwd ::max-attempts]))
+  (s/and map?
+         #(closed-map-keys? "agent-plan task" agent-plan-task-keys %)
+         (s/keys :req-un [::key ::title]
+                 :opt-un [::body ::kind ::hitl ::depends_on ::validation
+                          ::harness ::cwd ::max-attempts])))
 (s/def ::tasks (s/coll-of ::task :kind vector? :min-count 1))
 (s/def ::agent-plan-input
-  (s/keys :req-un [::feature ::title ::tasks]
-          :opt-un [::body]))
+  (s/and map?
+         #(closed-map-keys? "agent-plan input" agent-plan-input-keys %)
+         (s/keys :req-un [::feature ::title ::tasks]
+                 :opt-un [::body])))
 
 (defn- ref-symbol
   [k]
@@ -2399,6 +2444,10 @@
   `max-attempts` weave to the `agent-run/harness`, `agent-run/cwd`, and
   `agent-run/max-attempts` attributes `delegate` and `retry` read."
   [{:keys [input]}]
+  (closed-map-keys? "agent-plan input" agent-plan-input-keys input)
+  (doseq [task (:tasks input)]
+    (when (map? task)
+      (closed-map-keys? "agent-plan task" agent-plan-task-keys task)))
   (let [{:keys [feature title body tasks]} input]
     (into [{:ref 'plan
             :title title
