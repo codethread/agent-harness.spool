@@ -11,7 +11,7 @@ This is the **how/why** half of the delegation docs. The other two halves are:
 - [`delegation.api.md`](./delegation.api.md) — the **generated reference**: every public
   fn's signature, arity, and docstring, produced from source.
 
-Division of truth: verb shapes and fn signatures live in the README and the generated API doc; the coordination *shapes* live here. This cookbook never restates a verb's flags or a fn's arity — it links to them, and to `strand agent about`, the always-current in-band manual a delegated agent reads. When a recipe needs an exact flag, follow the link.
+Division of truth: verb shapes and fn signatures live in the README and the generated API doc; the coordination *shapes* live here. This cookbook never restates a verb's flags or a fn's arity — it links to them, and to `strand about agent`, the always-current in-band family narrative a delegated agent reads. When a recipe needs an exact flag, follow the link.
 
 ## How to read a recipe
 
@@ -305,8 +305,10 @@ Honest source: the interactive delegation model in [`delegation/README.md` §1 a
   the panel composition layer.
 - [`delegation.api.md`](./delegation.api.md) — generated signatures and docstrings for
   `council!`, `panel!`, `review!`, `defroster!`, and the rest referenced above.
-- `strand agent about` — the always-current in-band manual a delegated agent
-  reads; point your workers at it rather than describing the surface yourself.
+- `strand about agent` — the always-current in-band family narrative a delegated
+  agent reads (with `strand prime agent` for run-first discipline and `strand help
+  agent <verb>` for a verb's exact shape); point your workers at these rather than
+  describing the surface yourself.
 - [`agent-run/README.md`](./agent-run/README.md) — the run engine this spool composes:
   harness registry, run lifecycle, and the interactive backend registry.
 - [`workflow.cookbook.md`](./workflow.cookbook.md) — the sibling cookbook for

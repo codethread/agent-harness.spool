@@ -64,6 +64,36 @@ chosen workflow version. Compatibility across version skew follows the
 accretion convention: the engine adds; it does not break. This is a convention,
 not a version contract the dependent spool can enforce.
 
+## Compatibility: v7 → v8 (discovery-tier factoring)
+
+The `delegation` (`ct.spools/agent-run`) coordinate carries a **breaking**
+published-name change and ships as a new release (**v8**), not an accretion:
+
+- **`agent` discovery surface reshaped.** `about`/`prime` are no longer `agent`
+  subcommands: they are op-level prose the builtin `strand about agent` /
+  `strand prime agent` meta-verbs project, and `strand help agent <verb>` carries
+  per-verb detail from the arg-spec plus authored `:annotations` (use-when, notes,
+  and glossary-referenced failure modes). `strand agent about` no longer returns
+  the structured `{operation, concepts, verbs}` JSON manual, and the sole-token
+  `strand agent about` / `agent prime` grammar is retired (it now fails loudly with
+  a redirect to `strand help agent`). Same published op name, changed behavior →
+  a v7 consumer scripting `strand agent about`'s shape breaks, so this is a
+  new-release break by classification, not silent accretion.
+- **The engine run preamble** now points delegated agents at `about agent`
+  (was `agent about`), matching the new grammar.
+- **New Skein API floor.** This release requires a Skein checkout shipping the
+  discovery-tier deltas (DELTA-Dtf-001/002/003): the runtime glossary registry
+  (`skein.api.runtime.glossary.alpha/register-glossary-outcome!`), op-metadata
+  `:about`/`:prime`, arg-spec `:annotations`, and the builtin `about`/`prime`/`help`
+  grammar with the retired-`<op> help` redirect. Encode this as the advisory
+  `:skein/min` floor (a `vN` marker of the first Skein release carrying the
+  deltas) in `spool.edn` **at tag time** (Task 10/11); it is intentionally left
+  unpinned here because the Skein release marker is cut later.
+- **Producer compat alarm.** `bin/compat-alarm <v7-tag>` against this working tree
+  is expected to go **red** (the retired grammar and the changed `about` shape).
+  That red is the correct signal that the change ships under a new release rather
+  than being papered over — it must not be silenced before the v8 tag.
+
 ## Activation
 
 After approving the coordinates needed by the workspace, activate them from

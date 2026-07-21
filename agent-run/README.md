@@ -225,7 +225,7 @@ Every spawned run (unless its harness sets `:preamble? false`) is launched with 
 
 - the run's `run-id`;
 - the fully pinned `strand` invocation (`env XDG_STATE_HOME=… strand --workspace …`) that must prefix every strand command, because harness shells re-source dotfiles and cannot be trusted to inherit ambient env;
-- spawn/await/note one-liners and the pointer to `strand agent about`.
+- spawn/await/note one-liners and the pointer to `strand about agent`.
 
 After that block comes the engine's own worker contract, the one piece of contract text the engine ships and every preamble-carrying headless run receives (a harness registered `:preamble? false` gets no preamble at all, so none of this reaches it): never close your assigned strand, never mutate siblings or parents, never commit unless your contract says so; kill by PID only; keep delegation shallow. These are the invariants the engine itself couples to, so a workspace cannot switch them off. Everything else about the injected text is the workspace's call, through two slots:
 

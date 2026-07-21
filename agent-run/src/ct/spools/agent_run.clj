@@ -945,7 +945,7 @@
          "run-id: " run-id "\n"
          "- Every strand command MUST be invoked exactly as: " cmd " <command...>\n"
          "  (the env prefix and --workspace flag are both required; ambient env is unreliable)\n"
-         "- Complete manual for spawning/awaiting/notes: " cmd " agent about\n"
+         "- Complete manual for spawning/awaiting/notes: " cmd " about agent\n"
          "- Leave durable notes for peers or successors: " cmd " agent note <strand-id> \"<text>\" --by " run-id "\n"
          "- Spawn subagents (async, returns a run id): " cmd " agent spawn --harness <name> --prompt \"...\" --spawned-by " run-id "\n"
          "- Wait for children: " cmd " agent await <child-run-id>\n"
@@ -979,7 +979,7 @@
          "run-id: " id "\n"
          "- Every strand command MUST be invoked exactly as: " cmd " <command...>\n"
          "  (the env prefix and --workspace flag are both required; ambient env is unreliable)\n"
-         "- Complete manual for spawning/awaiting/notes: " cmd " agent about\n"
+         "- Complete manual for spawning/awaiting/notes: " cmd " about agent\n"
          (if for-id
            (str "- You serve strand " for-id ". Completion contract, in this exact order:\n"
                 "  1) leave a durable summary note: " cmd " "

@@ -8,7 +8,7 @@ This README is the contract — what each verb promises. For the *shapes* real c
 
 ## 1. User guide (for humans)
 
-This is the human-facing part. If you are a delegated agent, read [§5 Worker contract](#5-worker-contract-and-coordinator-loop) and run `strand agent about`.
+This is the human-facing part. If you are a delegated agent, read [§5 Worker contract](#5-worker-contract-and-coordinator-loop) and run `strand about agent`.
 
 ### What this gives you
 
@@ -34,7 +34,7 @@ The surface is deliberately built from words coding agents are already trained o
 
 ### How to prompt effectively
 
-- **Point your agent at the manual.** Tell it to run `strand agent prime` before delegating and `strand agent about` when it needs the full verb reference, rather than describing the surface yourself. They are the in-band, always-current source of truth.
+- **Point your agent at the manual.** Tell it to run `strand prime agent` before delegating, `strand about agent` for the family narrative, and `strand help agent <verb>` for a verb's exact shape, rather than describing the surface yourself. They are the in-band, always-current source of truth.
 - **Put contracts in strand bodies, not chat.** A task's body *is* the contract the worker reads (`strand show <task-id>`): scope, owned files, validation commands, commit policy. Chat scrollback is invisible to a delegated run; the strand body is not.
 - **Ask for `agent status` when you want to see where things are.** It renders the whole delegation tree plus flat triage lists from data that already exists — no bespoke reporting needed.
 
@@ -89,7 +89,7 @@ Loading agent-run without delegation gives you the run engine but **no** `strand
 
 ## 3. Op surface
 
-Every operational verb returns JSON; all verbs are flat under `strand agent <verb>`. `strand help agent` is generated from the declared arg-spec and is the command-shape reference. `strand agent about` returns the authored structured JSON manual (concepts, verb semantics, the coordinator loop, the worker contract). `strand agent prime` is the run-first tier: the coordinator's working discipline (traps, loop, policy) selected from the same manual data so it can never drift, without the verb-by-verb reference. Bare `strand agent` fails loudly with the available subcommands so discovery stays aligned with the help/about/prime convention.
+Every operational verb returns JSON; all verbs are flat under `strand agent <verb>`. Discovery follows the three-tier convention: `strand help agent` (and `strand help agent <verb>`) is generated from the declared arg-spec and per-verb `:annotations` (use-when, notes, and glossary-referenced failure modes) and is the command-shape reference; `strand about agent` returns the family narrative prose (the RUN/TASK lifecycle, gating rules, compositions, and coordinator loop); `strand prime agent` returns the run-first working discipline (traps, loop, policy) to load before delegating. `about`/`prime` are op-level prose the builtin meta-verbs project (they are no longer `agent` subcommands); the retired `strand agent about`/`agent prime` sole-token grammar fails loudly. Bare `strand agent` fails loudly with the available subcommands.
 
 ### Concepts (read first)
 
@@ -328,7 +328,7 @@ Delegation shapes the strand graph by convention, so the whole tree is inspectab
 
 ## 5. Worker contract and coordinator loop
 
-Roles are lenses, not capabilities: there is one API. Any worker may promote itself to coordinator for its own sub-world using the same verbs. The two guidance sets below differ only in placement — the worker contract rides the run preamble; the coordinator loop is opt-in via `agent prime` (and, with the full reference, `agent about`).
+Roles are lenses, not capabilities: there is one API. Any worker may promote itself to coordinator for its own sub-world using the same verbs. The two guidance sets below differ only in placement — the worker contract rides the run preamble; the coordinator loop is opt-in via `strand prime agent` (and, with the family narrative, `strand about agent`).
 
 ### Worker contract
 
