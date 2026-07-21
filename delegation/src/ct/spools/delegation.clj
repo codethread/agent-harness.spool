@@ -1867,7 +1867,7 @@
   {:op "agent"
    :doc "Spawn and coordinate coding-agent runs. Run `strand about agent` for the manual."
    :annotations {:use-when ["Coordinating delegated coding-agent runs over the strand graph: spawning, delegating, awaiting, verifying, and reviewing work."]
-                 :notes ["Every operational verb returns JSON. `strand about agent` is the family narrative; `strand prime agent` is the run-first discipline to load before delegating."]}
+                 :notes ["`strand about agent` is the family narrative; `strand prime agent` is the run-first discipline to load before delegating."]}
    :subcommands
    {"spawn" {:doc "Spawn a raw agent run."
              :flags {:harness {:required? true :doc "Harness or alias name."}
@@ -1882,12 +1882,12 @@
                      :backend {:doc "Interactive backend name."}
                      :reap {:doc "Interactive session reap policy: auto or manual."}}
              :annotations {:use-when ["Minting a raw, one-off run — recon, a helper, or a hand-wired run — that carries no task-serving contract."]
-                           :notes ["--for places the run under a strand as a read-only helper (parent-of, no serves edge), so it never gates that strand's later delegation; delegate owns serving a task's own work. --interactive launches a multiplexer session via --backend, and --reap manual leaves it for the human after completion."]
+                           :notes ["A --for helper never gates that strand's later delegation; delegate owns serving a task's own work. --reap manual leaves the interactive session for the human to reap after it completes."]
                            :failure-modes ["delegation/interactive-flags-misused" "delegation/backend-unresolved"]}}
     "ps" {:doc "List agent run summaries."
           :flags {:active {:type :boolean :doc "Only active run strands."}
                   :for {:doc "Runs serving this strand plus its structural (parent-of) helpers."}}
-          :annotations {:use-when ["Listing run summaries and checking interactive liveness; --active narrows to live runs, --for to runs serving one strand."]
+          :annotations {:use-when ["Listing run summaries and checking interactive liveness."]
                         :notes ["Listing doubles as a liveness check: a dead interactive session is failed here, and its summary carries the attach command to hand the human."]}}
     "spend" {:doc "Aggregate recorded agent-run spend into JSON totals, groups, and per-run rows."
              :flags {:harness {:doc "Restrict to one harness or alias name."}
