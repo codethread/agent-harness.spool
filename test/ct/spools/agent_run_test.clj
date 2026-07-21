@@ -11,6 +11,7 @@
             [next.jdbc :as jdbc]
             [ct.spools.agent-run :as shuttle]
             [skein.test.alpha :as test-alpha]
+            [skein.api.clock.alpha :as clock]
             [skein.api.graph.alpha :as graph]
             [skein.api.notes.alpha :as notes]
             [skein.api.vocab.alpha :as vocab]
@@ -339,6 +340,20 @@
                                        :depends-on [(:id blocker)]})
             {:keys [timed-out]} (shuttle/await-runs [(:id stuck)] {:timeout-secs 1})]
         (is (true? timed-out))))))
+
+(deftest await-runs-times-out-on-the-runtime-clock
+  (with-shuttle
+    (fn [rt]
+      (let [start java.time.Instant/EPOCH
+            manual (test-alpha/manual-clock start)
+            blocker (weaver/add! rt {:title "never closes"})
+            stuck (shuttle/spawn-run! {:harness :sh :prompt "echo never"
+                                       :depends-on [(:id blocker)]})]
+        (test-alpha/set-clock! rt manual)
+        (is (true? (:timed-out (shuttle/await-runs [(:id stuck)] {:timeout-secs 1})))
+            "the blocked run times out without wall-clock sleep")
+        (is (= (.plusSeconds start 1) (clock/now manual))
+            "awaiting advances the installed manual runtime clock")))))
 
 (deftest kill-terminates-a-running-harness
   (with-shuttle
