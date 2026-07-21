@@ -8,14 +8,6 @@ Agent coordination spool layered over the agent-run engine.
 
 
 
-## <a name="ct.spools.delegation/about-doc">`about-doc`</a>
-
-
-
-
-Structured manual returned by `agent about`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L124-L553">Source</a></sub></p>
-
 ## <a name="ct.spools.delegation/agent-op">`agent-op`</a>
 ``` clojure
 (agent-op #:op{:keys [args argv]})
@@ -23,7 +15,7 @@ Structured manual returned by `agent about`.
 Function.
 
 Dispatch parsed `strand agent` subcommands.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2248-L2278">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2101-L2129">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/agent-plan">`agent-plan`</a>
 ``` clojure
@@ -37,7 +29,7 @@ Create a feature strand plus task/review children for agent work.
   `"task"` or `"review"`. The terse task input fields `harness`, `cwd`, and
   `max-attempts` weave to the `agent-run/harness`, `agent-run/cwd`, and
   `agent-run/max-attempts` attributes `delegate` and `retry` read.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2305-L2339">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2173-L2211">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/council!">`council!`</a>
 ``` clojure
@@ -62,7 +54,7 @@ Convene a multi-agent council as a `:fresh`-blackboard panel (A7): its rounds
 
   Returns `{:blackboard <shared strand id> :turns [[run-ids]...] :synthesizer
   <run id>}`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1741-L1807">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1489-L1555">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/defroster!">`defroster!`</a>
 ``` clojure
@@ -81,7 +73,7 @@ Register or replace a named reviewer roster (weaver-lifetime state, so
   confinement text. `:synthesis` overrides the harness of the synthesis run
   (default: first seat's harness). Malformed data fails loudly with spec
   explain data.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L983-L999">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L717-L733">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/install!">`install!`</a>
 ``` clojure
@@ -94,7 +86,11 @@ Install the delegation op surface, pattern, and query.
   Claims neither agent-run preamble slot: the injected worker text is the
   workspace's call, so a workspace wanting this spool's task workflow registers
   `worker-contract` itself (see the README).
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2341-L2373">Source</a></sub></p>
+
+  Registers the delegation-owned glossary outcomes before the `agent` op (the
+  load-order contract, DELTA-Dtf-002.CC7): the op's per-verb `failure-modes`
+  references are checked against the runtime glossary at registration.
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2213-L2255">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/panel!">`panel!`</a>
 ``` clojure
@@ -122,7 +118,7 @@ Spawn a panel from an inline panel value.
   `:spawned-by` and `:cwd` ride onto every run.
 
   Returns `{:panel :blackboard :turns [[run-ids...]...] :synthesizer? :pass}`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1530-L1618">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1278-L1366">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/panel-specs">`panel-specs`</a>
 ``` clojure
@@ -151,19 +147,7 @@ Compile an **inline panel value** into plain, fully-built run specs
   `panel/seat`, `panel/turn`, `panel/blackboard`, and
   `panel/pass`. `:synthesizer` is present unless `:synthesis` is
   absent or `:none`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1438-L1528">Source</a></sub></p>
-
-## <a name="ct.spools.delegation/prime-doc">`prime-doc`</a>
-
-
-
-
-Run-first coordinator priming returned by `agent prime`.
-
-  A selection over `about-doc`, not new prose: the traps, coordinator loop,
-  and delegation policy an agent must load before delegating, without the
-  verb-by-verb reference that `about` and `strand help agent` carry.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L555-L590">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1183-L1276">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/review!">`review!`</a>
 ``` clojure
@@ -194,7 +178,7 @@ Spawn independent read-only reviewers for a target strand.
   target, and card notes stay lean for handover, so a card-targeted review
   fails loudly toward the card's task tier. The check reads only the
   `kanban/card` marker attribute — no kanban spool code is involved.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1636-L1728">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1384-L1476">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/review-contract">`review-contract`</a>
 
@@ -202,7 +186,7 @@ Spawn independent read-only reviewers for a target strand.
 
 
 Read-only reviewer contract text used as the workspace default for `agent review`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L79-L94">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L95-L110">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/roster->panel">`roster->panel`</a>
 ``` clojure
@@ -216,7 +200,7 @@ Convert a roster value into an equivalent single-round, target-blackboard
   default (the first seat's). Pure — the roster is validated identically to
   `defroster!` input. A rounds=1 panel compiles to the independent review
   shape, so this is how `review!` is expressible over the panel primitive.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1620-L1634">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1368-L1382">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/roster-review-specs">`roster-review-specs`</a>
 ``` clojure
@@ -258,7 +242,7 @@ Return a roster's review fan-out as plain, fully-built run specs
   present it is injected into every reviewer prompt so reviewers read the
   changed files instead of re-deriving the diff; the synthesizer never carries
   it. Malformed change context fails loudly against its spec.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1196-L1268">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L938-L1013">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/rosters">`rosters`</a>
 ``` clojure
@@ -267,7 +251,7 @@ Return a roster's review fan-out as plain, fully-built run specs
 Function.
 
 List registered reviewer rosters as full plain data.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L1001-L1005">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L735-L739">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/worker-contract">`worker-contract`</a>
 
@@ -282,4 +266,4 @@ Task-workflow contract this spool exports for the agent-run task-contract slot.
   workspace that wants this task workflow opts in with
   `agent-run/set-default-task-contract!`, which substitutes the served strand's
   id for `<task-id>` and the receiving run's own id for `<your-run-id>`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L96-L122">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L112-L138">Source</a></sub></p>

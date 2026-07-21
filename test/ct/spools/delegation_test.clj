@@ -9,6 +9,7 @@
             [clojure.test :refer [deftest is testing]]
             [skein.api.graph.alpha :as graph]
             [skein.api.patterns.alpha :as patterns]
+            [skein.api.runtime.glossary.alpha :as glossary]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
@@ -64,9 +65,7 @@
                                            [name {:subcommand subcommand}]))) entries)
             run {:id "run-1" :title "run" :state "active" :phase "pending" :harness "sh"}
             representatives
-            {"about" (assoc (agents/agent-op {:op/argv ["about"]}) :operation "agent about")
-             "prime" (agents/agent-op {:op/argv ["prime"]})
-             "spawn" (assoc run :operation "agent spawn")
+            {"spawn" (assoc run :operation "agent spawn")
              "ps" [run]
              "spend" {:operation "agent spend" :filters {} :totals {} :groups [] :runs []}
              "await" {:operation "agent await" :timed-out false :runs [run]}
@@ -98,23 +97,64 @@
   (with-agents
     (fn [rt]
       (is (some #(= "agent" (:name %)) (weaver/ops rt)))
-      (is (map? (agents/agent-op {:op/argv ["about"]})))
       (let [detail (weaver/resolve-op rt 'agent)]
         (is (not (contains? detail :raw-envelope)))
-        (is (= ["about" "await" "backends" "council" "delegate" "harnesses" "kill" "logs" "note" "notes" "prime" "ps" "retry" "review" "rosters" "spawn" "spend" "status"]
+        ;; `about`/`prime` are no longer verbs: they moved OUT to the builtin
+        ;; `strand about|prime agent` meta-verbs (DELTA-Dtf-002.CC6), and the
+        ;; op declares their prose as `:about`/`:prime` metadata (CC4).
+        (is (= ["await" "backends" "council" "delegate" "harnesses" "kill" "logs" "note" "notes" "ps" "retry" "review" "rosters" "spawn" "spend" "status"]
                (sort (keys (get-in detail [:arg-spec :subcommands])))))
-        (let [review-flags (get-in detail [:arg-spec :subcommands "review" :flags])
-              manual-entries (->> agents/about-doc :verbs vals)
-              manual-verbs (set (map :verb manual-entries))
-              declared-verbs (set (keys (get-in detail [:arg-spec :subcommands])))]
-          (is (every? string? manual-verbs)
-              "every agent about-doc verb entry must carry a string :verb")
-          (is (empty? (set/difference manual-verbs declared-verbs))
-              (str "about-doc verbs missing from arg-spec: " (sort (set/difference manual-verbs declared-verbs))))
-          (is (empty? (set/difference declared-verbs manual-verbs))
-              (str "arg-spec subcommands missing from about-doc: " (sort (set/difference declared-verbs manual-verbs))))
+        (is (not (str/blank? (:about detail))))
+        (is (not (str/blank? (:prime detail))))
+        (let [review-flags (get-in detail [:arg-spec :subcommands "review" :flags])]
           (is (contains? review-flags :commit-range))
           (is (contains? review-flags :changed-files)))))))
+
+(deftest agents-adopt-discovery-tier-pattern
+  ;; TASK-Dtf-009.MI1/MI2: the `agent` family adopts the discovery-tier pattern —
+  ;; per-verb help via arg-spec `:annotations`, cross-verb narrative in
+  ;; `:about`/`:prime` prose, and shared lifecycle failures in the glossary
+  ;; referenced by `failure-modes` name. The verbose whole-tree `about` fetch is
+  ;; gone (see agent-op-dispatches-and-fails-loudly).
+  (with-agents
+    (fn [rt]
+      (testing "install! registers the delegation-owned glossary outcomes before the op"
+        (is (set/subset?
+             #{"delegation/harness-unresolved" "delegation/task-not-found"
+               "delegation/task-not-ready" "delegation/task-needs-retry"
+               "delegation/nothing-to-retry" "delegation/review-surface-invalid"
+               "delegation/council-underspecified" "delegation/spend-filter-invalid"}
+             (set (map :name (glossary/glossary-outcomes rt))))))
+      (testing "about/prime prose projects through the builtin meta-verbs"
+        (let [about (:about (weaver/op! rt 'about ["agent"]))
+              prime (:prime (weaver/op! rt 'prime ["agent"]))]
+          (is (str/includes? about "A RUN is a strand carrying agent-run/*"))
+          (is (str/includes? about "Run success never closes the TASK it served"))
+          (is (str/includes? prime "Load this discipline before delegating"))
+          ;; workspace-specific validation tiers stay out of the shipped prime
+          (is (not (str/includes? prime "make test-warm")))))
+      (testing "a verb's help node carries authored annotations and the glossary closure narrows on slice"
+        (let [{:keys [glossary node]} (weaver/op! rt 'help ["agent" "delegate"])]
+          (is (seq (:use-when node)))
+          (is (= ["delegation/task-not-found" "delegation/task-not-active"
+                  "delegation/task-not-ready" "delegation/task-has-active-run"
+                  "delegation/task-needs-retry" "delegation/task-awaits-verification"
+                  "delegation/harness-unresolved" "delegation/hitl-needs-interactive"
+                  "delegation/backend-unresolved" "delegation/interactive-flags-misused"]
+                 (:failure-modes node)))
+          (is (= (set (:failure-modes node)) (set (keys glossary)))
+              "the glossary closure is exactly the verb's referenced outcomes")
+          (is (str/includes? (get glossary "delegation/task-needs-retry") "retry"))))
+      (testing "every referenced failure-mode resolves against the runtime glossary"
+        ;; the register-op! glossary-ref existence check (DELTA-Dtf-002.CC7) already
+        ;; enforces this at install!; assert the whole closure here too.
+        (let [registered (set (map :name (glossary/glossary-outcomes rt)))
+              subcommands (get-in (weaver/resolve-op rt 'agent) [:arg-spec :subcommands])
+              referenced (into #{} (mapcat #(get-in % [:annotations :failure-modes]))
+                               (vals subcommands))]
+          (is (seq referenced))
+          (is (empty? (set/difference referenced registered))
+              (str "unregistered failure-modes: " (set/difference referenced registered))))))))
 
 (deftest agent-plan-rejects-unknown-input-keys
   (with-agents
@@ -206,36 +246,15 @@
 (deftest agent-op-dispatches-and-fails-loudly
   (with-agents
     (fn [_]
-      (testing "about is explicit and carries the manual"
+      (testing "a bare op fails loudly, and the retired about/prime verbs are gone"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Missing subcommand"
                               (agents/agent-op {:op/argv []})))
-        (let [about (agents/agent-op {:op/argv ["about"]})]
-          (is (contains? about :verbs))
-          (is (contains? (:verbs about) :delegate))
-          (is (contains? (get-in about [:verbs :delegate :returns]) "task"))
-          (is (seq (get-in about [:verbs :delegate :fails])))
-          (is (some #(str/includes? % "FILE SCOPE") (get-in about [:concepts :traps])))
-          (is (some #(str/includes? % "Run success never closes")
-                    (get-in about [:concepts :traps])))
-          (is (some #(str/includes? (:action %) "Provision working directories")
-                    (:coordinator-loop about)))
-          (is (some #(= "validation" %) (get-in about [:plan-creation :task-fields])))
-          (is (str/includes? (:worker-contract about) "Read your assigned strand AND its notes"))))
-      (testing "prime is a drift-proof selection over the about manual"
-        (let [about (agents/agent-op {:op/argv ["about"]})
-              prime (agents/agent-op {:op/argv ["prime"]})]
-          (is (= "agent prime" (:operation prime)))
-          (is (= (:coordinator-loop about) (:coordinator-loop prime)))
-          (is (= (get-in about [:concepts :traps]) (get-in prime [:concepts :traps])))
-          (is (not (contains? (:concepts prime) :phase-enum))
-              "prime carries discipline, not the reference enums")
-          (is (contains? (:policy prime) :native-subagents))
-          (is (not (contains? (:policy prime) :tiered-validation))
-              "workspace validation tiers stay out of the spool-shipped prime")
-          (is (not (contains? prime :verbs)))
-          (is (not (contains? prime :worker-contract)))
-          (is (seq (:working-agreement prime)))
-          (is (seq (:pointers prime)))))
+        ;; `about`/`prime` are no longer verbs (RFC-Dtf-001.C3): the structured
+        ;; whole-tree fetch is retired, so dispatching them fails loudly.
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"[Uu]nknown subcommand"
+                              (agents/agent-op {:op/argv ["about"]})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"[Uu]nknown subcommand"
+                              (agents/agent-op {:op/argv ["prime"]}))))
       (testing "spawn/ps/await/notes drive a full run over argv"
         (let [spawned (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo via-op"]})]
           (is (= "pending" (:phase spawned)))
