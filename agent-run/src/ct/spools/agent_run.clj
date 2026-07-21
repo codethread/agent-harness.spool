@@ -77,7 +77,7 @@
             [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.format.alpha :as fmt]
-            [skein.api.spool.alpha :refer [fail! attr-get]])
+            [skein.api.spool.alpha :refer [fail! attr-get poll-until!]])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
@@ -2497,19 +2497,25 @@
   `timeout-secs` (default 300) elapses. Returns run summaries plus :timed-out."
   ([ids] (await-runs ids {}))
   ([ids {:keys [timeout-secs] :or {timeout-secs 300}}]
-   (let [deadline (+ (System/currentTimeMillis) (* 1000 (long timeout-secs)))]
-     (loop [i 1]
-       (let [strands (graph/strands-by-ids (rt) (vec ids))]
-         (cond
-           (every? terminal? strands) {:timed-out false :runs (mapv run-summary strands)}
-           (>= (System/currentTimeMillis) deadline) {:timed-out true :runs (mapv run-summary strands)}
-           :else (do
-                   ;; awaiting an interactive run must notice a dead session
-                   ;; rather than sit out the full timeout; probe every ~2s
-                   (when (and (zero? (mod i 8)) (some interactive? strands))
-                     (try (supervise!) (catch Exception _ nil)))
-                   (Thread/sleep 250)
-                   (recur (inc i)))))))))
+   (let [runtime (rt)
+         polls (atom 0)]
+     (poll-until!
+      (runtime/clock runtime)
+      {:timeout-ms (* 1000 (long timeout-secs))
+       :poll-ms 250
+       :check (fn []
+                (let [strands (graph/strands-by-ids runtime (vec ids))]
+                  ;; Awaiting an interactive run must notice a dead session rather
+                  ;; than sitting out the full timeout; probe every ~2 seconds.
+                  (when (and (zero? (mod (swap! polls inc) 8))
+                             (some interactive? strands))
+                    (try (supervise!) (catch Exception _ nil)))
+                  strands))
+       :pred->result (fn [strands]
+                       (when (every? terminal? strands)
+                         {:timed-out false :runs (mapv run-summary strands)}))
+       :on-timeout (fn [strands]
+                     {:timed-out true :runs (mapv run-summary strands)})}))))
 
 (defn kill!
   "Kill a run's harness process (or interactive session) and mark it failed."
