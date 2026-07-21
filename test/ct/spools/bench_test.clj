@@ -754,9 +754,14 @@ esac
     (fn [rt _]
       (is (some #(= "bench" (:name %)) (weaver/ops rt)) "install! registered the op")
       (is (contains? (graph/queries rt) "bench-runs") "install! registered the query")
-      (testing "the help alias projects the declared verb surface"
-        (let [detail (bench-op! rt "help")
-              verbs (mapv :name (get-in detail [:arg-spec :subcommands]))]
+      (testing "the retired `bench help` sole-token alias loudly redirects to the help grammar"
+        ;; DELTA-Dtf-001.CC5: the `<op> help` verb-position sugar is retired in
+        ;; alpha; a bare `help` verb fails loudly pointing at `strand help bench`.
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"retired sugar"
+                              (bench-op! rt "help"))))
+      (testing "`strand help bench` projects the declared verb surface"
+        (let [envelope (weaver/op! rt 'help ["bench"])
+              verbs (mapv :name (get-in envelope [:node :children]))]
           (is (= ["abort" "about" "gc" "harnesses" "list" "report" "retry" "run" "status" "suites"]
                  verbs))))
       (testing "bare op and unknown verb fail during parser routing"
