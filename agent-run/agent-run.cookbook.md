@@ -246,7 +246,7 @@ Honest source: `dependent-run-waits-for-blocker-and-fans-in` in ``test/skein/age
 ```clojure
 (require '[ct.spools.agent-run :as agent-run])
 
-;; run once from startup config (init.clj / a spool install!)
+;; run once from startup config (init.clj / a module reconcile)
 (agent-run/set-preamble-extension!
   "House rules for every run here:
    - Read ./AGENTS.md before touching code.

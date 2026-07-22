@@ -43,7 +43,7 @@
   `agent-run/phase \"superseded\"` (never `failed`/`exhausted`), so matching a
   dead phase over `serves` selects exactly the gates whose current serving run
   is dead — by construction in lockstep with the `gate-stalled?` predicate, no
-  `gate/superseded-by` bridge. `install!` registers it under the query name;
+  `gate/superseded-by` bridge. The module registers it under the query name;
   readers composing on the rule list with this definition directly, so
   membership cannot drift even on a runtime where the executor is not
   installed."
