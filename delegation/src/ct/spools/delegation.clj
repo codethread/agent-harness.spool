@@ -2208,8 +2208,32 @@
                                        depends_on)))))
           tasks)))
 
-(defn install!
-  "Install the delegation op surface, pattern, and query.
+(defn contribute
+  "Return delegation's owner-complete CLI, pattern, query, and roster kinds.
+
+  The roster registry handle is materialized directly in runtime spool state so
+  the publication kernel can discover it. Core surface entries are declarative;
+  vocabulary and glossary setup belong to `reconcile` after publication."
+  [{:keys [runtime]}]
+  (registry-handle runtime)
+  {:ops {:entries {"agent" {:doc (:doc agent-arg-spec)
+                            :arg-spec agent-arg-spec
+                            :returns agent-returns
+                            :about agent-about
+                            :prime agent-prime
+                            :deadline-class :unbounded
+                            :fn 'ct.spools.delegation/agent-op}}
+         :overrides #{}}
+   :patterns {:entries {"agent-plan" {:doc "Create a feature strand plus task/review children for agent work."
+                                      :fn 'ct.spools.delegation/agent-plan
+                                      :input-spec ::agent-plan-input}}
+              :overrides #{}}
+   :queries {:entries {"agent-failures" [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"]
+                                         [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]]}
+             :overrides #{}}})
+
+(defn reconcile
+  "Reconcile delegation's non-declarative vocabulary and glossary resources.
 
   Claims neither agent-run preamble slot: the injected worker text is the
   workspace's call, so a workspace wanting this spool's task workflow registers
@@ -2218,36 +2242,22 @@
   Registers the delegation-owned glossary outcomes before the `agent` op (the
   load-order contract, DELTA-Dtf-002.CC7): the op's per-verb `failure-modes`
   references are checked against the runtime glossary at registration."
-  []
-  (let [runtime (rt)]
-    (doseq [outcome delegation-glossary]
-      (glossary/register-glossary-outcome! runtime (assoc outcome :owner 'ct.spools.delegation)))
-    (vocab/declare! runtime
-                    {:kind :attr-namespace
-                     :name "review"
-                     :owner :skein/spools-delegation
-                     :keys ["review/roster" "review/focus"]
-                     :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
-    (vocab/declare! runtime
-                    {:kind :attr-namespace
-                     :name "panel"
-                     :owner :skein/spools-delegation
-                     :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
-                     :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
-    {:installed true
-     :namespace 'ct.spools.delegation
-     :op (weaver/register-op! runtime 'agent
-                              {:doc (:doc agent-arg-spec)
-                               :arg-spec agent-arg-spec
-                               :returns agent-returns
-                               ;; cross-verb narrative projected by `strand about
-                               ;; agent` / `strand prime agent` (DELTA-Dtf-002.CC4)
-                               :about agent-about
-                               :prime agent-prime
-                            ;; await blocks for arbitrarily long coordination waits
-                               :deadline-class :unbounded}
-                              'ct.spools.delegation/agent-op)
-     :pattern (patterns/register-pattern! runtime 'agent-plan
-                                          "Create a feature strand plus task/review children for agent work."
-                                          'ct.spools.delegation/agent-plan ::agent-plan-input)
-     :query (graph/register-query! runtime 'agent-failures [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"] [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]])}))
+  [{:keys [runtime] :as ctx}]
+  (case (get-in ctx [:module/contribution :status])
+    :removed {:reconciled :removed}
+    (do
+      (doseq [outcome delegation-glossary]
+        (glossary/register-glossary-outcome! runtime (assoc outcome :owner 'ct.spools.delegation)))
+      (vocab/declare! runtime
+                      {:kind :attr-namespace
+                       :name "review"
+                       :owner :skein/spools-delegation
+                       :keys ["review/roster" "review/focus"]
+                       :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
+      (vocab/declare! runtime
+                      {:kind :attr-namespace
+                       :name "panel"
+                       :owner :skein/spools-delegation
+                       :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
+                       :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
+      {:reconciled :applied})))

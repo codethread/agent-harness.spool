@@ -295,43 +295,49 @@
       {:gate (:id gate) :run (:id run) :phase (attr run :agent-run/phase)
        :error (attr run :agent-run/error)})))
 
-(defn install!
-  "Install the subagent executor's event handler and perform an initial scan.
+(defn contribute
+  "Return subagent's owner-complete executor and coordinator queries."
+  [_ctx]
+  {workflow/executor-kind {:entries {"subagent" 'ct.spools.executors.subagent/gate-stalled?}
+                           :overrides #{}}
+   :queries {:entries {"stalled-subagent-gates" stalled-gates-query
+                       "blocked-deliveries" [:and [:= :state "closed"]
+                                             [:exists [:attr "gate/delivery-blocked"]]
+                                             [:missing [:attr "gate/delivered"]]]}
+             :overrides #{}}})
 
-  Fails loudly unless `ct.spools.agent-run/install!` has already registered
+(defn reconcile
+  "Reconcile the subagent executor's event handler and initial scan.
+
+  Fails loudly unless agent-run's module has already registered
   the agent-run engine in this weaver runtime."
-  []
-  (let [runtime (rt)
-        handlers (set (map :key (events/handlers runtime)))]
-    (when-not (contains? handlers :agent-run/engine)
-      (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
+  [{:keys [runtime] :as ctx}]
+  (binding [*runtime* runtime
+            agent-run/*runtime* runtime]
+    (case (get-in ctx [:module/contribution :status])
+      :removed (do (events/unregister-handler! runtime :subagent/engine)
+                   {:reconciled :removed})
+      (let [handlers (set (map :key (events/handlers runtime)))]
+        (when-not (contains? handlers :agent-run/engine)
+          (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
     ;; The activation module owns the namespace, not the file location: the
     ;; source sits in the agent-run package but `:skein/spools-treadle` is the
     ;; use-key. `:keys` is advisory (the keys `deliver-run!`/`spawn-for-gate!`
     ;; stamp), not enforced. `gate/error` is the one key both gate executors
     ;; write, so the namespace spans them rather than belonging to this one.
-    (vocab/declare! runtime
-                    {:kind :attr-namespace
-                     :name "gate"
-                     :owner :skein/spools-treadle
-                     :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
-                     :doc (fmt/reflow "
+        (vocab/declare! runtime
+                        {:kind :attr-namespace
+                         :name "gate"
+                         :owner :skein/spools-treadle
+                         :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
+                         :doc (fmt/reflow "
                            |Workflow-gate completion, delivery, and spawn control attributes.
                            |gate/completion-policy selects run-done or status-implemented delivery.
                            |gate/delivered and gate/delivery-blocked record handing a delegated run's
                            |result to its gate. gate/error is wider: any gate executor's durable
                            |failure stamp, written by both the subagent and shell executors.")})
-    (events/register-handler! runtime :subagent/engine event-types
-                              'ct.spools.executors.subagent/on-event
-                              {:spool "subagent"})
-    (workflow/register-executor! :subagent gate-stalled?)
-    ;; The human attention surface for stuck gates; the rule lives on
-    ;; `stalled-gates-query` so composing readers share it without the registry.
-    (graph/register-query! runtime 'stalled-subagent-gates stalled-gates-query)
-    (graph/register-query! runtime 'blocked-deliveries
-                           [:and [:= :state "closed"]
-                            [:exists [:attr "gate/delivery-blocked"]]
-                            [:missing [:attr "gate/delivered"]]])
-    (scan!)
-    {:installed true
-     :namespace 'ct.spools.executors.subagent}))
+        (events/register-handler! runtime :subagent/engine event-types
+                                  'ct.spools.executors.subagent/on-event
+                                  {:spool "subagent"})
+        (scan!)
+        {:reconciled :applied}))))

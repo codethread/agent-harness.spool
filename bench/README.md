@@ -27,12 +27,13 @@ Approved local-root spool. Agent-run must be installed first (the default `:harn
 (runtime/use! runtime :bench
   {:ns 'ct.spools.bench
    :spools ['ct.spools/bench]
-   :call 'ct.spools.bench/install!
+   :contribute 'ct.spools.bench/contribute
+   :reconcile 'ct.spools.bench/reconcile
    :required? true
    :after [:agent-run]})
 ```
 
-`install!` creates the runtime-owned spool state (executor, registries, in-flight tracking — versioned per `docs/spools/writing-shared-spools.md` with a `:close-fn`), registers the `bench` CLI op and the `bench-runs` named query, detects the container engine (see §4), and reconciles orphaned entries from a previous weaver lifetime (see §9). It registers **no suites and no harness definitions** — those are trusted config, exactly like harness aliases.
+`contribute` publishes the `bench` CLI op and `bench-runs` named query; `reconcile` creates the runtime-owned spool state (executor, registries, in-flight tracking — versioned per `docs/spools/writing-shared-spools.md` with a `:close-fn`), detects the container engine (see §4), and reconciles orphaned entries from a previous weaver lifetime (see §9). It registers **no suites and no harness definitions** — those are trusted config, exactly like harness aliases.
 
 All public functions take `runtime` as the first argument (shared-spool rules). State lives in `skein.api.runtime.alpha/spool-state`; no module-level atoms.
 
@@ -122,7 +123,7 @@ Rules:
 
 ## 4. Container engine
 
-`install!` resolves the engine by probing `docker` then `podman` on PATH; trusted config may pin it with `(bench/set-engine! runtime ["podman"])` — any argv prefix speaking the `run`/`inspect` CLI dialect. **This is also the test seam**: tests inject a fake engine script and the whole lifecycle runs without a container runtime on the machine. No engine resolvable at `run!` time fails loudly.
+`reconcile` resolves the engine by probing `docker` then `podman` on PATH; trusted config may pin it with `(bench/set-engine! runtime ["podman"])` — any argv prefix speaking the `run`/`inspect` CLI dialect. **This is also the test seam**: tests inject a fake engine script and the whole lifecycle runs without a container runtime on the machine. No engine resolvable at `run!` time fails loudly.
 
 Per entry, the engine executes (conceptually):
 
@@ -251,7 +252,7 @@ The judge is deliberately **not** asked to approve blind: validation exit codes 
 ## 9. Failure and recovery
 
 - Fail-loud validation happens before any strand exists (§6). Setup failure, timeout, and engine errors mark the entry `failed` + `bench/error`, judge blocked. A **non-zero agent exit** still finalizes the entry `done` **when there is something to measure** — non-empty stdout *or* a non-empty diff (the exit code is recorded as `bench/exit-code`); with nothing to measure (empty stdout *and* empty diff) the entry is `failed` with `bench/error "agent exited <code> with no artifacts"`.
-- Weaver crash mid-run: `install!` reconciliation marks any `bench/phase preparing|running` entry with no in-flight executor claim as `failed` (`bench/error "orphaned by weaver restart"`). Containers are `--rm` and named `skein-bench-<run-id>-<slug>`; reconcile best-effort `<engine> kill`s a still-live container by name. No auto-respawn — `bench retry` is deliberate.
+- Weaver crash mid-run: `reconcile` marks any `bench/phase preparing|running` entry with no in-flight executor claim as `failed` (`bench/error "orphaned by weaver restart"`). Containers are `--rm` and named `skein-bench-<run-id>-<slug>`; reconcile best-effort `<engine> kill`s a still-live container by name. No auto-respawn — `bench retry` is deliberate.
 - `bench retry <entry-id>`: only for `failed` entries; resets to `pending` with a fresh workspace, increments `bench/attempt`.
 - Executor and registries are versioned spool state with `:close-fn`; runtime stop kills live containers loudly.
 

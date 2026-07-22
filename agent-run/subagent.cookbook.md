@@ -18,7 +18,7 @@ The subagent executor sits between two spools that know nothing of each other: t
 engine](../workflow.md), which models a step it can't do itself as a `gate`, and the [agent-run
 engine](../agent-run/README.md), which spawns agent runs but has no notion of workflows. The
 subagent executor is the only namespace that speaks both. Load order matters — **agent-run first,
-then the subagent executor** (its `install!` fails loudly otherwise and runs an initial gate scan) —
+then the subagent executor** (its `reconcile` fails loudly otherwise and runs an initial gate scan) —
 and the subagent executor must load *after* any startup config that registers the harness aliases
 your gates name. See [`subagent.md`, "Loading"](./subagent.md#loading).
 
@@ -234,7 +234,7 @@ itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a
   runs (non-blank result), the blank-exit-0 case can't masquerade as success. If the subagent
   executor instead let the run self-close the gate on exit, a hollow run would advance the workflow
   with nothing done. Routing through `complete!` on `done`-only is what makes that impossible.
-- **A registered executor keeps coordination quiet until it shouldn't be.** `install!` registers
+- **A registered executor keeps coordination quiet until it shouldn't be.** Declarative publication registers
   `gate-stalled?` as the `:subagent` executor, so a coordinator's `await!` reports `:waiting` on a
   healthy delegated gate instead of surfacing it as unattended, and wakes to `:stalled` only on a
   real stall (spawn error, or a failed/exhausted serving run). No wall-clock hang policy is

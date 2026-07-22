@@ -1510,8 +1510,25 @@
           "bench/judge" "bench/run-id" "bench/judge-prompt" "bench/verdict"]
    :doc "Bench run-root, entry, and judge attributes written by ct.spools.bench/run!."})
 
-(defn install!
-  "Activate bench on the current runtime.
+(defn contribute
+  "Materialize bench's registry handle for owner-complete publication.
+
+  The registry is a direct spool-state slot, not nested in the resource map,
+  so the publication kernel discovers harness, suite, and extractor kinds."
+  [{:keys [runtime]}]
+  (registry-handle runtime)
+  {:ops {:entries {"bench" {:doc (:doc bench-arg-spec)
+                            :arg-spec bench-arg-spec
+                            :returns bench-returns
+                            :deadline-class :unbounded
+                            :hook-class :mutating
+                            :fn 'ct.spools.bench/bench-op}}
+         :overrides #{}}
+   :queries {:entries {"bench-runs" [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]]}
+             :overrides #{}}})
+
+(defn reconcile
+  "Reconcile bench's live resources after declarative publication.
 
   Creates the runtime-owned state (bounded executor + registries + in-flight
   tracking), detects the container engine (docker then podman on PATH unless
@@ -1521,27 +1538,18 @@
   the `bench` CLI op and the `bench-runs` named query. Registers no suites or
   harness definitions — those are trusted config. Called as a no-arg module
   `:call` at startup/reload."
-  []
-  (let [runtime (current/runtime)]
-    (state runtime)
-    (vocab/declare! runtime bench-namespace-declaration)
-    (register-extractor! runtime :generic generic-extractor)
-    (register-default-extractors! runtime)
-    (detect-engine! runtime)
-    (let [reconciled (reconcile! runtime)]
-      {:installed true
-       :namespace 'ct.spools.bench
-       :engine (engine runtime)
-       :harnesses (mapv :name (harnesses runtime))
-       :suites (mapv :name (suites runtime))
-       :reconciled reconciled
-       :op (weaver/register-op! runtime 'bench
-                                {:doc (:doc bench-arg-spec)
-                                 :arg-spec bench-arg-spec
-                                 :returns bench-returns
-                              ;; run/reconcile may fetch a git mirror synchronously
-                                 :deadline-class :unbounded
-                                 :hook-class :mutating}
-                                'ct.spools.bench/bench-op)
-       :query (graph/register-query! runtime 'bench-runs
-                                     [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]])})))
+  [{:keys [runtime] :as ctx}]
+  (case (get-in ctx [:module/contribution :status])
+    :removed {:reconciled :removed}
+    (do
+      (state runtime)
+      (vocab/declare! runtime bench-namespace-declaration)
+      (register-extractor! runtime :generic generic-extractor)
+      (register-default-extractors! runtime)
+      (detect-engine! runtime)
+      (let [reconciled (reconcile! runtime)]
+        {:reconciled :applied
+         :engine (engine runtime)
+         :harnesses (mapv :name (harnesses runtime))
+         :suites (mapv :name (suites runtime))
+         :reconciled-entries reconciled}))))

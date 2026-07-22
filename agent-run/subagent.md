@@ -34,14 +34,15 @@ Load agent-run first, then the subagent executor from the same approved local-ro
 (runtime/use! runtime :subagent
   {:ns 'ct.spools.executors.subagent
    :spools ['ct.spools/agent-run]
-   :call 'ct.spools.executors.subagent/install!
+   :contribute 'ct.spools.executors.subagent/contribute
+   :reconcile 'ct.spools.executors.subagent/reconcile
    :required? true})
 ```
 
-`install!` fails loudly unless `:agent-run/engine` is already installed.
+`reconcile` fails loudly unless `:agent-run/engine` is already installed.
 
-Install the subagent executor **after** any startup config that registers harness aliases.
-`install!` runs an initial gate scan, so an alias a durable ready gate names (e.g. `worker`) must
+Activate the subagent executor **after** any startup config that registers harness aliases.
+`reconcile` runs an initial gate scan, so an alias a durable ready gate names (e.g. `worker`) must
 already be registered or that gate is stamped `gate/error` on every cold start.
 
 Gate scans serialize on a runtime-owned monitor: independent weaver runtimes in one JVM scan
@@ -138,7 +139,7 @@ failed run stays visible for audit.
 
 ## Coordination attention
 
-`install!` calls `(workflow/register-executor! :subagent gate-stalled?)`, registering itself as the
+Declarative publication registers `:subagent` with `workflow/executor-kind`, registering itself as the
 executor for every gate whose `waiter` is `subagent`. Because an executor is registered, `await!`
 stays silent (`:waiting`) on a healthy subagent gate instead of surfacing it immediately as `:gate`.
 `gate-stalled?` reports a ready subagent gate as stalled (`:reason :stalled`) when the gate has

@@ -75,21 +75,26 @@ Register or replace a named reviewer roster (weaver-lifetime state, so
   explain data.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L717-L733">Source</a></sub></p>
 
-## <a name="ct.spools.delegation/install!">`install!`</a>
+## <a name="ct.spools.delegation/contribute">`contribute`</a>
 ``` clojure
-(install!)
+(contribute ctx)
 ```
 Function.
 
-Install the delegation op surface, pattern, and query.
+Return delegation's owner-complete CLI, pattern, query, and roster kinds.
 
-  Claims neither agent-run preamble slot: the injected worker text is the
-  workspace's call, so a workspace wanting this spool's task workflow registers
-  `worker-contract` itself (see the README).
+The roster registry handle is materialized directly in runtime spool state so
+the publication kernel can discover it. Core surface entries are declarative;
+vocabulary and glossary setup belong to `reconcile` after publication.
 
-  Registers the delegation-owned glossary outcomes before the `agent` op (the
-  load-order contract, DELTA-Dtf-002.CC7): the op's per-verb `failure-modes`
-  references are checked against the runtime glossary at registration.
+## <a name="ct.spools.delegation/reconcile">`reconcile`</a>
+``` clojure
+(reconcile ctx)
+```
+Function.
+
+Reconcile delegation's non-declarative vocabulary and glossary resources.
+
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2213-L2255">Source</a></sub></p>
 
 ## <a name="ct.spools.delegation/panel!">`panel!`</a>

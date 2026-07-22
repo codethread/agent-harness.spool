@@ -70,12 +70,13 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 (runtime/use! runtime :delegation
   {:ns 'ct.spools.delegation
    :spools ['ct.spools/delegation]
-   :call 'ct.spools.delegation/install!
+   :contribute 'ct.spools.delegation/contribute
+   :reconcile 'ct.spools.delegation/reconcile
    :required? true
    :after [:agent-run]})
 ```
 
-`agents/install!` registers:
+Declarative publication registers:
 
 - the **`agent` CLI operation** (`strand agent ...`) — the full verb surface below;
 - the **`agent-plan` weave pattern** (`strand weave --pattern agent-plan`);

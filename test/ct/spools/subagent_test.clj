@@ -16,13 +16,27 @@
   (with-runtime
     (fn [rt _]
       (shuttle/install!)
+      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
+                                     'ct.spools.agent-run/contribute
+                                     'ct.spools.agent-run/reconcile)
       (shuttle/register-harness! :sh-tail {:argv ["sh" "-c" "tail -n 1 | sh"]
                                            :prompt-via :stdin
                                            :parse :raw
                                            :preamble? false
                                            :doc "Test harness that executes only the final prompt line."})
-      (treadle/install!)
+      (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
+                                     'ct.spools.executors.subagent/contribute
+                                     'ct.spools.executors.subagent/reconcile)
       (f rt))))
+
+(defn- activate-treadle! [rt]
+  (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
+                                 'ct.spools.agent-run/contribute
+                                 'ct.spools.agent-run/reconcile)
+  (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
+                                 'ct.spools.executors.subagent/contribute
+                                 'ct.spools.executors.subagent/reconcile
+                                 :after [:agent-run]))
 
 (defn- attr-namespace-declaration [rt name]
   (->> (vocab/declarations rt {:kind :attr-namespace})
@@ -162,7 +176,7 @@
                                               :agent-run/result 42
                                               :workflow/run-id "invalid-result"}
                                  :edges [{:type "serves" :to gate-id}]})]
-        (treadle/install!)
+        (activate-treadle! rt)
         (test-alpha/await-quiescent! rt)
         (let [run (weaver/show rt (:id run))
               gate (weaver/show rt gate-id)]
@@ -194,7 +208,7 @@
                                               :agent-run/result "generic result"
                                               :workflow/run-id "default-policy"}
                                  :edges [{:type "serves" :to gate-id}]})]
-        (treadle/install!)
+        (activate-treadle! rt)
         (test-alpha/await-quiescent! rt)
         (is (= "true" (attr (weaver/show rt (:id run)) :gate/delivered)))
         (is (= "closed" (:state (weaver/show rt gate-id))))
@@ -215,7 +229,7 @@
                                               :agent-run/result "honest red"
                                               :workflow/run-id "strict-policy"}
                                  :edges [{:type "serves" :to gate-id}]})]
-        (treadle/install!)
+        (activate-treadle! rt)
         (test-alpha/await-quiescent! rt)
         (let [gate (weaver/show rt gate-id)
               run (weaver/show rt (:id run))]
@@ -255,7 +269,7 @@
                                               :agent-run/result "completed result"
                                               :workflow/run-id "unknown-policy"}
                                  :edges [{:type "serves" :to gate-id}]})]
-        (treadle/install!)
+        (activate-treadle! rt)
         (test-alpha/await-quiescent! rt)
         (let [gate (weaver/show rt gate-id)
               run (weaver/show rt (:id run))]
@@ -280,7 +294,7 @@
   (with-runtime
     (fn [rt _]
       (shuttle/install!)
-      (treadle/install!)
+      (activate-treadle! rt)
       (let [gate-id (:id (weaver/add! rt {:title "Errored gate"
                                           :state "active"
                                           :attributes {:workflow/gate "subagent"

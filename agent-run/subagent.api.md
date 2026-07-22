@@ -38,15 +38,23 @@ Return durable stall detail for a ready subagent gate view, or nil.
   policy is applied.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/agent-run/src/ct/spools/executors/subagent.clj#L240-L257">Source</a></sub></p>
 
-## <a name="ct.spools.executors.subagent/install!">`install!`</a>
+## <a name="ct.spools.executors.subagent/contribute">`contribute`</a>
 ``` clojure
-(install!)
+(contribute ctx)
 ```
 Function.
 
-Install the subagent executor's event handler and perform an initial scan.
+Return subagent's owner-complete executor and coordinator queries.
 
-  Fails loudly unless `ct.spools.agent-run/install!` has already registered
+## <a name="ct.spools.executors.subagent/reconcile">`reconcile`</a>
+``` clojure
+(reconcile ctx)
+```
+Function.
+
+Reconcile the subagent executor's event handler and initial scan.
+
+  Fails loudly unless agent-run's module has already registered
   the agent-run engine in this weaver runtime.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/agent-run/src/ct/spools/executors/subagent.clj#L259-L298">Source</a></sub></p>
 
@@ -80,7 +88,7 @@ Query definition behind the registered `stalled-subagent-gates` query: an
   `agent-run/phase "superseded"` (never `failed`/`exhausted`), so matching a
   dead phase over `serves` selects exactly the gates whose current serving run
   is dead — by construction in lockstep with the `gate-stalled?` predicate, no
-  `gate/superseded-by` bridge. `install!` registers it under the query name;
+  `gate/superseded-by` bridge. Declarative publication registers it under the query name;
   readers composing on the rule list with this definition directly, so
   membership cannot drift even on a runtime where the executor is not
   installed.

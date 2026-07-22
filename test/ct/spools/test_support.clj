@@ -6,10 +6,27 @@
   of reinventing its own deadline/sleep/recur loop."
   (:require [clojure.java.io :as io]
             [clojure.test :as t]
+            [skein.api.runtime.alpha :as runtime]
             [skein.api.weaver.alpha :as weaver]
             [skein.core.db-test :as db-test]
             [skein.core.weaver.config :as weaver-config]
             [skein.core.weaver.runtime :as weaver-runtime]))
+
+(defn activate-module!
+  "Declare and refresh one config-owned contribution module for a test runtime.
+
+  The disposable source file keeps collection scoped to an approved target;
+  `contribute` may then require the tested classpath namespace outside
+  collection, as shared-spool module publication requires."
+  [rt key _ns-sym contribute reconcile & {:keys [after]}]
+  (let [path (str "test-module-" (name key) ".clj")
+        file (io/file (get-in rt [:metadata :config-dir]) path)]
+    (spit file (str "(ns ct.spools.test-support." (name key) ")\n"))
+    (runtime/module! rt key
+                     (cond-> {:file path
+                              :contribute contribute
+                              :reconcile reconcile}
+                       after (assoc :after after)))))
 
 (defn test-world [config-dir]
   (weaver-config/world config-dir

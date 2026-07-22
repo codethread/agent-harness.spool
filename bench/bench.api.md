@@ -121,22 +121,24 @@ Function.
 Return registered bench harness definitions for `runtime`, sorted by key.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L345-L348">Source</a></sub></p>
 
-## <a name="ct.spools.bench/install!">`install!`</a>
+## <a name="ct.spools.bench/contribute">`contribute`</a>
 ``` clojure
-(install!)
+(contribute ctx)
 ```
 Function.
 
-Activate bench on the current runtime.
+Materialize bench's registry handle for owner-complete publication.
 
-  Creates the runtime-owned state (bounded executor + registries + in-flight
-  tracking), detects the container engine (docker then podman on PATH unless
-  `set-engine!` already pinned one), registers the shipped
-  `:generic`/`:claude`/`:pi`/`:codex` extractors (defaults; user registrations
-  win), reconciles entries orphaned by a previous weaver lifetime, and registers
-  the `bench` CLI op and the `bench-runs` named query. Registers no suites or
-  harness definitions — those are trusted config. Called as a no-arg module
-  `:call` at startup/reload.
+The registry is a direct spool-state slot, not nested in the resource map,
+so the publication kernel discovers harness, suite, and extractor kinds.
+
+## <a name="ct.spools.bench/reconcile">`reconcile`</a>
+``` clojure
+(reconcile ctx)
+```
+Function.
+
+Reconcile bench's live resources after declarative publication.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1463-L1497">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/judge-spec">`judge-spec`</a>

@@ -120,21 +120,24 @@ trusted `init.clj`:
 (runtime/use! rt :delegation
   {:ns 'ct.spools.delegation
    :spools '[ct.spools/delegation ct.spools/agent-run]
-   :call 'ct.spools.delegation/install!
+   :contribute 'ct.spools.delegation/contribute
+   :reconcile 'ct.spools.delegation/reconcile
    :after [:agent-run]
    :required? true})
 
 (runtime/use! rt :subagent
   {:ns 'ct.spools.executors.subagent
    :spools '[ct.spools/agent-run skein.spools/workflow]
-   :call 'ct.spools.executors.subagent/install!
+   :contribute 'ct.spools.executors.subagent/contribute
+   :reconcile 'ct.spools.executors.subagent/reconcile
    :after [:workflow :agent-run]
    :required? true})
 
 (runtime/use! rt :bench
   {:ns 'ct.spools.bench
    :spools '[ct.spools/bench ct.spools/agent-run]
-   :call 'ct.spools.bench/install!
+   :contribute 'ct.spools.bench/contribute
+   :reconcile 'ct.spools.bench/reconcile
    :after [:agent-run]
    :required? true})
 ```

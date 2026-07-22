@@ -268,9 +268,11 @@
     {:prefix "skein-bench-metrics"}
     (fn [rt _]
       (let [sentinel (fn [_ctx] {:cost-usd 9.99})]
-        ;; a trusted config that registered its own :claude before install! wins.
+        ;; a trusted config that registered its own :claude before activation wins.
         (bench/register-extractor! rt :claude sentinel)
-        (bench/install!)
+        (test-support/activate-module! rt :bench 'ct.spools.bench
+                                       'ct.spools.bench/contribute
+                                       'ct.spools.bench/reconcile)
         (is (= #{:claude :codex :generic :pi} (set (bench/extractors rt)))
             "all shipped extractor keys are present")
         (let [reg (registry/effective (bench/registry-handle rt) bench/extractor-kind)]
