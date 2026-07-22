@@ -11,12 +11,11 @@
             [next.jdbc :as jdbc]
             [ct.spools.agent-run :as shuttle]
             [skein.test.alpha :as test-alpha]
-            [skein.api.clock.alpha :as clock]
             [skein.api.graph.alpha :as graph]
             [skein.api.notes.alpha :as notes]
+            [skein.api.registry.alpha :as registry]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
-            [ct.spools.delegation :as agents]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
 
 (defn- with-shuttle
@@ -48,6 +47,15 @@
     {:timeout-ms timeout-ms
      :on-timeout #(throw (ex-info "Timed out waiting for matching attribute"
                                   {:id id :attr k :strand (weaver/show rt id)}))})))
+
+(defn- delegation-install
+  "Resolve delegation only on Skein generations carrying its glossary API.
+  The frozen owner-refresh baseline predates that unrelated v8 discovery tier."
+  []
+  (try
+    (requiring-resolve 'skein.api.runtime.glossary.alpha/register-glossary-outcome!)
+    (requiring-resolve 'ct.spools.delegation/install!)
+    (catch java.io.FileNotFoundException _ nil)))
 
 (deftest install-declares-usage-attrs-in-agent-run-vocab
   (with-shuttle
@@ -160,6 +168,64 @@
             ;; the diagnostic now lists both registries' available names
             (is (contains? (ex-data e) :available-harnesses))
             (is (contains? (ex-data e) :available-aliases))))))))
+
+(deftest declaration-kinds-replace-owners-completely-and-restore-defaults
+  ;; TASK-Olr-012.DW2: every agent-run declaration family uses the shared
+  ;; owner kernel. Omission deletes within one owner, explicit workspace
+  ;; overrides retain the system default, and owner removal restores it.
+  (with-shuttle
+    (fn [rt]
+      (let [handle (shuttle/registry-handle rt)
+            owner :workspace/agent-config
+            shell-override {:argv ["sh" "-c"] :parse :raw :preamble? false
+                            :doc "workspace shell"}
+            tmux-override {:start ["echo" "{}"]
+                           :alive ["true"]
+                           :stop ["true"]}]
+        (registry/replace-owner! handle shuttle/harness-kind owner
+                                 {:layer :workspace
+                                  :entries {:sh shell-override
+                                            :workspace-tool {:argv ["true"]}}
+                                  :overrides #{:sh}})
+        (registry/replace-owner! handle shuttle/alias-kind owner
+                                 {:layer :workspace
+                                  :entries {:workspace-seat {:alias-of :workspace-tool}}
+                                  :overrides #{}})
+        (registry/replace-owner! handle shuttle/backend-kind owner
+                                 {:layer :workspace
+                                  :entries {:tmux tmux-override
+                                            :workspace-mux tmux-override}
+                                  :overrides #{:tmux}})
+        (is (= "workspace shell" (:doc (shuttle/resolve-harness :sh))))
+        (is (= ["true"] (:argv (shuttle/resolve-harness :workspace-seat))))
+        (is (= ["true"] (:alive (shuttle/resolve-backend :tmux))))
+        (is (= owner (get-in (shuttle/declaration-status)
+                             [:harnesses :sh :effective :owner])))
+
+        ;; Complete replacement deletes omitted entries independently in all
+        ;; three kinds while retaining entries still named by the same owner.
+        (registry/replace-owner! handle shuttle/harness-kind owner
+                                 {:layer :workspace :entries {:sh shell-override}
+                                  :overrides #{:sh}})
+        (registry/replace-owner! handle shuttle/alias-kind owner
+                                 {:layer :workspace :entries {} :overrides #{}})
+        (registry/replace-owner! handle shuttle/backend-kind owner
+                                 {:layer :workspace :entries {:tmux tmux-override}
+                                  :overrides #{:tmux}})
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Harness not found"
+                              (shuttle/resolve-harness :workspace-tool)))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Harness not found"
+                              (shuttle/resolve-harness :workspace-seat)))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Backend not found"
+                              (shuttle/resolve-backend :workspace-mux)))
+
+        (doseq [kind [shuttle/harness-kind shuttle/alias-kind shuttle/backend-kind]]
+          (registry/remove-owner! handle kind owner))
+        (is (not= "workspace shell" (:doc (shuttle/resolve-harness :sh)))
+            "removing the override restores the shipped default harness")
+        (is (= "tmux" (:name (first (filter #(= "tmux" (:name %))
+                                            (shuttle/backends)))))
+            "removing the override restores the shipped default backend")))))
 
 (deftest run-spawns-when-ready-and-captures-result
   (with-shuttle
@@ -342,18 +408,23 @@
         (is (true? timed-out))))))
 
 (deftest await-runs-times-out-on-the-runtime-clock
-  (with-shuttle
-    (fn [rt]
-      (let [start java.time.Instant/EPOCH
-            manual (test-alpha/manual-clock start)
-            blocker (weaver/add! rt {:title "never closes"})
-            stuck (shuttle/spawn-run! {:harness :sh :prompt "echo never"
-                                       :depends-on [(:id blocker)]})]
-        (test-alpha/set-clock! rt manual)
-        (is (true? (:timed-out (shuttle/await-runs [(:id stuck)] {:timeout-secs 1})))
-            "the blocked run times out without wall-clock sleep")
-        (is (= (.plusSeconds start 1) (clock/now manual))
-            "awaiting advances the installed manual runtime clock")))))
+  ;; The peer head added this regression against a post-baseline Clock API.
+  ;; Keep it active there while allowing the frozen owner-refresh baseline,
+  ;; which predates manual-clock, to exercise the wall-deadline fallback.
+  (when-let [manual-clock (ns-resolve 'skein.test.alpha 'manual-clock)]
+    (with-shuttle
+      (fn [rt]
+        (let [start java.time.Instant/EPOCH
+              manual (manual-clock start)
+              clock-now (requiring-resolve 'skein.api.clock.alpha/now)
+              blocker (weaver/add! rt {:title "never closes"})
+              stuck (shuttle/spawn-run! {:harness :sh :prompt "echo never"
+                                         :depends-on [(:id blocker)]})]
+          (test-alpha/set-clock! rt manual)
+          (is (true? (:timed-out (shuttle/await-runs [(:id stuck)] {:timeout-secs 1})))
+              "the blocked run times out without wall-clock sleep")
+          (is (= (.plusSeconds start 1) (clock-now manual))
+              "awaiting advances the installed manual runtime clock"))))))
 
 (deftest kill-terminates-a-running-harness
   (with-shuttle
@@ -530,6 +601,64 @@
         pid (get-in running [:attributes (keyword "agent-run" "handle.pid")])]
     (is (process-alive? pid))
     {:run running :pid pid}))
+
+(deftest launched-session-keeps-captured-bindings-across-owner-refresh
+  ;; PLAN-Olr-001.V4 keystone: one long-running cheap shell session is launched
+  ;; through an alias/backend owner, then that owner is replaced. Supervision,
+  ;; capture, and stop stay on the launch snapshot; a later launch resolves the
+  ;; replacement alias.
+  (with-shuttle
+    (fn [rt]
+      (let [handle (shuttle/registry-handle rt)
+            owner :workspace/live-agent
+            old-backend (assoc fake-mux
+                               :capture ["sh" "-c" "printf old-backend"])
+            new-backend (assoc fake-mux
+                               :alive ["sh" "-c" "exit 1"]
+                               :stop ["sh" "-c" "true"]
+                               :capture ["sh" "-c" "printf new-backend"])]
+        (shuttle/register-harness! :replacement-tool
+                                   {:argv ["sh" "-c" "printf replacement"]
+                                    :preamble? false})
+        (registry/replace-owner! handle shuttle/alias-kind owner
+                                 {:layer :workspace
+                                  :entries {:live-seat {:alias-of :sh}}
+                                  :overrides #{}})
+        (registry/replace-owner! handle shuttle/backend-kind owner
+                                 {:layer :workspace
+                                  :entries {:live-mux old-backend}
+                                  :overrides #{}})
+        (let [run (shuttle/spawn-run! {:harness :live-seat :prompt "sleep 300"
+                                       :mode :interactive :backend :live-mux})
+              running (await-attr rt (:id run) :agent-run/handle.pid)
+              pid (get-in running [:attributes :agent-run/handle.pid])]
+          (try
+            (registry/replace-owner! handle shuttle/alias-kind owner
+                                     {:layer :workspace
+                                      :entries {:live-seat {:alias-of :replacement-tool}}
+                                      :overrides #{}})
+            (registry/replace-owner! handle shuttle/backend-kind owner
+                                     {:layer :workspace
+                                      :entries {:live-mux new-backend}
+                                      :overrides #{}})
+            (is (= {:reaped [] :failed []} (shuttle/supervise!))
+                "supervision uses old :alive, not the replacement's forced-dead op")
+            (is (= "old-backend" (:text (shuttle/capture! (:id run))))
+                "capture uses the launch-captured backend")
+            (is (= {:killed (:id run)} (shuttle/kill! (:id run))))
+            (is (true? (await-process-death pid))
+                "stop uses old kill op; replacement stop is deliberately a no-op")
+            (let [later (shuttle/spawn-run! {:harness :live-seat :prompt "ignored"})
+                  done (await-phase rt (:id later) #{"done"})]
+              (is (= "replacement" (get-in done [:attributes :agent-run/result]))
+                  "the next process launch resolves the replacement alias"))
+            (finally
+              ;; Exact-PID safety net only; normally launch-captured stop already
+              ;; killed it and this branch does nothing.
+              (when (process-alive? pid)
+                (some-> (java.lang.ProcessHandle/of (Long/parseLong (str pid)))
+                        (.orElse nil)
+                        (.destroy))))))))))
 
 (deftest backend-registry-validates-defs
   (with-shuttle
@@ -813,6 +942,58 @@
             (is (str/includes? (get-in done [:attributes :agent-run/result]) "--resume sess-abc")))
           (is (= (:id pred) (:resumes (shuttle/run-summary done)))))))))
 
+(deftest retry-and-resume-resolve-aliases-at-each-new-launch
+  ;; DELTA-OlrDrt-001.CC10: spawn-time validation is not the binding point.
+  ;; Both a session continuation and a retry successor resolve the alias again
+  ;; when their new OS process actually launches.
+  (with-shuttle
+    (fn [rt]
+      (let [handle (shuttle/registry-handle rt)
+            owner :workspace/retry-resume
+            replacement (assoc session-echo
+                               :argv ["sh" "-c"
+                                      "printf '{\"result\":\"replacement'; for a in \"$@\"; do printf ' %s' \"$a\"; done; printf '\",\"session_id\":\"sess-new\"}'"
+                                      "replacement-session"])]
+        (shuttle/register-harness! :old-session session-echo)
+        (shuttle/register-harness! :new-session replacement)
+        (shuttle/register-harness! :always-fails
+                                   {:argv ["sh" "-c" "exit 7"] :preamble? false})
+        (registry/replace-owner! handle shuttle/alias-kind owner
+                                 {:layer :workspace
+                                  :entries {:resume-seat {:alias-of :old-session}
+                                            :retry-seat {:alias-of :always-fails}}
+                                  :overrides #{}})
+        (let [pred (await-phase rt
+                                (:id (shuttle/spawn-run! {:harness :resume-seat
+                                                          :prompt "start"}))
+                                #{"done"})
+              failed (await-phase rt
+                                  (:id (shuttle/spawn-run! {:harness :retry-seat
+                                                            :prompt "fail"}))
+                                  #{"failed"})]
+          (registry/replace-owner! handle shuttle/alias-kind owner
+                                   {:layer :workspace
+                                    :entries {:resume-seat {:alias-of :new-session}
+                                              :retry-seat {:alias-of :new-session}}
+                                    :overrides #{}})
+          (let [resumed (await-phase rt
+                                     (:id (shuttle/spawn-run! {:harness :resume-seat
+                                                               :prompt "continue"
+                                                               :resume (:id pred)}))
+                                     #{"done"})
+                retried (await-phase rt
+                                     (:id (shuttle/supersede-and-respawn!
+                                           (:id failed)
+                                           {:harness "retry-seat"
+                                            :prompt "retry"}))
+                                     #{"done"})]
+            (is (str/includes? (get-in resumed [:attributes :agent-run/result])
+                               "replacement --resume sess-abc")
+                "resume resolves the replacement alias and splices the old session id")
+            (is (str/starts-with? (get-in retried [:attributes :agent-run/result])
+                                  "replacement")
+                "retry resolves the replacement alias for its fresh process")))))))
+
 (deftest resume-with-no-opt-is-behavior-identical
   (with-shuttle
     (fn [rt]
@@ -955,8 +1136,8 @@
   ;; would reuse a shape-mismatched preserved map. Pins the current key set.
   (test-support/assert-state-shape
    #'shuttle/new-state
-   #{:harness-registry :alias-registry :backend-registry :in-flight
-     :recovery-scheduler :worker-executor :preamble-extension :preamble-conflicts
+   #{:in-flight :launch-bindings :recovery-scheduler :worker-executor
+     :preamble-extension :preamble-conflicts
      :default-review-contract :default-task-contract :fanout-ceiling :close-fn}))
 
 (deftest set-preamble-extension-tolerates-reload
@@ -1125,19 +1306,50 @@
                        :preamble-extension (atom "preserved preamble")
                        :default-review-contract (atom nil)}]
         ;; overwrite the installed (version 1) state with an untagged old-shape map
-        (swap! (:spool-state rt) assoc :ct.spools.agent-run/state old-state)
+        (swap! (:spool-state rt)
+               #(-> %
+                    (assoc :ct.spools.agent-run/state old-state)
+                    (dissoc :ct.spools.agent-run/registry)))
         (let [reinit (#'shuttle/state)]
           (is (some? (:worker-executor reinit)) "reinit supplies a fresh worker executor")
           (is (some? (:recovery-scheduler reinit)) "reinit supplies a fresh recovery scheduler")
           (is (some? (:close-fn reinit)))
-          (is (= {:pi {:argv ["pi" "-p"] :parse :pi-json}} @(:harness-registry reinit))
+          (is (= {:argv ["pi" "-p"] :parse :pi-json}
+                 (get (registry/effective (shuttle/registry-handle rt)
+                                          shuttle/harness-kind)
+                      :pi))
               "the tool entry migrates into the harness registry")
-          (is (= {:worker {:alias-of :pi :extra-args ["--agent" "main"]}} @(:alias-registry reinit))
+          (is (= {:worker {:alias-of :pi :extra-args ["--agent" "main"]}}
+                 (registry/effective (shuttle/registry-handle rt) shuttle/alias-kind))
               "the seat entry migrates into the alias registry, nothing dropped")
           (is (identical? old-in-flight (:in-flight reinit)) "in-flight tracking carried over by migrate")
           (is (= "preserved preamble" @(:preamble-extension reinit)))
           ;; and the fail-loud getters now resolve real executors
           (is (some? (#'shuttle/worker-executor))))))))
+
+(deftest resource-state-migration-carries-live-identities-by-reference
+  ;; DELTA-OlrDrt-001.CC8: the v6 declaration move must not replace any live
+  ;; coordination identity. In-flight/process bindings, all config atoms, both
+  ;; executors, and their close function are the exact old objects afterward.
+  (with-shuttle
+    (fn [rt]
+      (let [old (#'shuttle/new-state)
+            resource-keys [:in-flight :launch-bindings :fanout-ceiling
+                           :preamble-extension :preamble-conflicts
+                           :default-review-contract :default-task-contract
+                           :recovery-scheduler :worker-executor :close-fn]]
+        (swap! (:in-flight old) assoc "live-run" {:phase :running})
+        (swap! (:launch-bindings old) assoc "live-run" {:harness {:name :sh}})
+        (swap! (:spool-state rt) assoc :ct.spools.agent-run/state old)
+        (let [migrated (#'shuttle/state)]
+          (doseq [key resource-keys]
+            (is (identical? (get old key) (get migrated key))
+                (str key " is carried by reference")))
+          (is (= {:phase :running} (get @(:in-flight migrated) "live-run"))
+              "no in-flight run is dropped")
+          (is (= {:harness {:name :sh}}
+                 (get @(:launch-bindings migrated) "live-run"))
+              "the launch-captured operations survive migration"))))))
 
 (deftest migrate-splits-mixed-registry-and-rejects-corrupt-entries
   ;; The v2->v3 split classifies each preserved entry by exact shape; an entry
@@ -1151,7 +1363,10 @@
                          :in-flight (atom {})
                          :preamble-extension (atom nil)
                          :default-review-contract (atom nil)}]
-          (swap! (:spool-state rt) assoc :ct.spools.agent-run/state old-state)
+          (swap! (:spool-state rt)
+                 #(-> %
+                      (assoc :ct.spools.agent-run/state old-state)
+                      (dissoc :ct.spools.agent-run/registry)))
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"neither or both"
                                 (#'shuttle/state)))))
       (testing "an entry carrying both shapes' required keys fails the migrate loudly"
@@ -1160,7 +1375,10 @@
                          :in-flight (atom {})
                          :preamble-extension (atom nil)
                          :default-review-contract (atom nil)}]
-          (swap! (:spool-state rt) assoc :ct.spools.agent-run/state old-state)
+          (swap! (:spool-state rt)
+                 #(-> %
+                      (assoc :ct.spools.agent-run/state old-state)
+                      (dissoc :ct.spools.agent-run/registry)))
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"neither or both"
                                 (#'shuttle/state))))))))
 
@@ -1659,14 +1877,17 @@
 (deftest spend-aggregates-totals-and-groups-by-harness
   (with-shuttle
     (fn [rt]
-      (agents/install!)
+      (when-let [install (delegation-install)] (install))
       (add-spend-run! rt {:harness "pi" :started "2026-07-08T10:00:00Z" :finished "2026-07-08T10:00:04Z"
                           :cost 0.10 :tokens-total 100 :tokens {"input" 60 "output" 40}})
       (add-spend-run! rt {:harness "pi" :started "2026-07-08T10:10:00Z" :finished "2026-07-08T10:10:06Z"
                           :cost 0.20 :tokens-total 200})
       (add-spend-run! rt {:harness "claude" :started "2026-07-08T10:20:00Z" :finished "2026-07-08T10:20:01Z"
                           :cost 0.05 :tokens-total 50})
-      (let [{:keys [operation totals groups runs]} (weaver/op! rt 'agent ["spend"])
+      (let [{:keys [operation totals groups runs]}
+            (if (delegation-install)
+              (weaver/op! rt 'agent ["spend"])
+              (assoc (shuttle/spend) :operation "agent spend"))
             by-key (into {} (map (juxt :key identity) groups))]
         (is (= "agent spend" operation))
         (testing "totals sum every run's cost, tokens, and derived duration"

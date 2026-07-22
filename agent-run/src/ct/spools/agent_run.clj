@@ -55,12 +55,14 @@
   op returns a durable handle stored as `agent-run/handle.*` attributes, so
   sessions survive weaver restarts and are adopted, never respawned.
 
-  Harnesses (tools) and aliases (seats) live in two independent runtime
-  registries: `register-harness!` writes one entry per tool (claude, pi, codex,
-  sh), `register-alias!` writes named seats over them. Resolution is alias-first — an
-  unvisited alias shadows a same-named harness, so a seat may carry a tool's own
-  name and still terminate at the tool. Re-registration replaces within a
-  registry (reload idempotency); across registries names are independent.
+  Harnesses (tools), aliases (seats), and interactive backends are three
+  owner-partitioned declaration kinds in one runtime-owned registry handle.
+  Complete owner replacement makes omissions delete, keeps system defaults and
+  workspace/direct definitions independently visible, and restores shadowed
+  entries when an override disappears. Resolution is alias-first — an unvisited
+  alias shadows a same-named harness, so a seat may carry a tool's own name and
+  still terminate at the tool. Every actual launch snapshots the resolved
+  harness/backend operations; later registry refresh affects only later launches.
 
   The whole spool composes public surfaces (`skein.api.weaver.alpha` inside the
   weaver JVM) and owns no privileged runtime state. Higher-level spools, such as
@@ -74,10 +76,11 @@
             [skein.api.weaver.alpha :as weaver]
             [skein.api.events.alpha :as events]
             [skein.api.current.alpha :as current]
+            [skein.api.registry.alpha :as registry]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.format.alpha :as fmt]
-            [skein.api.spool.alpha :refer [fail! attr-get poll-until!]])
+            [skein.api.spool.alpha :refer [fail! attr-get]])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
@@ -115,6 +118,35 @@
   (binding [*out* *err*]
     (println (str "[agent-run] WARN " message " " (pr-str data)))))
 
+(declare new-registry-handle prepare-legacy-launch-bindings!)
+
+(def harness-kind
+  "Owner-partitioned kind id for harness tool declarations."
+  :ct.spools.agent-run/harness)
+
+(def alias-kind
+  "Owner-partitioned kind id for harness alias/seat declarations."
+  :ct.spools.agent-run/alias)
+
+(def backend-kind
+  "Owner-partitioned kind id for interactive backend declarations."
+  :ct.spools.agent-run/backend)
+
+(def ^:private repl-owner :skein.owner/repl)
+(def ^:private system-owner :skein.owner/system)
+
+(def ^:private registry-state-version 1)
+
+(defn registry-handle
+  "Return the runtime-owned owner registry for harness, alias, and backend
+  declarations. The handle lives directly in spool-state so Skein's module
+  publication coordinator discovers all three kinds."
+  ([] (registry-handle (rt)))
+  ([runtime]
+   (runtime/spool-state runtime ::registry
+                        {:version registry-state-version}
+                        #(new-registry-handle runtime))))
+
 (def ^:private state-version
   "Shape version for the engine's runtime spool-state map.
 
@@ -126,27 +158,30 @@
   instead. The `state-shape-matches-declared-version` test fails loudly if
   `new-state` and this version drift apart.
 
-  v3 split the single mixed harness registry into `:harness-registry` (tools)
-  and `:alias-registry` (seats); `migrate-state` splits a preserved v2 registry
-  by entry shape. v4 added `:fanout-ceiling` (the workspace headless fan-out cap
+  v3 split the single mixed harness registry into tool and seat maps. v4 added
+  `:fanout-ceiling` (the workspace headless fan-out cap
   the claim! window consults): a preserved v3 map lacks the key, so `reload!`
   reinits through `migrate-state` and lets `new-state`'s default seed it rather
   than reusing a map with no ceiling. v5 added `:default-task-contract` (the
-  workspace task-contract text serving runs receive), carried and defaulted the
-  same way."
-  5)
+  workspace task-contract text serving runs receive). v6 moves the three
+  declaration maps into a direct registry.alpha spool-state handle and adds
+  `:launch-bindings`, which retains the exact harness/backend operations each
+  launched process or session started with. Every live resource from v5 is
+  carried by reference."
+  6)
 
 (defn- new-state []
   (let [scheduler (ScheduledThreadPoolExecutor. 1 (daemon-thread-factory "agent-run-recovery"))
         workers (Executors/newCachedThreadPool (daemon-thread-factory "agent-run-exec"))]
     (.setRemoveOnCancelPolicy scheduler true)
-    {:harness-registry (atom {})
-     :alias-registry (atom {})
-     :backend-registry (atom {})
-     ;; run-id -> {:phase :claimed|:running|:deferred-recovery, :process Process,
+    {;; run-id -> {:phase :claimed|:running|:deferred-recovery, :process Process,
      ;; :headless? bool, :fanout-group str|nil, :fanout-cap int|nil} — the last
      ;; three let claim!'s atomic window count headless width per workspace/group.
      :in-flight (atom {})
+     ;; run-id -> immutable launch snapshot. Unlike declarations this is live
+     ;; resource state: later registry publication must never redirect an
+     ;; already-launched process/session's capture, supervision, or teardown.
+     :launch-bindings (atom {})
      ;; workspace headless fan-out ceiling the claim! window enforces; trusted
      ;; config overrides it via set-fanout-ceiling!.
      :fanout-ceiling (atom default-fanout-ceiling)
@@ -190,38 +225,36 @@
 (defn- migrate-state
   "Reinit a preserved engine state whose shape predates `state-version`.
 
-  The v2 mixed `:harness-registry` is split by entry shape into the v3
-  `:harness-registry` (tools) and `:alias-registry` (seats); backend registry,
-  in-flight tracking, and the config override atoms (preamble extension, default
-  review contract, default task contract, `:fanout-ceiling`) carry over; the
-  executors and close hook are rebuilt fresh so scan!/scheduling never runs
-  against a stale or missing executor. A map predating a slot lacks its key, so
-  `select-keys` omits it and `new-state`'s default survives (the `(merge
-  (new-state) (select-keys old ...))` order never leaves a slot nil where the
-  default is non-nil); a configured value is preserved. The old recovery scheduler is stopped (best-effort,
-  accepting no new ticks) while the old worker pool is left to drain any
-  in-flight run monitors as daemon threads rather than being interrupted
-  mid-run."
+  Declaration maps migrate separately into `registry-handle`; this state holds
+  live resources only. Every existing atom plus the scheduler, executor, and
+  close function is carried by reference when the v5 execution triad is
+  complete. Older shapes lacking that triad receive one coherent fresh triad.
+  A slot absent from an older map receives `new-state`'s default."
   [old]
-  (when-let [scheduler (:recovery-scheduler old)]
-    (try (.shutdown ^ScheduledThreadPoolExecutor scheduler)
-         (catch Throwable t
-           (warn! "Old recovery scheduler shutdown failed during migrate; it may leak"
-                  {:exception/message (ex-message t)}))))
-  (let [grouped (group-by (fn [[k v]] (classify-registry-entry k v))
-                          @(:harness-registry old))]
-    (merge (new-state)
-           (select-keys old [:backend-registry :in-flight
-                             :preamble-extension :preamble-conflicts
-                             :default-review-contract :default-task-contract
-                             :fanout-ceiling])
-           {:harness-registry (atom (into {} (:harness grouped)))
-            :alias-registry (atom (into {} (:alias grouped)))})))
+  (let [fresh (new-state)
+        execution-keys [:recovery-scheduler :worker-executor :close-fn]
+        carry-execution? (every? #(contains? old %) execution-keys)
+        carried-keys [:in-flight :launch-bindings :preamble-extension
+                      :preamble-conflicts :default-review-contract
+                      :default-task-contract :fanout-ceiling]
+        replacement (merge fresh
+                           (select-keys old carried-keys)
+                           (when carry-execution?
+                             (select-keys old execution-keys)))]
+    (when carry-execution?
+      ((:close-fn fresh)))
+    replacement))
 
 (defn- state []
-  (runtime/spool-state (rt) ::state
-                       {:version state-version :migrate-fn migrate-state}
-                       new-state))
+  ;; Materialize/migrate declarations while a pre-v6 ::state still contains
+  ;; its legacy registry atoms; migrate-state then removes those declaration
+  ;; slots from the resource shape.
+  (let [runtime (rt)]
+    (registry-handle runtime)
+    (prepare-legacy-launch-bindings! runtime)
+    (runtime/spool-state runtime ::state
+                         {:version state-version :migrate-fn migrate-state}
+                         new-state)))
 
 (defn- require-state-entry
   "Return spool-state entry `k`, failing loudly when it is missing.
@@ -236,10 +269,8 @@
         (fail! "Required engine spool-state entry is missing"
                {:missing k :present (vec (sort (keys s)))}))))
 
-(defn- harness-registry [] (:harness-registry (state)))
-(defn- alias-registry [] (:alias-registry (state)))
-(defn- backend-registry [] (:backend-registry (state)))
 (defn- in-flight [] (:in-flight (state)))
+(defn- launch-bindings [] (:launch-bindings (state)))
 (defn- preamble-extension [] (:preamble-extension (state)))
 (defn- preamble-conflicts-atom [] (:preamble-conflicts (state)))
 (defn- ^ScheduledThreadPoolExecutor recovery-scheduler [] (require-state-entry :recovery-scheduler))
@@ -457,6 +488,51 @@
           (fail! "Op argv keyword is not an available input"
                  {:owner owner :op op :token token :allowed allowed}))))))
 
+(defn- validate-harness-def! [key def]
+  (when-let [unknown (and (map? def) (seq (remove harness-def-keys (keys def))))]
+    (fail! "Harness def contains unknown keys" {:harness key :keys (vec unknown)}))
+  (when-not (s/valid? ::harness-def def)
+    (fail! (str "Harness def does not conform to ::harness-def: "
+                (s/explain-str ::harness-def def))
+           {:harness key :def def :explain (s/explain-data ::harness-def def)}))
+  (when (contains? def :capture)
+    (validate-op-argv! key :capture (:capture def)))
+  (when (contains? def :resume)
+    (validate-resume-argv! key (:resume def)))
+  def)
+
+(defn- validate-alias-def! [key def]
+  (when-let [unknown (and (map? def) (seq (remove alias-def-keys (keys def))))]
+    (fail! "Alias def contains unknown keys" {:alias key :keys (vec unknown)}))
+  (when-not (s/valid? ::alias-def def)
+    (fail! (str "Alias def does not conform to ::alias-def: "
+                (s/explain-str ::alias-def def))
+           {:alias key :def def :explain (s/explain-data ::alias-def def)}))
+  def)
+
+(defn- valid-harness-def? [def]
+  (try (validate-harness-def! :registry-entry def) true
+       (catch Exception _ false)))
+
+(defn- valid-alias-def? [def]
+  (try (validate-alias-def! :registry-entry def) true
+       (catch Exception _ false)))
+
+(s/def ::registered-harness-def valid-harness-def?)
+(s/def ::registered-alias-def valid-alias-def?)
+
+(defn- effective-definitions [kind-id]
+  (registry/effective (registry-handle) kind-id))
+
+(defn- direct-partition [handle kind-id key value]
+  (let [entries (assoc (get-in (registry/snapshot handle)
+                               [:partitions kind-id repl-owner :entries]
+                               {})
+                       key value)]
+    {:layer :direct
+     :entries entries
+     :overrides (set (keys entries))}))
+
 (defn register-harness!
   "Register a harness definition under `name`.
 
@@ -485,17 +561,10 @@
   dedicated validators."
   [name def]
   (let [key (harness-key name)]
-    (when-let [unknown (and (map? def) (seq (remove harness-def-keys (keys def))))]
-      (fail! "Harness def contains unknown keys" {:harness key :keys (vec unknown)}))
-    (when-not (s/valid? ::harness-def def)
-      (fail! (str "Harness def does not conform to ::harness-def: "
-                  (s/explain-str ::harness-def def))
-             {:harness key :def def :explain (s/explain-data ::harness-def def)}))
-    (when (contains? def :capture)
-      (validate-op-argv! key :capture (:capture def)))
-    (when (contains? def :resume)
-      (validate-resume-argv! key (:resume def)))
-    (swap! (harness-registry) assoc key def)
+    (validate-harness-def! key def)
+    (let [handle (registry-handle)]
+      (registry/replace-owner! handle harness-kind repl-owner
+                               (direct-partition handle harness-kind key def)))
     {:harness key :def def}))
 
 (defn register-alias!
@@ -513,13 +582,10 @@
   The def shape is the `::alias-def` spec."
   [name def]
   (let [key (harness-key name)]
-    (when-let [unknown (and (map? def) (seq (remove alias-def-keys (keys def))))]
-      (fail! "Alias def contains unknown keys" {:alias key :keys (vec unknown)}))
-    (when-not (s/valid? ::alias-def def)
-      (fail! (str "Alias def does not conform to ::alias-def: "
-                  (s/explain-str ::alias-def def))
-             {:alias key :def def :explain (s/explain-data ::alias-def def)}))
-    (swap! (alias-registry) assoc key def)
+    (validate-alias-def! key def)
+    (let [handle (registry-handle)]
+      (registry/replace-owner! handle alias-kind repl-owner
+                               (direct-partition handle alias-kind key def)))
     {:alias key :def def}))
 
 (defn resolve-harness
@@ -534,8 +600,8 @@
   \"alias-cycle\"` so a real configuration bug never masquerades as the
   transient not-found reload race."
   [name]
-  (let [alias-defs @(alias-registry)
-        harness-defs @(harness-registry)]
+  (let [alias-defs (effective-definitions alias-kind)
+        harness-defs (effective-definitions harness-kind)]
     (loop [key (harness-key name)
            seen #{}
            extra-args []
@@ -598,8 +664,8 @@
   chain omits the `:harness`/`:harness-doc` keys rather than failing the
   listing."
   []
-  (let [alias-defs @(alias-registry)
-        harness-defs @(harness-registry)
+  (let [alias-defs (effective-definitions alias-kind)
+        harness-defs (effective-definitions harness-kind)
         harness-entries
         (map (fn [[key def]]
                (cond-> {:name (name key) :kind "harness"}
@@ -617,15 +683,12 @@
              alias-defs)]
     (vec (sort-by :name (concat harness-entries alias-entries)))))
 
-(defn register-default-harnesses!
-  "Register the shipped harness definitions, keeping any existing entries."
-  []
-  (let [defaults
-        {:claude {:argv ["claude" "-p" "--output-format" "json" "--dangerously-skip-permissions"]
-                  :parse :claude-json
-                  :prompt-via :stdin
-                  :resume ["--resume" :agent-run/session-id]
-                  :doc (fmt/reflow "
+(def ^:private default-harness-defs
+  {:claude {:argv ["claude" "-p" "--output-format" "json" "--dangerously-skip-permissions"]
+            :parse :claude-json
+            :prompt-via :stdin
+            :resume ["--resume" :agent-run/session-id]
+            :doc (fmt/reflow "
                         |Claude Code headless: full agentic coding toolset (file edits, shell,
                         |subagents) plus web search/fetch, from a code-focused model family.
                         |The worker prompt rides on stdin (`claude -p` reads
@@ -634,11 +697,11 @@
                         |prompts so the run can drive the strand CLI; redefine with your own argv
                         |to tighten. :claude-json captures agent-run/session-id and :resume continues
                         |that session with `--resume <session-id>`.")}
-         :pi {:argv ["pi" "-p" "--mode" "json"]
-              :parse :pi-json
-              :prompt-via :stdin
-              :resume ["--session" :agent-run/session-id]
-              :doc (fmt/reflow "
+   :pi {:argv ["pi" "-p" "--mode" "json"]
+        :parse :pi-json
+        :prompt-via :stdin
+        :resume ["--session" :agent-run/session-id]
+        :doc (fmt/reflow "
                     |pi headless in JSON event mode: agentic coding toolset that is
                     |provider/model-agnostic — aliases pick the model via --provider/--model,
                     |so model capability notes belong on the aliases.
@@ -647,20 +710,48 @@
                     |blast radius. :pi-json captures agent-run/session-id and :resume continues
                     |that specific session with `--session <session-id>` (an existing session,
                     |not the create-if-missing --session-id).")}
-         :sh {:argv ["sh" "-c"]
-              :parse :raw
-              :preamble? false
-              :doc "Shell harness: the prompt is the script, stdout is the result. Intended for tests and plumbing."}}]
-    (doseq [[key def] defaults]
-      (when-not (contains? @(harness-registry) key)
-        (register-harness! key def)))
-    (harnesses)))
+   :sh {:argv ["sh" "-c"]
+        :parse :raw
+        :preamble? false
+        :doc "Shell harness: the prompt is the script, stdout is the result. Intended for tests and plumbing."}})
+
+(defn register-default-harnesses!
+  "Replace the complete system/default harness partition with the shipped
+  definitions. Higher-layer workspace/direct definitions remain stored and
+  effective according to explicit override intent."
+  []
+  (doseq [[key def] default-harness-defs]
+    (validate-harness-def! key def))
+  (registry/replace-owner! (registry-handle) harness-kind system-owner
+                           {:layer :defaults
+                            :entries default-harness-defs
+                            :overrides #{}})
+  (harnesses))
 
 ;; ---------------------------------------------------------------------------
 ;; Backend registry (interactive session multiplexers)
 
 (def ^:private backend-def-keys #{:start :alive :stop :capture :attach :doc})
 (def ^:private backend-required-ops [:start :alive :stop])
+
+(defn- validate-backend-def! [key def]
+  (when-not (map? def)
+    (fail! "Backend def must be a map" {:backend key :def def}))
+  (when-let [unknown (seq (remove backend-def-keys (keys def)))]
+    (fail! "Backend def contains unknown keys" {:backend key :keys (vec unknown)}))
+  (doseq [op backend-required-ops]
+    (when-not (contains? def op)
+      (fail! "Backend def missing required op" {:backend key :op op})))
+  (doseq [op [:start :alive :stop :capture :attach]
+          :when (contains? def op)]
+    (validate-op-argv! key op (get def op)))
+  def)
+
+(defn- valid-backend-def? [def]
+  (try (validate-backend-def! :registry-entry def) true
+       (catch Exception _ false)))
+
+(s/def ::backend-def valid-backend-def?)
 
 (defn register-backend!
   "Register an interactive session backend under `name`.
@@ -675,25 +766,19 @@
   means `{}`); that handle is stored durably on the run strand."
   [name def]
   (let [key (harness-key name)]
-    (when-not (map? def)
-      (fail! "Backend def must be a map" {:backend key :def def}))
-    (when-let [unknown (seq (remove backend-def-keys (keys def)))]
-      (fail! "Backend def contains unknown keys" {:backend key :keys (vec unknown)}))
-    (doseq [op backend-required-ops]
-      (when-not (contains? def op)
-        (fail! "Backend def missing required op" {:backend key :op op})))
-    (doseq [op [:start :alive :stop :capture :attach]
-            :when (contains? def op)]
-      (validate-op-argv! key op (get def op)))
-    (swap! (backend-registry) assoc key def)
+    (validate-backend-def! key def)
+    (let [handle (registry-handle)]
+      (registry/replace-owner! handle backend-kind repl-owner
+                               (direct-partition handle backend-kind key def)))
     {:backend key :def def}))
 
 (defn resolve-backend
   "Return the backend definition registered under `name`; fails loudly."
   [name]
-  (let [key (harness-key name)]
-    (or (get @(backend-registry) key)
-        (fail! "Backend not found" {:backend key :available (sort (keys @(backend-registry)))}))))
+  (let [key (harness-key name)
+        defs (effective-definitions backend-kind)]
+    (or (get defs key)
+        (fail! "Backend not found" {:backend key :available (sort (keys defs))}))))
 
 (defn backends
   "Return registered backend metadata ordered by name."
@@ -704,24 +789,83 @@
                              (filter #(contains? def %))
                              (mapv clojure.core/name))}
             (:doc def) (assoc :doc (:doc def))))
-        (sort-by key @(backend-registry))))
+        (sort-by key (effective-definitions backend-kind))))
+
+(defn declaration-status
+  "Return joined owner/provenance explanations for harness, alias, and backend
+  declarations. Each entry shows its effective contender, shadowed contenders,
+  and every owner partition in deterministic layer order."
+  []
+  (let [handle (registry-handle)]
+    {:harnesses (registry/explain handle harness-kind)
+     :aliases (registry/explain handle alias-kind)
+     :backends (registry/explain handle backend-kind)}))
+
+(def ^:private default-backend-defs
+  {:tmux {:start ["tmux" "new-session" "-d" "-s" :session "-c" :cwd
+                  "-P" "-F" "{\"session\":\"#{session_name}\",\"pane\":\"#{pane_id}\"}"
+                  :command]
+          :alive ["tmux" "has-session" "-t" :handle/session]
+          :stop ["tmux" "kill-session" "-t" :handle/session]
+          :capture ["tmux" "capture-pane" "-p" "-t" :handle/pane]
+          :attach ["tmux" "attach" "-t" :handle/session]
+          :doc "tmux: one detached session per run; honors the suggested session name."}})
 
 (defn register-default-backends!
-  "Register the shipped tmux backend, keeping any existing entries."
+  "Replace the complete system/default backend partition with shipped defs."
   []
-  (let [defaults
-        {:tmux {:start ["tmux" "new-session" "-d" "-s" :session "-c" :cwd
-                        "-P" "-F" "{\"session\":\"#{session_name}\",\"pane\":\"#{pane_id}\"}"
-                        :command]
-                :alive ["tmux" "has-session" "-t" :handle/session]
-                :stop ["tmux" "kill-session" "-t" :handle/session]
-                :capture ["tmux" "capture-pane" "-p" "-t" :handle/pane]
-                :attach ["tmux" "attach" "-t" :handle/session]
-                :doc "tmux: one detached session per run; honors the suggested session name."}}]
-    (doseq [[key def] defaults]
-      (when-not (contains? @(backend-registry) key)
-        (register-backend! key def)))
-    (backends)))
+  (doseq [[key def] default-backend-defs]
+    (validate-backend-def! key def))
+  (registry/replace-owner! (registry-handle) backend-kind system-owner
+                           {:layer :defaults
+                            :entries default-backend-defs
+                            :overrides #{}})
+  (backends))
+
+(defn- legacy-registry-definitions [runtime]
+  (when-let [legacy (get @(:spool-state runtime) ::state)]
+    (when-let [mixed (:harness-registry legacy)]
+      (if-let [aliases (:alias-registry legacy)]
+        {:harness @mixed
+         :alias @aliases
+         :backend (some-> (:backend-registry legacy) deref)}
+        (let [grouped (group-by (fn [[key def]] (classify-registry-entry key def)) @mixed)]
+          {:harness (into {} (:harness grouped))
+           :alias (into {} (:alias grouped))
+           :backend (some-> (:backend-registry legacy) deref)})))))
+
+(defn- new-registry-handle [runtime]
+  (let [handle (doto (registry/registry)
+                 (registry/declare-kind! {:id harness-kind
+                                          :entry-spec ::registered-harness-def
+                                          :binding-moment :process-launch})
+                 (registry/declare-kind! {:id alias-kind
+                                          :entry-spec ::registered-alias-def
+                                          :binding-moment :process-launch})
+                 (registry/declare-kind! {:id backend-kind
+                                          :entry-spec ::backend-def
+                                          :binding-moment :interactive-session-launch}))
+        legacy (legacy-registry-definitions runtime)]
+    (registry/replace-owner! handle harness-kind system-owner
+                             {:layer :defaults
+                              :entries default-harness-defs
+                              :overrides #{}})
+    (registry/replace-owner! handle backend-kind system-owner
+                             {:layer :defaults
+                              :entries default-backend-defs
+                              :overrides #{}})
+    (doseq [[kind-id entries] [[harness-kind (:harness legacy)]
+                               [alias-kind (:alias legacy)]
+                               [backend-kind (:backend legacy)]]
+            :when (seq entries)]
+      ;; Pre-v6 registries carried no owner provenance. Preserve every entry as
+      ;; direct/REPL data, whose explicit override intent keeps it effective
+      ;; over defaults registered immediately after migration.
+      (registry/replace-owner! handle kind-id repl-owner
+                               {:layer :direct
+                                :entries entries
+                                :overrides (set (keys entries))}))
+    handle))
 
 (defn- splice-op-argv
   "Resolve a backend op's argv against engine `inputs` and the run `handle`.
@@ -1548,6 +1692,60 @@
 ;; ---------------------------------------------------------------------------
 ;; Interactive supervision
 
+(defn- capture-launch-binding!
+  "Record the immutable declarations and effective cwd used for one actual
+  process/session launch. A later owner refresh may replace or remove those
+  names, but lifecycle operations for this launch keep this snapshot."
+  [id binding]
+  (swap! (launch-bindings) assoc id binding)
+  binding)
+
+(defn- launch-binding
+  "Return the captured binding for `run`. A recovered interactive session from
+  an earlier process generation has no in-memory snapshot, so adoption resolves
+  once, records that recovery-time binding, and every later operation reuses it."
+  [id run]
+  (or (get @(launch-bindings) id)
+      (let [harness (resolve-harness (sattr run "harness"))
+            backend-name (when (interactive? run)
+                           (harness-key (sattr run "backend")))
+            backend (when backend-name (resolve-backend backend-name))]
+        (capture-launch-binding!
+         id
+         {:harness harness
+          :backend-name backend-name
+          :backend backend
+          :cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))}))))
+
+(defn- prepare-legacy-launch-bindings!
+  "Before the v5 resource map migrates, capture declarations for every run it
+  already tracks. This one-time bridge reads the preserved v5 registry through
+  the new handle, so a code/config refresh cannot redirect a process that was
+  already running when v6 became live."
+  [runtime]
+  (let [spool-state (:spool-state runtime)]
+    (locking spool-state
+      (when-let [legacy (get @spool-state ::state)]
+        (when (and (:in-flight legacy)
+                   (not (contains? legacy :launch-bindings)))
+          (let [bindings
+                (into {}
+                      (keep (fn [id]
+                              (when-let [run (weaver/show runtime id)]
+                                (let [harness (resolve-harness (sattr run "harness"))
+                                      backend-name (when (interactive? run)
+                                                     (harness-key (sattr run "backend")))
+                                      backend (when backend-name
+                                                (resolve-backend backend-name))]
+                                  [id {:harness harness
+                                       :backend-name backend-name
+                                       :backend backend
+                                       :cwd (or (sattr run "cwd") (:cwd harness)
+                                                (workspace-dir))}]))))
+                      (keys @(:in-flight legacy)))]
+            (swap! spool-state assoc ::state
+                   (assoc legacy :launch-bindings (atom bindings)))))))))
+
 (defn- claim-teardown!
   "Atomically claim the right to tear a run down; teardown paths can race
   (event reap vs await probe vs kill), and the session must be stopped once."
@@ -1588,17 +1786,15 @@
   transcripts: session logs, user hook-written dialogue logs) wins over the
   backend's scrollback capture — then persist its stdout as `<id>.capture`
   under the run log dir. Returns the file path or fails loudly."
-  [id run backend]
-  (let [harness (try (resolve-harness (sattr run "harness")) (catch Exception _ nil))
-        [owner op] (or (cond
+  [id run {:keys [harness backend backend-name cwd]}]
+  (let [[owner op] (or (cond
                          (:capture harness) [(:name harness) (:capture harness)]
-                         (:capture backend) [(harness-key (sattr run "backend")) (:capture backend)])
+                         (:capture backend) [backend-name (:capture backend)])
                        (fail! "Run has no capture op (no harness or backend :capture)"
                               {:id id}))
         ;; the effective launch cwd, including the harness default — a
         ;; capture source keyed by project directory must see the same value
         ;; the session was launched with
-        cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))
         argv (splice-op-argv owner :capture op
                              {:run-id id :cwd cwd :session (sattr run "session")}
                              (run-handle run))
@@ -1614,9 +1810,9 @@
   "Best-effort transcript capture before teardown; returns the capture file
   path, or nil when no capture op is configured or capture fails (capture is
   forensics, never a teardown blocker)."
-  [id run backend]
+  [id run binding]
   (try
-    (run-capture-op! id run backend)
+    (run-capture-op! id run binding)
     (catch Exception _ nil)))
 
 (defn- finish-interactive!
@@ -1630,9 +1826,8 @@
       (let [current (weaver/show (rt) id)]
         ;; a racing path may have finished the run between selection and claim
         (when (= "running" (sattr current "phase"))
-          (let [backend-name (harness-key (sattr current "backend"))
-                backend (resolve-backend backend-name)
-                capture-path (capture-session! id current backend)
+          (let [{:keys [backend-name backend] :as binding} (launch-binding id current)
+                capture-path (capture-session! id current binding)
                 reap (or (sattr current "reap") "auto")
                 stop-error (when (= "auto" reap)
                              (stop-session! id current backend-name backend))]
@@ -1683,8 +1878,7 @@
                      (update acc :reaped conj id))
 
                  :else
-                 (let [backend-name (harness-key (sattr run "backend"))
-                       backend (resolve-backend backend-name)]
+                 (let [{:keys [backend-name backend]} (launch-binding id run)]
                    (if (session-alive? id run backend-name backend)
                      acc
                      ;; recheck completion after the probe: the agent may have
@@ -1723,6 +1917,10 @@
           session (suggested-session id)
           attempt (inc (or (sattr run "attempt") 0))
           script (write-launcher-script! id argv (:env harness) cwd)]
+      (capture-launch-binding! id {:harness harness
+                                   :backend-name backend-name
+                                   :backend backend
+                                   :cwd cwd})
       (update-run! id {"agent-run/phase" "running"
                        "agent-run/attempt" attempt
                        "agent-run/session" session
@@ -1778,10 +1976,15 @@
             resume (resume-args harness run)
             prompt (effective-prompt harness run)
             argv (build-argv harness resume prompt)
+            cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))
             dir (log-dir)
             out-file (io/file dir (str id ".out"))
             err-file (io/file dir (str id ".err"))
             attempt (inc (or (sattr run "attempt") 0))]
+        (capture-launch-binding! id {:harness harness
+                                     :backend-name nil
+                                     :backend nil
+                                     :cwd cwd})
         ;; durably mark the run running before the process exists: a crash in
         ;; the gap respawns a strand whose process never started, instead of
         ;; leaving a pending strand with a live orphan process.
@@ -1790,7 +1993,7 @@
                          "agent-run/log" (.getPath out-file)
                          "agent-run/started-at" (now)}
                      {})
-        (let [process (start-process! argv {:cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))
+        (let [process (start-process! argv {:cwd cwd
                                             :env (:env harness)
                                             :out-file out-file
                                             :err-file err-file
@@ -1998,8 +2201,7 @@
                  (fn [acc run]
                    (let [id (:id run)]
                      (try
-                       (let [backend-name (harness-key (sattr run "backend"))
-                             backend (resolve-backend backend-name)]
+                       (let [{:keys [backend-name backend]} (launch-binding id run)]
                          (if (session-alive? id run backend-name backend)
                            (do (swap! (in-flight) assoc id {:phase :running})
                                (update acc :adopted conj id))
@@ -2275,9 +2477,9 @@
   because a backend def or handle is currently unresolvable."
   [run]
   (try
-    (let [backend (resolve-backend (sattr run "backend"))]
+    (let [{:keys [backend-name backend]} (launch-binding (:id run) run)]
       (when-let [op (:attach backend)]
-        (->> (splice-op-argv (harness-key (sattr run "backend")) :attach op
+        (->> (splice-op-argv backend-name :attach op
                              {:run-id (:id run)} (run-handle run))
              (map (fn [token]
                     (if (re-find #"[^A-Za-z0-9_@%+=:,./-]" token) (sh-quote token) token)))
@@ -2498,32 +2700,40 @@
   ([ids] (await-runs ids {}))
   ([ids {:keys [timeout-secs] :or {timeout-secs 300}}]
    (let [runtime (rt)
-         polls (atom 0)]
-     (poll-until!
-      (runtime/clock runtime)
-      {:timeout-ms (* 1000 (long timeout-secs))
-       :poll-ms 250
-       :check (fn []
-                (let [strands (graph/strands-by-ids runtime (vec ids))]
-                  ;; Awaiting an interactive run must notice a dead session rather
-                  ;; than sitting out the full timeout; probe every ~2 seconds.
-                  (when (and (zero? (mod (swap! polls inc) 8))
-                             (some interactive? strands))
-                    (try (supervise!) (catch Exception _ nil)))
-                  strands))
-       :pred->result (fn [strands]
-                       (when (every? terminal? strands)
-                         {:timed-out false :runs (mapv run-summary strands)}))
-       :on-timeout (fn [strands]
-                     {:timed-out true :runs (mapv run-summary strands)})}))))
+         polls (atom 0)
+         opts {:poll-ms 250
+               :check (fn []
+                        (let [strands (graph/strands-by-ids runtime (vec ids))]
+                          ;; Awaiting an interactive run must notice a dead session rather
+                          ;; than sitting out the full timeout; probe every ~2 seconds.
+                          (when (and (zero? (mod (swap! polls inc) 8))
+                                     (some interactive? strands))
+                            (try (supervise!) (catch Exception _ nil)))
+                          strands))
+               :pred->result (fn [strands]
+                               (when (every? terminal? strands)
+                                 {:timed-out false :runs (mapv run-summary strands)}))
+               :on-timeout (fn [strands]
+                             {:timed-out true :runs (mapv run-summary strands)})}]
+     ;; Skein's frozen owner-refresh baseline still exposes the deadline helper;
+     ;; later runtimes expose the Clock-aware replacement. Resolve this one
+     ;; compatibility seam dynamically so the v8 business API behaves on both.
+     (if-let [poll-until (ns-resolve 'skein.api.spool.alpha 'poll-until!)]
+       (let [clock-fn (requiring-resolve 'skein.api.runtime.alpha/clock)]
+         (poll-until (clock-fn runtime)
+                     (assoc opts :timeout-ms (* 1000 (long timeout-secs)))))
+       (let [poll-until-deadline (requiring-resolve
+                                  'skein.api.spool.alpha/poll-until-deadline!)]
+         (poll-until-deadline
+          (assoc opts :deadline (+ (System/currentTimeMillis)
+                                   (* 1000 (long timeout-secs))))))))))
 
 (defn kill!
   "Kill a run's harness process (or interactive session) and mark it failed."
   [id]
   (let [run (or (weaver/show (rt) id) (fail! "Run not found" {:id id}))]
     (if (interactive? run)
-      (let [backend-name (harness-key (sattr run "backend"))
-            backend (resolve-backend backend-name)]
+      (let [{:keys [backend-name backend]} (launch-binding id run)]
         (when-not (session-alive? id run backend-name backend)
           (fail! "Run has no live session" {:id id}))
         (when (claim-teardown! id)
@@ -2559,8 +2769,8 @@
   (let [run (or (weaver/show (rt) id) (fail! "Run not found" {:id id}))]
     (when-not (interactive? run)
       (fail! "Capture applies to interactive runs; headless runs already write agent-run/log" {:id id}))
-    (let [backend (resolve-backend (harness-key (sattr run "backend")))
-          path (run-capture-op! id run backend)]
+    (let [binding (launch-binding id run)
+          path (run-capture-op! id run binding)]
       (update-run! id {"agent-run/log" path} {})
       {:id id :path path :text (slurp path)})))
 
@@ -2613,6 +2823,53 @@
 ;; ---------------------------------------------------------------------------
 ;; Install
 
+(def ^:private engine-event-types
+  #{:strand/added :strand/updated :batch/applied
+    :strand/burned :strand/superseded})
+
+(defn- declare-agent-run-vocab! [runtime]
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "agent-run"
+                   :owner :skein/spools-shuttle
+                   :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
+                   :doc "Agent-run engine control attributes reserved by spawn-run! and the supervision engine, plus usage attributes finish-run! records at completion and the prompt forms higher-level spools carry onto a run."}))
+
+(defn- register-engine-handler! [runtime]
+  (events/register-handler! runtime :agent-run/engine engine-event-types
+                            'ct.spools.agent-run/on-event
+                            {:spool "agent-run"}))
+
+(defn contribute
+  "Materialize agent-run's registered declaration kinds for module publication.
+
+  Shipped harness/backend defaults are the stable system/default partitions;
+  workspace modules contribute their complete owner partitions under
+  `harness-kind`, `alias-kind`, and `backend-kind`. The module itself therefore
+  contributes no workspace-owned duplicates."
+  [{:keys [runtime]}]
+  (binding [*runtime* runtime]
+    (registry-handle runtime))
+  {})
+
+(defn reconcile
+  "Reconcile agent-run resources around owner-complete declaration publication.
+
+  Applied publication installs the event listener, vocabulary, existing live
+  resource state, crash recovery, and the first scan. Removal stops future
+  event dispatch without replacing or clearing in-flight/resource state."
+  [{:keys [runtime] :as ctx}]
+  (binding [*runtime* runtime]
+    (case (get-in ctx [:module/contribution :status])
+      :removed (do (events/unregister-handler! runtime :agent-run/engine)
+                   {:reconciled :removed
+                    :retained-in-flight (vec (sort (in-flight-run-ids)))})
+      (do (declare-agent-run-vocab! runtime)
+          (register-engine-handler! runtime)
+          (state)
+          {:reconciled :applied
+           :recovered (reconcile!)}))))
+
 (defn install!
   "Install the agent-run engine into the active weaver: default harnesses, the graph
   event listener, crash reconciliation, and a first scan, and declare the
@@ -2629,17 +2886,8 @@
   (let [runtime (rt)]
     (register-default-harnesses!)
     (register-default-backends!)
-    (vocab/declare! runtime
-                    {:kind :attr-namespace
-                     :name "agent-run"
-                     :owner :skein/spools-shuttle
-                     :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
-                     :doc "Agent-run engine control attributes reserved by spawn-run! and the supervision engine, plus usage attributes finish-run! records at completion and the prompt forms higher-level spools carry onto a run."})
-    (events/register-handler! runtime :agent-run/engine
-                              #{:strand/added :strand/updated :batch/applied
-                                :strand/burned :strand/superseded}
-                              'ct.spools.agent-run/on-event
-                              {:spool "agent-run"})
+    (declare-agent-run-vocab! runtime)
+    (register-engine-handler! runtime)
     (let [recovered (reconcile!)]
       {:installed true
        :namespace 'ct.spools.agent-run

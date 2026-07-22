@@ -4,10 +4,10 @@
             [clojure.test :refer [deftest is]]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as treadle]
-            [ct.spools.delegation :as agents]
             [skein.spools.workflow :as workflow]
             [ct.spools.test-support :as test-support :refer [with-runtime]]
             [skein.core.db :as db]
+            [skein.api.graph.alpha :as graph]
             [skein.api.weaver.alpha :as weaver]
             [skein.test.alpha :as test-alpha]
             [skein.api.vocab.alpha :as vocab]))
@@ -35,6 +35,18 @@
    (test-support/poll-until pred
                             {:timeout-ms timeout-ms
                              :on-timeout #(throw (ex-info "Timed out" {}))})))
+
+(defn- install-agent-failures-query! [rt]
+  (if-let [install (try
+                     (requiring-resolve
+                      'skein.api.runtime.glossary.alpha/register-glossary-outcome!)
+                     (requiring-resolve 'ct.spools.delegation/install!)
+                     (catch java.io.FileNotFoundException _ nil))]
+    (install)
+    (graph/register-query!
+     rt 'agent-failures
+     [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"]
+      [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]])))
 
 (defn- attr [strand k]
   (get-in strand [:attributes k]))
@@ -358,7 +370,7 @@
     (fn [rt]
       ;; agents install registers the `agent-failures` query the failed run
       ;; must surface through.
-      (agents/install!)
+      (install-agent-failures-query! rt)
       (workflow/start! "blank" (workflow/workflow
                                 "Blank"
                                 (workflow/gate :delegate "Delegate" :subagent
