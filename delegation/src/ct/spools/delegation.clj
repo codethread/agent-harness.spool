@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [skein.api.cli.alpha :as cli]
             [skein.api.current.alpha :as current]
+            [skein.api.registry.alpha :as registry]
             [skein.api.patterns.alpha :as patterns]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.runtime.glossary.alpha :as glossary]
@@ -523,22 +524,16 @@
 ;; config (the git-reviewable rules file is the source of truth; this registry
 ;; is its weaver-lifetime, in-band mirror).
 
-(def ^:private state-version
-  "Shape version for the agents-roster runtime spool-state map. Bump whenever
-  `new-state`'s key set changes: spool-state survives `reload!`, so a post-upgrade
-  reload would otherwise reuse a preserved map missing the new key
-  (docs/spools/writing-shared-spools.md 'Versioned spool state', SPEC-004.C95). The
-  `state-shape-matches-declared-version` test guards against silent drift."
-  1)
+(def roster-kind :ct.spools.delegation/roster)
+(def ^:private direct-owner :skein.owner/repl)
 
-(defn- new-state []
-  {:rosters (atom {})})
-
-(defn- state []
-  (runtime/spool-state (rt) ::state {:version state-version} new-state))
-
-(defn- rosters-atom []
-  (:rosters (state)))
+(defn registry-handle
+  ([] (registry-handle (rt)))
+  ([runtime]
+   (runtime/spool-state runtime ::registry {:version 1}
+                        #(let [handle (registry/registry)]
+                           (registry/declare-kind! handle {:id roster-kind :entry-spec :ct.spools.delegation/roster :binding-moment :fanout})
+                           handle))))
 
 (defn- harness-ref?
   "True for a keyword or non-blank string naming a harness/alias. Existence is
@@ -728,19 +723,23 @@
   [roster-name roster]
   (let [roster-id (roster-key roster-name)]
     (validate-roster! roster-id roster)
-    (swap! (rosters-atom) assoc roster-id roster)
+    (let [handle (registry-handle)
+          entries (assoc (registry/effective handle roster-kind) roster-id roster)]
+      (registry/replace-owner! handle roster-kind direct-owner
+                               {:layer :direct :entries entries :overrides (set (keys entries))}))
     {:roster roster-id :seats (count (:seats roster))}))
 
 (defn rosters
   "List registered reviewer rosters as full plain data."
   []
   (mapv (fn [[key roster]] (assoc roster :name key))
-        (sort-by key @(rosters-atom))))
+        (sort-by key (registry/effective (registry-handle) roster-kind))))
 
 (defn- resolve-roster! [roster-name]
   (let [key (roster-key roster-name)]
-    (or (get @(rosters-atom) key)
-        (fail! "Roster not found" {:roster key :available (sort (keys @(rosters-atom)))}))))
+    (let [entries (registry/effective (registry-handle) roster-kind)]
+      (or (get entries key)
+          (fail! "Roster not found" {:roster key :available (sort (keys entries))})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Blackboard prompt protocol (PLAN-Pnl-001.A6)

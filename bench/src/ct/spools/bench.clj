@@ -23,6 +23,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.current.alpha :as current]
+            [skein.api.registry.alpha :as registry]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.graph.alpha :as graph]
@@ -38,13 +39,27 @@
 ;; ---------------------------------------------------------------------------
 ;; Runtime-owned state
 
+(def harness-kind :ct.spools.bench/harness)
+(def suite-kind :ct.spools.bench/suite)
+(def extractor-kind :ct.spools.bench/extractor)
+(def ^:private direct-owner :skein.owner/repl)
+(def ^:private system-owner :skein.owner/system)
+
+(defn registry-handle [runtime]
+  (runtime/spool-state runtime ::registry {:version 1}
+                       #(let [handle (registry/registry)]
+                          (registry/declare-kind! handle {:id harness-kind :entry-spec ::registered-harness :binding-moment :run})
+                          (registry/declare-kind! handle {:id suite-kind :entry-spec ::registered-suite :binding-moment :run})
+                          (registry/declare-kind! handle {:id extractor-kind :entry-spec ::registered-extractor :binding-moment :run})
+                          handle)))
+
 (def ^:private state-version
   "Shape version for bench's runtime spool-state map. Bump whenever `new-state`'s
   key set changes: spool-state survives `reload!`, so a post-upgrade reload would
   otherwise reuse a preserved map missing a new key. The
   `state-shape-matches-declared-version` test fails loudly if `new-state` and
   this version drift apart."
-  3)
+  4)
 
 (defn- ^ThreadFactory daemon-thread-factory [prefix]
   (let [counter (atom 0)]
@@ -57,10 +72,7 @@
   (let [workers (Executors/newCachedThreadPool (daemon-thread-factory "bench"))
         engine (atom nil)
         in-flight (atom {})]
-    {:harnesses (atom {})
-     :suites (atom {})
-     :extractors (atom {})
-     :engine engine
+    {:engine engine
      :executor workers
      ;; run-id -> Semaphore: one shared parallelism gate per run so retries
      ;; contend for the same run's :parallel budget as its original entries.
@@ -75,12 +87,15 @@
                  (when-not (.awaitTermination workers 1000 TimeUnit/MILLISECONDS)
                    (fail! "Bench executor did not stop" {})))}))
 
-(defn- state [runtime]
-  (runtime/spool-state runtime ::state {:version state-version} new-state))
+(defn- migrate-state [old]
+  (let [fresh (new-state)]
+    ((:close-fn fresh))
+    (merge fresh (select-keys old [:engine :executor :semaphores :in-flight :close-fn]))))
 
-(defn- harnesses-atom [runtime] (:harnesses (state runtime)))
-(defn- suites-atom [runtime] (:suites (state runtime)))
-(defn- extractors-atom [runtime] (:extractors (state runtime)))
+(defn- state [runtime]
+  (registry-handle runtime)
+  (runtime/spool-state runtime ::state {:version state-version :migrate-fn migrate-state} new-state))
+
 (defn- engine-atom [runtime] (:engine (state runtime)))
 (defn- semaphores-atom [runtime] (:semaphores (state runtime)))
 (defn- in-flight-atom [runtime] (:in-flight (state runtime)))
@@ -132,6 +147,7 @@
                    :bench.harness/extractor]
           :opt-un [:bench.harness/model-flag :bench.harness/thinking-flag
                    :bench.harness/env :bench.harness/auth :bench.harness/doc]))
+(s/def ::registered-harness (s/and map? #(s/valid? ::harness-def (dissoc % :name))))
 
 (s/def :bench.cell/harness keyword?)
 (s/def :bench.cell/model string?)
@@ -184,6 +200,8 @@
           :opt-un [:bench.suite/sha :bench.suite/rev :bench.suite/prompts :bench.suite/prompt
                    :bench.suite/setup :bench.suite/validation :bench.suite/files
                    :bench.suite/remove :bench.suite/parallel :bench.suite/timeout-secs]))
+(s/def ::registered-suite (s/and map? #(s/valid? ::suite-def (dissoc % :name))))
+(s/def ::registered-extractor ifn?)
 
 ;; ---------------------------------------------------------------------------
 ;; Agent + suite + extractor registries
@@ -235,8 +253,11 @@
     (require-prompt-via! definition {:harness key})
     (require-valid! ::harness-def definition "bench harness definition is invalid")
     (resolve-extractor! runtime (:extractor definition))
-    (swap! (harnesses-atom runtime) assoc key (assoc definition :name key))
-    (get @(harnesses-atom runtime) key)))
+    (let [handle (registry-handle runtime)
+          entries (assoc (registry/effective handle harness-kind) key (assoc definition :name key))]
+      (registry/replace-owner! handle harness-kind direct-owner
+                               {:layer :direct :entries entries :overrides (set (keys entries))})
+      (get (registry/effective handle harness-kind) key))))
 
 (def ^:private judge-spec-keys #{:harness :external :contract})
 
@@ -320,9 +341,12 @@
   normalizes it. Returns the stored definition."
   [runtime k definition]
   (normalize-suite definition)
-  (let [key (reg-key k)]
-    (swap! (suites-atom runtime) assoc key (assoc definition :name key))
-    (get @(suites-atom runtime) key)))
+  (let [key (reg-key k)
+        handle (registry-handle runtime)
+        entries (assoc (registry/effective handle suite-kind) key (assoc definition :name key))]
+    (registry/replace-owner! handle suite-kind direct-owner
+                             {:layer :direct :entries entries :overrides (set (keys entries))})
+    (get (registry/effective handle suite-kind) key)))
 
 (defn register-extractor!
   "Register a metrics extractor `f` under `k` for this `runtime`.
@@ -337,8 +361,11 @@
   [runtime k f]
   (when-not (ifn? f)
     (fail! "bench extractor must be a function" {:key k}))
-  (let [key (reg-key k)]
-    (swap! (extractors-atom runtime) assoc key f)
+  (let [key (reg-key k)
+        handle (registry-handle runtime)
+        entries (assoc (registry/effective handle extractor-kind) key f)]
+    (registry/replace-owner! handle extractor-kind direct-owner
+                             {:layer :direct :entries entries :overrides (set (keys entries))})
     key))
 
 (defn set-engine!
@@ -360,22 +387,22 @@
 (defn harnesses
   "Return registered bench harness definitions for `runtime`, sorted by key."
   [runtime]
-  (->> @(harnesses-atom runtime) vals (sort-by (comp str :name)) vec))
+  (->> (registry/effective (registry-handle runtime) harness-kind) vals (sort-by (comp str :name)) vec))
 
 (defn suites
   "Return registered suite definitions for `runtime`, sorted by key."
   [runtime]
-  (->> @(suites-atom runtime) vals (sort-by (comp str :name)) vec))
+  (->> (registry/effective (registry-handle runtime) suite-kind) vals (sort-by (comp str :name)) vec))
 
 (defn extractors
   "Return the registered extractor keys for `runtime`, sorted."
   [runtime]
-  (->> @(extractors-atom runtime) keys (sort-by str) vec))
+  (->> (registry/effective (registry-handle runtime) extractor-kind) keys (sort-by str) vec))
 
 (defn- resolve-extractor!
   "Resolve an explicitly named extractor, failing loudly when it is unavailable."
   [runtime requested]
-  (or (get @(extractors-atom runtime) requested)
+  (or (get (registry/effective (registry-handle runtime) extractor-kind) requested)
       (fail! "bench harness references an unknown extractor"
              {:requested requested :available (extractors runtime)})))
 
@@ -411,10 +438,10 @@
   defaults, leaving any extractor a trusted config already registered under the
   same key untouched (user registration wins). Idempotent across reloads."
   [runtime]
-  (let [reg (extractors-atom runtime)]
-    (doseq [[k f] metrics/shipped]
-      (when-not (contains? @reg k)
-        (swap! reg assoc k f)))))
+  (registry/replace-owner! (registry-handle runtime) extractor-kind system-owner
+                           {:layer :defaults
+                            :entries (merge {:generic generic-extractor} metrics/shipped)
+                            :overrides #{}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Paths
@@ -603,7 +630,7 @@
   [runtime ctx entry]
   (let [{:keys [run-id engine suite semaphore]} ctx
         {:keys [entry-id slug cell prompt-text]} entry
-        harness-def (get @(harnesses-atom runtime) (:harness cell))
+        harness-def (get (registry/effective (registry-handle runtime) harness-kind) (:harness cell))
         prompt-via (require-prompt-via! harness-def {:harness (:harness cell) :cell cell})
         entry-dir (io/file (run-dir runtime run-id) slug)
         container (exec/container-name run-id slug)]
@@ -685,7 +712,7 @@
   (if (map? suite-name-or-inline)
     {:name "<inline>" :definition suite-name-or-inline}
     (let [key (reg-key suite-name-or-inline)
-          def (or (get @(suites-atom runtime) key)
+          def (or (get (registry/effective (registry-handle runtime) suite-kind) key)
                   (fail! "bench suite not registered" {:suite key :available (mapv :name (suites runtime))}))]
       {:name (name key) :definition def})))
 
@@ -880,7 +907,7 @@
         judge (:judge normalized)
         selected (select-entries normalized (:entries opts))]
     (doseq [cell selected]
-      (let [harness-def (or (get @(harnesses-atom runtime) (:harness cell))
+      (let [harness-def (or (get (registry/effective (registry-handle runtime) harness-kind) (:harness cell))
                             (fail! "bench entry references an unregistered harness"
                                    {:harness (:harness cell) :available (mapv :name (harnesses runtime))}))]
         (validate-cell-axes! harness-def cell)))
@@ -954,7 +981,7 @@
   re-registered by trusted config across restarts)."
   [runtime root]
   (let [suite-name (attr-get root "bench/suite")
-        definition (or (get @(suites-atom runtime) (keyword suite-name))
+        definition (or (get (registry/effective (registry-handle runtime) suite-kind) (keyword suite-name))
                        (fail! "bench retry needs the suite registered" {:suite suite-name}))
         normalized (normalize-suite definition)]
     {:run-id (:id root)
@@ -977,7 +1004,7 @@
           slug (attr-get entry "bench/slug")
           cell (or (first (filter #(= slug (:slug %)) (:entries (:suite ctx))))
                    (fail! "bench retry: entry slug not in suite" {:slug slug}))
-          harness-def (get @(harnesses-atom runtime) (:harness cell))
+          harness-def (get (registry/effective (registry-handle runtime) harness-kind) (:harness cell))
           _ (validate-cell-axes! harness-def cell)
           prompt-slug (if (:single-prompt? (:suite ctx)) ::single (:prompt cell))
           prompt-text (resolve-prompt-text runtime (:prompts (:suite ctx)) prompt-slug)

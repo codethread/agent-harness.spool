@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.graph.alpha :as graph]
+            [skein.api.registry.alpha :as registry]
             [skein.api.patterns.alpha :as patterns]
             [skein.api.runtime.glossary.alpha :as glossary]
             [skein.api.vocab.alpha :as vocab]
@@ -1740,12 +1741,14 @@
           (is (= "fake-mux" (get-in new-run [:attributes :agent-run/backend])))
           (agents/agent-op {:op/argv ["kill" (:id new-run)]}))))))
 
-(deftest state-shape-matches-declared-version
-  ;; Drift alarm for the agents-roster versioned spool-state: a key added to
-  ;; new-state without a state-version bump would survive reload! as a stale map.
-  (test-support/assert-state-shape
-   ;; white-box read of a private var: kondo flags cross-ns private access, but
-   ;; #'ns/private is legal and intentional here.
-   #_{:clj-kondo/ignore [:unresolved-var]}
-   #'agents/new-state
-   #{:rosters}))
+(deftest roster-owner-partition-deletes-by-omission
+  (with-agents
+    (fn [rt]
+      (let [handle (agents/registry-handle rt)
+            roster {:seats [{:name "reader" :harness :sh :brief "Read it"}]}]
+        (registry/replace-owner! handle agents/roster-kind :delegation-test
+                                 {:layer :workspace :entries {:gone roster} :overrides #{}})
+        (is (contains? (registry/effective handle agents/roster-kind) :gone))
+        (registry/replace-owner! handle agents/roster-kind :delegation-test
+                                 {:layer :workspace :entries {} :overrides #{}})
+        (is (not (contains? (registry/effective handle agents/roster-kind) :gone)))))))

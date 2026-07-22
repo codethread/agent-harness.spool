@@ -15,6 +15,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [skein.api.graph.alpha :as graph]
+            [skein.api.registry.alpha :as registry]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.bench :as bench]
@@ -298,7 +299,22 @@ esac
   (test-support/assert-state-shape
    #_{:clj-kondo/ignore [:unresolved-var]}
    #'bench/new-state
-   #{:harnesses :suites :extractors :engine :executor :semaphores :in-flight :close-fn}))
+   #{:engine :executor :semaphores :in-flight :close-fn}))
+
+(deftest owner-partitions-delete-omitted-bench-declarations
+  (with-bench
+    (fn [rt _]
+      (let [handle (bench/registry-handle rt)]
+        (doseq [[kind entry] [[bench/harness-kind {:image "i" :argv ["a"] :prompt-via :arg :extractor :generic}]
+                              [bench/suite-kind {:repo "r" :sha (str/join (repeat 40 "a")) :prompt "p" :entries [{:harness :h}] :judge :none}]
+                              [bench/extractor-kind (fn [_] {})]]]
+          (registry/replace-owner! handle kind :bench-test
+                                   {:layer :workspace :entries {:gone entry} :overrides #{}})
+          (is (contains? (registry/effective handle kind) :gone))
+          (registry/replace-owner! handle kind :bench-test
+                                   {:layer :workspace :entries {} :overrides #{}})
+          (is (not (contains? (registry/effective handle kind) :gone))
+              (str (name kind) " deletes declarations by omission")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Argv compilation / redaction (unit)

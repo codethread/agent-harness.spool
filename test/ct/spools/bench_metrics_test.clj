@@ -13,6 +13,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [skein.api.registry.alpha :as registry]
             [ct.spools.bench :as bench]
             [ct.spools.bench.metrics :as metrics]
             [ct.spools.test-support :as test-support])
@@ -272,7 +273,7 @@
         (bench/install!)
         (is (= #{:claude :codex :generic :pi} (set (bench/extractors rt)))
             "all shipped extractor keys are present")
-        (let [reg @(#'bench/extractors-atom rt)]
+        (let [reg (registry/effective (bench/registry-handle rt) bench/extractor-kind)]
           (is (identical? sentinel (:claude reg)) "user-registered :claude is not clobbered")
           (is (identical? metrics/pi-extractor (:pi reg)) "unregistered keys get the shipped default")
           (is (identical? metrics/codex-extractor (:codex reg))))))))
