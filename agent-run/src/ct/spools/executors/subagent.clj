@@ -298,13 +298,11 @@
 (defn contribute
   "Return subagent's owner-complete executor and coordinator queries."
   [_ctx]
-  {workflow/executor-kind {:entries {"subagent" 'ct.spools.executors.subagent/gate-stalled?}
-                           :overrides #{}}
-   :queries {:entries {"stalled-subagent-gates" stalled-gates-query
-                       "blocked-deliveries" [:and [:= :state "closed"]
-                                             [:exists [:attr "gate/delivery-blocked"]]
-                                             [:missing [:attr "gate/delivered"]]]}
-             :overrides #{}}})
+  {workflow/executor-kind {"subagent" 'ct.spools.executors.subagent/gate-stalled?}
+   :queries {"stalled-subagent-gates" stalled-gates-query
+             "blocked-deliveries" [:and [:= :state "closed"]
+                                   [:exists [:attr "gate/delivery-blocked"]]
+                                   [:missing [:attr "gate/delivered"]]]}})
 
 (defn reconcile
   "Reconcile the subagent executor's event handler and initial scan.

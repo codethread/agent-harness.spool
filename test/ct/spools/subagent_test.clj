@@ -43,6 +43,12 @@
        (filter #(= name (:name %)))
        first))
 
+(deftest finding-subagent-queries-publish-through-module-refresh
+  (with-treadle
+    (fn [rt]
+      (is (vector? (weaver/list-query rt 'stalled-subagent-gates {})))
+      (is (vector? (weaver/list-query rt 'blocked-deliveries {}))))))
+
 (defn- await-eventually
   ([pred] (await-eventually pred (test-support/await-budget-ms)))
   ([pred timeout-ms]

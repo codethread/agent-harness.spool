@@ -181,6 +181,19 @@ esac
 (defn- wire-value [value]
   (json/read-str (json/write-str value) :key-fn keyword))
 
+(deftest finding-missing-bench-dispatch-metadata-through-module-refresh
+  (with-bench
+    (fn [rt _config-dir]
+      (let [entry (weaver/resolve-op rt 'bench)]
+        (is (= {:name "bench"
+                :fn 'ct.spools.bench/bench-op
+                :stream? false
+                :deadline-class :unbounded
+                :hook-class :mutating
+                :provenance 'ct.spools.bench}
+               (select-keys entry [:name :fn :stream? :deadline-class :hook-class :provenance])))
+        (is (= "bench about" (:operation (weaver/op! rt 'bench ["about"]))))))))
+
 (deftest production-return-coverage-is-derived-from-bench-provenance
   (with-bench
     (fn [rt _]

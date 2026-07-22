@@ -13,7 +13,7 @@
             [skein.core.weaver.runtime :as weaver-runtime]))
 
 (defn activate-module!
-  "Declare and refresh one config-owned contribution module for a test runtime.
+  "Declare and publish one config-owned contribution module for a test runtime.
 
   The disposable source file keeps collection scoped to an approved target;
   `contribute` may then require the tested classpath namespace outside
@@ -26,7 +26,8 @@
                      (cond-> {:file path
                               :contribute contribute
                               :reconcile reconcile}
-                       after (assoc :after after)))))
+                       after (assoc :after after)))
+    (runtime/refresh! rt {:only #{key}})))
 
 (defn test-world [config-dir]
   (weaver-config/world config-dir

@@ -1517,12 +1517,15 @@
   so the publication kernel discovers harness, suite, and extractor kinds."
   [{:keys [runtime]}]
   (registry-handle runtime)
-  {:ops {:entries {"bench" {:doc (:doc bench-arg-spec)
-                            :arg-spec bench-arg-spec
-                            :returns bench-returns
+  {:ops {:entries {"bench" {:name "bench"
+                            :fn 'ct.spools.bench/bench-op
+                            :stream? false
                             :deadline-class :unbounded
                             :hook-class :mutating
-                            :fn 'ct.spools.bench/bench-op}}
+                            :provenance 'ct.spools.bench
+                            :doc (:doc bench-arg-spec)
+                            :arg-spec bench-arg-spec
+                            :returns bench-returns}}
          :overrides #{}}
    :queries {:entries {"bench-runs" [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]]}
              :overrides #{}}})

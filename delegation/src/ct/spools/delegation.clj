@@ -2216,17 +2216,22 @@
   vocabulary and glossary setup belong to `reconcile` after publication."
   [{:keys [runtime]}]
   (registry-handle runtime)
-  {:ops {:entries {"agent" {:doc (:doc agent-arg-spec)
+  {:ops {:entries {"agent" {:name "agent"
+                            :fn 'ct.spools.delegation/agent-op
+                            :stream? false
+                            :deadline-class :unbounded
+                            :hook-class :mutating
+                            :provenance 'ct.spools.delegation
+                            :doc (:doc agent-arg-spec)
                             :arg-spec agent-arg-spec
                             :returns agent-returns
                             :about agent-about
-                            :prime agent-prime
-                            :deadline-class :unbounded
-                            :fn 'ct.spools.delegation/agent-op}}
+                            :prime agent-prime}}
          :overrides #{}}
-   :patterns {:entries {"agent-plan" {:doc "Create a feature strand plus task/review children for agent work."
+   :patterns {:entries {"agent-plan" {:name "agent-plan"
                                       :fn 'ct.spools.delegation/agent-plan
-                                      :input-spec ::agent-plan-input}}
+                                      :input-spec ::agent-plan-input
+                                      :doc "Create a feature strand plus task/review children for agent work."}}
               :overrides #{}}
    :queries {:entries {"agent-failures" [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"]
                                          [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]]}

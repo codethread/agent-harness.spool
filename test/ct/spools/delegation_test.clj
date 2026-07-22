@@ -62,6 +62,22 @@
 (defn- wire-value [value]
   (json/read-str (json/write-str value) :key-fn keyword))
 
+(deftest finding-nil-name-help-npe-and-agent-plan-name-through-module-refresh
+  (with-agents
+    (fn [rt]
+      (let [agent (weaver/resolve-op rt 'agent)
+            plan (first (filter #(= "agent-plan" (:name %))
+                                (patterns/patterns rt)))]
+        (is (= {:name "agent"
+                :fn 'ct.spools.delegation/agent-op
+                :stream? false
+                :deadline-class :unbounded
+                :hook-class :mutating
+                :provenance 'ct.spools.delegation}
+               (select-keys agent [:name :fn :stream? :deadline-class :hook-class :provenance])))
+        (is (= "agent-plan" (:name plan)))
+        (is (map? (weaver/op! rt 'help ["agent"])))))))
+
 (deftest production-return-coverage-is-derived-from-delegation-provenance
   (with-agents
     (fn [rt]
