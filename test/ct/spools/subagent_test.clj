@@ -24,6 +24,10 @@
                                            :parse :raw
                                            :preamble? false
                                            :doc "Test harness that executes only the final prompt line."})
+      (test-support/activate-module! rt :workflow 'skein.spools.workflow
+                                     'skein.spools.workflow/contribute
+                                     'skein.spools.workflow/reconcile
+                                     :after [:agent-run])
       (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
                                      'ct.spools.executors.subagent/contribute
                                      'ct.spools.executors.subagent/reconcile)
@@ -33,10 +37,14 @@
   (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
                                  'ct.spools.agent-run/contribute
                                  'ct.spools.agent-run/reconcile)
+  (test-support/activate-module! rt :workflow 'skein.spools.workflow
+                                 'skein.spools.workflow/contribute
+                                 'skein.spools.workflow/reconcile
+                                 :after [:agent-run])
   (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
                                  'ct.spools.executors.subagent/contribute
                                  'ct.spools.executors.subagent/reconcile
-                                 :after [:agent-run]))
+                                 :after [:agent-run :workflow]))
 
 (defn- attr-namespace-declaration [rt name]
   (->> (vocab/declarations rt {:kind :attr-namespace})
@@ -44,10 +52,32 @@
        first))
 
 (deftest finding-subagent-queries-publish-through-module-refresh
-  (with-treadle
-    (fn [rt]
-      (is (vector? (weaver/list-query rt 'stalled-subagent-gates {})))
-      (is (vector? (weaver/list-query rt 'blocked-deliveries {}))))))
+  (with-runtime
+    (fn [rt _]
+      (shuttle/install!)
+      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
+                                     'ct.spools.agent-run/contribute
+                                     'ct.spools.agent-run/reconcile)
+      (let [without-workflow
+            (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
+                                           'ct.spools.executors.subagent/contribute
+                                           'ct.spools.executors.subagent/reconcile
+                                           :after [:agent-run])]
+        (is (= :partial (:status without-workflow)))
+        (is (= [:skein.spools.workflow/executor]
+               (get-in without-workflow [:modules :subagent :error :data :kinds]))))
+      (test-support/activate-module! rt :workflow 'skein.spools.workflow
+                                     'skein.spools.workflow/contribute
+                                     'skein.spools.workflow/reconcile
+                                     :after [:agent-run])
+      (let [with-workflow
+            (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
+                                           'ct.spools.executors.subagent/contribute
+                                           'ct.spools.executors.subagent/reconcile
+                                           :after [:agent-run :workflow])]
+        (is (not= :partial (:status with-workflow)))
+        (is (vector? (weaver/list-query rt 'stalled-subagent-gates {})))
+        (is (vector? (weaver/list-query rt 'blocked-deliveries {})))))))
 
 (defn- await-eventually
   ([pred] (await-eventually pred (test-support/await-budget-ms)))
