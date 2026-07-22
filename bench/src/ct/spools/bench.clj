@@ -1371,24 +1371,34 @@
    :doc "Deterministic containerized benchmarking of coding-agent harnesses. Run `strand bench about` for the manual."
    :subcommands
    {"run" {:doc "Pour and start a bench run for a registered suite."
+           :hook-class :mutating :deadline-class :standard
            :flags {:entries {:doc "Comma-separated subset of entry slugs to run."}
                    :for {:doc "Parent strand id to root the run beneath."}}
            :positionals [{:name :suite :required? true :doc "Registered suite name."}]}
     "list" {:doc "List bench run roots with per-run entry phase counts."
+            :hook-class :read :deadline-class :standard
             :flags {:suite {:doc "Only runs of this suite."}}}
     "status" {:doc "Entries with phase and headline metrics, judge run state, and blocking failures."
+              :hook-class :read :deadline-class :standard
               :positionals [{:name :run-id :required? true :doc "Bench run root id."}]}
     "report" {:doc "Full comparison document: per-entry metrics, extraction warnings, judge verdict and notes, artifact paths."
+              :hook-class :read :deadline-class :standard
               :positionals [{:name :run-id :required? true :doc "Bench run root id."}]}
     "retry" {:doc "Rerun one failed entry on a fresh workspace."
+             :hook-class :mutating :deadline-class :standard
              :positionals [{:name :entry-id :required? true :doc "Failed entry strand id."}]}
     "abort" {:doc "Kill live containers, fail outstanding entries, and supersede the judge."
+             :hook-class :mutating :deadline-class :standard
              :positionals [{:name :run-id :required? true :doc "Bench run root id."}]}
-    "suites" {:doc "List registered benchmark suites."}
-    "harnesses" {:doc "List registered bench harness definitions (container definitions; not agent-run harnesses)."}
+    "suites" {:doc "List registered benchmark suites."
+              :hook-class :read :deadline-class :standard}
+    "harnesses" {:doc "List registered bench harness definitions (container definitions; not agent-run harnesses)."
+                 :hook-class :read :deadline-class :standard}
     "gc" {:doc "Delete bench artifact directories (strand-side metrics and verdicts survive)."
+          :hook-class :mutating :deadline-class :standard
           :flags {:run {:doc "Only this run's artifact directory."}}}
-    "about" {:doc "Return the authored bench manual."}}})
+    "about" {:doc "Return the authored bench manual."
+             :hook-class :read :deadline-class :standard}}})
 
 (def ^:private bench-returns
   {:subcommands
@@ -1433,7 +1443,7 @@
   `strand bench` or an unknown verb fails during parser routing (the declared
   `:subcommands` machinery), never here."
   [{:op/keys [args runtime]}]
-  (case (:subcommand args)
+  (case (first (:subcommand args))
     "run" (run! runtime (:suite args)
                 (cond-> {}
                   (:entries args) (assoc :entries (split-csv (:entries args)))
@@ -1520,8 +1530,6 @@
   {:ops {:entries {"bench" {:name "bench"
                             :fn 'ct.spools.bench/bench-op
                             :stream? false
-                            :deadline-class :unbounded
-                            :hook-class :mutating
                             :provenance 'ct.spools.bench
                             :doc (:doc bench-arg-spec)
                             :arg-spec bench-arg-spec

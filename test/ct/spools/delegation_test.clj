@@ -70,10 +70,11 @@
         (is (= {:name "agent"
                 :fn 'ct.spools.delegation/agent-op
                 :stream? false
-                :deadline-class :unbounded
-                :hook-class :mutating
                 :provenance 'ct.spools.delegation}
-               (select-keys agent [:name :fn :stream? :deadline-class :hook-class :provenance])))
+               (select-keys agent [:name :fn :stream? :provenance])))
+        (is (= [:read :unbounded]
+               (mapv #(get-in agent [:arg-spec :subcommands "await" %])
+                     [:hook-class :deadline-class])))
         (is (= "agent-plan" (:name plan)))
         (is (map? (weaver/op! rt 'help ["agent"])))))))
 
@@ -84,7 +85,7 @@
             missing (mapv :name (filter #(not (contains? % :returns)) entries))
             required (into #{} (mapcat (fn [{:keys [name returns]}]
                                          (for [subcommand (keys (:subcommands returns))]
-                                           [name {:subcommand subcommand}]))) entries)
+                                           [name {:subcommand [subcommand]}]))) entries)
             run {:id "run-1" :title "run" :state "active" :phase "pending" :harness "sh"}
             representatives
             {"spawn" (assoc run :operation "agent spawn")
@@ -108,9 +109,9 @@
              "council" {:operation "agent council" :blackboard "board-1" :turns [["run-1"]]}}
             checked (into #{}
                           (map (fn [[subcommand value]]
-                                 (t/check-op-return! rt 'agent {:subcommand subcommand}
+                                 (t/check-op-return! rt 'agent {:subcommand [subcommand]}
                                                      (wire-value value))
-                                 ["agent" {:subcommand subcommand}]))
+                                 ["agent" {:subcommand [subcommand]}]))
                           representatives)]
         (is (= [] missing))
         (is (= #{} (set/difference required checked)))))))

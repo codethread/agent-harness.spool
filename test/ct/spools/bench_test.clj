@@ -187,10 +187,11 @@ esac
         (is (= {:name "bench"
                 :fn 'ct.spools.bench/bench-op
                 :stream? false
-                :deadline-class :unbounded
-                :hook-class :mutating
                 :provenance 'ct.spools.bench}
-               (select-keys entry [:name :fn :stream? :deadline-class :hook-class :provenance])))
+               (select-keys entry [:name :fn :stream? :provenance])))
+        (is (= [:mutating :standard]
+               (mapv #(get-in entry [:arg-spec :subcommands "run" %])
+                     [:hook-class :deadline-class])))
         (is (= "bench about" (:operation (weaver/op! rt 'bench ["about"]))))))))
 
 (deftest production-return-coverage-is-derived-from-bench-provenance
@@ -200,7 +201,7 @@ esac
             missing (mapv :name (filter #(not (contains? % :returns)) entries))
             required (into #{} (mapcat (fn [{:keys [name returns]}]
                                          (for [subcommand (keys (:subcommands returns))]
-                                           [name {:subcommand subcommand}]))) entries)
+                                           [name {:subcommand [subcommand]}]))) entries)
             representatives
             {"run" {:operation "bench run" :run "bench-1" :entries {"cell" "entry-1"} :judge nil}
              "list" [{:run "bench-1" :suite "demo" :sha "abc" :state "active"
@@ -218,9 +219,9 @@ esac
              "about" (assoc (bench/about) :operation "bench about")}
             checked (into #{}
                           (map (fn [[subcommand value]]
-                                 (t/check-op-return! rt 'bench {:subcommand subcommand}
+                                 (t/check-op-return! rt 'bench {:subcommand [subcommand]}
                                                      (wire-value value))
-                                 ["bench" {:subcommand subcommand}]))
+                                 ["bench" {:subcommand [subcommand]}]))
                           representatives)]
         (is (= [] missing))
         (is (= #{} (set/difference required checked)))))))

@@ -1869,6 +1869,7 @@
                  :notes ["`strand about agent` is the family narrative; `strand prime agent` is the run-first discipline to load before delegating."]}
    :subcommands
    {"spawn" {:doc "Spawn a raw agent run."
+             :hook-class :mutating :deadline-class :standard
              :flags {:harness {:required? true :doc "Harness or alias name."}
                      :prompt {:required? true :doc "Prompt text for the run."}
                      :title {:doc "Run strand title."}
@@ -1884,11 +1885,13 @@
                            :notes ["A --for helper never gates that strand's later delegation; delegate owns serving a task's own work. --reap manual leaves the interactive session for the human to reap after it completes."]
                            :failure-modes ["delegation/interactive-flags-misused" "delegation/backend-unresolved"]}}
     "ps" {:doc "List agent run summaries."
+          :hook-class :read :deadline-class :standard
           :flags {:active {:type :boolean :doc "Only active run strands."}
                   :for {:doc "Runs serving this strand plus its structural (parent-of) helpers."}}
           :annotations {:use-when ["Listing run summaries and checking interactive liveness."]
                         :notes ["Listing doubles as a liveness check: a dead interactive session is failed here, and its summary carries the attach command to hand the human."]}}
     "spend" {:doc "Aggregate recorded agent-run spend into JSON totals, groups, and per-run rows."
+             :hook-class :read :deadline-class :standard
              :flags {:harness {:doc "Restrict to one harness or alias name."}
                      :since {:doc "Lower ISO-instant bound on a run's started-at (inclusive)."}
                      :until {:doc "Upper ISO-instant bound on a run's started-at (inclusive)."}
@@ -1897,30 +1900,36 @@
                            :notes ["Every sum skips nulls, so a run that recorded no figure for a dimension never inflates a total to zero."]
                            :failure-modes ["delegation/spend-filter-invalid"]}}
     "await" {:doc "Wait for run ids, or non-terminal runs under a root, to finish."
+             :hook-class :read :deadline-class :unbounded
              :flags {:timeout-secs {:type :int :doc "Maximum seconds to wait."}
                      :under {:doc "Root strand whose descendant runs should be awaited."}}
              :positionals [{:name :ids :variadic? true :doc "Run ids to await."}]
              :annotations {:use-when ["Blocking until named runs, or every non-terminal run under a plan/task root, reach a terminal phase."]
                            :notes ["Run ids and --under are mutually exclusive. A finished helper's findings are in its result; logs are usually only for failure forensics."]}}
     "logs" {:doc "Return captured logs for a run."
+            :hook-class :read :deadline-class :standard
             :flags {:tail {:type :int :doc "Tail this many lines."}}
             :positionals [{:name :run-id :required? true :doc "Run id."}]
             :annotations {:use-when ["Reading a run's captured stdout/stderr — or a running interactive session's live transcript — for debugging and failure forensics."]
                           :notes ["For a running interactive run, logs captures the session transcript fresh without attaching; err is omitted for interactive runs."]
                           :failure-modes ["delegation/run-not-found" "delegation/logs-unavailable"]}}
     "kill" {:doc "Kill a running run process or interactive session."
+            :hook-class :mutating :deadline-class :standard
             :positionals [{:name :run-id :required? true :doc "Run id."}]
             :annotations {:use-when ["Stopping a running run's live process or interactive session and marking it failed."]
                           :notes ["For an already-failed run, use retry instead of kill."]
                           :failure-modes ["delegation/run-not-found" "delegation/run-not-killable"]}}
     "harnesses" {:doc "List configured harnesses and aliases."
+                 :hook-class :read :deadline-class :standard
                  :flags {:full {:type :boolean
                                 :doc "Include argv and resolved root-harness details (the terse default lists name, kind, alias-of, and doc)."}}
                  :annotations {:use-when ["Discovering which harnesses and model-seat aliases the runtime exposes before choosing who does the work."]
                                :notes ["A harness picks who does the work; validation stays in task attributes and proves the work independently."]}}
     "backends" {:doc "List configured interactive backends."
+                :hook-class :read :deadline-class :standard
                 :annotations {:use-when ["Listing the interactive session backends trusted config registered, before delegating a hitl task."]}}
     "delegate" {:doc "Delegate one task or every ready task below a plan."
+                :hook-class :mutating :deadline-class :standard
                 :flags {:ready {:doc "Plan/root id for fan-out delegation."}
                         :harness {:doc "Harness override for single-task delegation."}
                         :cwd {:doc "Working directory override."}
@@ -1939,6 +1948,7 @@
                                               "delegation/harness-unresolved" "delegation/hitl-needs-interactive"
                                               "delegation/backend-unresolved" "delegation/interactive-flags-misused"]}}
     "retry" {:doc "Supersede and retry a failed/exhausted task or run."
+             :hook-class :mutating :deadline-class :standard
              :flags {:fresh {:type :boolean :doc "Start cold instead of resuming a previous session."}
                      :harness {:doc "Harness override."}
                      :cwd {:doc "Working directory override."}
@@ -1949,10 +1959,12 @@
                            :failure-modes ["delegation/task-not-found" "delegation/nothing-to-retry"
                                            "delegation/ambiguous-retry-target" "delegation/resume-needs-fresh"]}}
     "status" {:doc "Return the coordinator dashboard."
+              :hook-class :read :deadline-class :standard
               :positionals [{:name :root-id :doc "Optional plan or task root id."}]
               :annotations {:use-when ["Reading the coordinator dashboard for a plan or task, or workspace-wide active delegation when given no root."]
                             :notes ["Tree renders active tasks and their runs; ready matches delegate --ready's selection; awaiting_verification lists active tasks a worker marked implemented."]}}
     "note" {:doc "Append a note to a strand; its note/text/note/at content is write-once."
+            :hook-class :mutating :deadline-class :standard
             :flags {:by {:doc "Author run id."}
                     :round {:type :int :doc "Council round."}
                     :attr {:repeat? true :doc "Decorating attr key=value on the note strand; repeatable."}}
@@ -1961,10 +1973,12 @@
             :annotations {:use-when ["Appending a durable, write-once note to any strand's memory — findings, handovers, or progress."]
                           :notes ["Notes are append-only: a note-content rewrite throws, and burn is the only escape hatch. Workers may note any strand, including parents, without violating their contract. --round is for councils."]}}
     "notes" {:doc "Read a strand's notes."
+             :hook-class :read :deadline-class :standard
              :flags {:round {:type :int :doc "Council round filter."}}
              :positionals [{:name :strand-id :required? true :doc "Target strand id."}]
              :annotations {:use-when ["Reading a strand's notes in write-once order from every writer, optionally filtered to one council round."]}}
     "review" {:doc "Spawn independent reviewers for a target strand."
+              :hook-class :mutating :deadline-class :standard
               :flags {:seats {:type :int :doc "Number of ad hoc reviewer seats."}
                       :harness {:doc "Comma-separated harness list."}
                       :synthesize {:type :boolean :doc "Also spawn synthesis run."}
@@ -1982,9 +1996,11 @@
                             :failure-modes ["delegation/review-target-invalid" "delegation/harness-unresolved"
                                             "delegation/roster-unknown" "delegation/review-surface-invalid"]}}
     "rosters" {:doc "List configured reviewer rosters."
+               :hook-class :read :deadline-class :standard
                :annotations {:use-when ["Listing the named reviewer rosters trusted config registered before fanning one out with review --roster."]
                              :notes ["A roster is the panel primitive's seat vector; ct.spools.delegation/roster-review-specs returns the same fan-out from trusted Clojure."]}}
     "council" {:doc "Convene a fresh-blackboard deliberation panel."
+               :hook-class :mutating :deadline-class :standard
                :flags {:topic {:required? true :doc "Council topic."}
                        :seats {:type :int :doc "Number of seats."}
                        :rounds {:type :int :doc "Number of rounds."}
@@ -2097,10 +2113,10 @@
                        positional-keys))))
 
 (defn agent-op
-  "Dispatch parsed `strand agent` subcommands."
+  "Dispatch parsed `strand agent` subcommands using the first path segment."
   [{:op/keys [args argv]}]
   (let [args (or args (cli/parse agent-arg-spec argv))]
-    (case (:subcommand args)
+    (case (first (:subcommand args))
       "spawn" (op-spawn (parsed->legacy-argv args []))
       "ps" (agent-run/runs (cond-> {:active (boolean (:active args))}
                              (:for args) (assoc :for (:for args))))
@@ -2219,8 +2235,6 @@
   {:ops {:entries {"agent" {:name "agent"
                             :fn 'ct.spools.delegation/agent-op
                             :stream? false
-                            :deadline-class :unbounded
-                            :hook-class :mutating
                             :provenance 'ct.spools.delegation
                             :doc (:doc agent-arg-spec)
                             :arg-spec agent-arg-spec
