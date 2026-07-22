@@ -61,13 +61,13 @@ Move work onto this surface whenever the result should be **durable, awaitable b
          '[skein.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
-(runtime/sync! runtime)
-(runtime/use! runtime :agent-run
+(runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
    :spools ['ct.spools/agent-run]
-   :call 'ct.spools.agent-run/install!
+   :contribute 'ct.spools.agent-run/contribute
+   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
-(runtime/use! runtime :delegation
+(runtime/module! runtime :delegation
   {:ns 'ct.spools.delegation
    :spools ['ct.spools/delegation]
    :contribute 'ct.spools.delegation/contribute

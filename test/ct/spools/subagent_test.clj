@@ -15,7 +15,6 @@
 (defn- with-treadle [f]
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
                                      'ct.spools.agent-run/contribute
                                      'ct.spools.agent-run/reconcile)
@@ -54,7 +53,6 @@
 (deftest finding-subagent-queries-publish-through-module-refresh
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
                                      'ct.spools.agent-run/contribute
                                      'ct.spools.agent-run/reconcile)
@@ -197,7 +195,6 @@
 (deftest invalid-success-result-stamps-delivery-error-and-leaves-gate-incomplete
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (workflow/start! "invalid-result"
                        (workflow/workflow
                         "Invalid result"
@@ -228,7 +225,6 @@
 (deftest generic-gate-default-remains-run-done
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (workflow/start! "default-policy"
                        (workflow/workflow
                         "Default policy"
@@ -253,7 +249,6 @@
 (deftest task-gate-emits-strict-policy-and-blocks-completed-red-run
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (workflow/start! "strict-policy"
                        (workflow-with-task-gate {"status" "blocked"})
                        {})
@@ -289,7 +284,6 @@
 (deftest unknown-completion-policy-fails-loudly-and-recovers
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (workflow/start! "unknown-policy"
                        (workflow/workflow
                         "Unknown policy"
@@ -329,7 +323,6 @@
   ;; v1 consumer cleared with a blank.
   (with-runtime
     (fn [rt _]
-      (shuttle/install!)
       (activate-treadle! rt)
       (let [gate-id (:id (weaver/add! rt {:title "Errored gate"
                                           :state "active"

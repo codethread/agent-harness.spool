@@ -151,7 +151,6 @@ esac
   (test-support/with-runtime
     {:publish? true :prefix "skein-bench-judge"}
     (fn [rt config-dir]
-      (shuttle/install!)
       (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
                                      'ct.spools.agent-run/contribute
                                      'ct.spools.agent-run/reconcile)

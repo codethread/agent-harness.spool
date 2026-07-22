@@ -29,7 +29,6 @@
   (test-support/with-runtime
     {:nest-skein? true :prefix "skein-agents-config"}
     (fn [rt _config-dir]
-      (shuttle/install!)
       (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
                                      'ct.spools.agent-run/contribute
                                      'ct.spools.agent-run/reconcile)

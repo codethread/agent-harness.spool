@@ -29,7 +29,9 @@
   (test-support/with-runtime
     {:publish? true :prefix "skein-shuttle-config"}
     (fn [rt _config-dir]
-      (shuttle/install!)
+      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
+                                     'ct.spools.agent-run/contribute
+                                     'ct.spools.agent-run/reconcile)
       (f rt))))
 
 (defn- attr-namespace-declaration [rt name]
@@ -68,8 +70,10 @@
           (doseq [k ["agent-run/cost-usd" "agent-run/tokens-total"
                      "agent-run/tokens" "agent-run/usage-source"]]
             (is (contains? keys k) (str k " is listed in the agent-run vocab"))))
-        (testing "re-installing is idempotent for the same owner (survives reload!)"
-          (shuttle/install!)
+        (testing "refreshing the same owner is idempotent"
+          (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
+                                         'ct.spools.agent-run/contribute
+                                         'ct.spools.agent-run/reconcile)
           (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
 
 (deftest harness-registry-validates-and-resolves-aliases

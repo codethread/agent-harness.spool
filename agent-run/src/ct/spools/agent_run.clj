@@ -9,7 +9,8 @@
   default; `await` is the opt-in blocking convenience.
 
   Runs survive weaver crashes because the strands are durable: `reconcile!`
-  respawns still-active running strands on install, bounded by
+  respawns still-active running strands during applied module reconciliation,
+  bounded by
   `agent-run/max-attempts`. Run memory is note strands linked by the declared
   `notes` relation — the edge is the sole linkage — whose `note/text`/`note/at`
   content is storage-enforced write-once.
@@ -2821,7 +2822,7 @@
   (or @(default-review-contract) generic-review-contract))
 
 ;; ---------------------------------------------------------------------------
-;; Install
+;; Module reconciliation
 
 (def ^:private engine-event-types
   #{:strand/added :strand/updated :batch/applied
@@ -2869,28 +2870,3 @@
           (state)
           {:reconciled :applied
            :recovered (reconcile!)}))))
-
-(defn install!
-  "Install the agent-run engine into the active weaver: default harnesses, the graph
-  event listener, crash reconciliation, and a first scan, and declare the
-  `agent-run/*` attribute-namespace vocabulary this spool owns.
-
-  The declaration includes the usage attributes written when parsed runs finish:
-  `agent-run/cost-usd`, `agent-run/tokens-total`, `agent-run/tokens`, and
-  `agent-run/usage-source`. Pi JSON folds per-message usage deltas; Claude JSON
-  reads the final result object's usage fields; raw output records no cost or
-  token attributes. It also includes `agent-run/fresh-prompt`, which a
-  higher-level spool carries onto a run so `agent retry --fresh` has a
-  full-brief prompt to cold-start from."
-  []
-  (let [runtime (rt)]
-    (register-default-harnesses!)
-    (register-default-backends!)
-    (declare-agent-run-vocab! runtime)
-    (register-engine-handler! runtime)
-    (let [recovered (reconcile!)]
-      {:installed true
-       :namespace 'ct.spools.agent-run
-       :harnesses (mapv :name (harnesses))
-       :backends (mapv :name (backends))
-       :recovered recovered})))

@@ -25,13 +25,13 @@ Load agent-run first, then the subagent executor from the same approved local-ro
          '[skein.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
-(runtime/sync! runtime)
-(runtime/use! runtime :agent-run
+(runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
    :spools ['ct.spools/agent-run]
-   :call 'ct.spools.agent-run/install!
+   :contribute 'ct.spools.agent-run/contribute
+   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
-(runtime/use! runtime :subagent
+(runtime/module! runtime :subagent
   {:ns 'ct.spools.executors.subagent
    :spools ['ct.spools/agent-run]
    :contribute 'ct.spools.executors.subagent/contribute

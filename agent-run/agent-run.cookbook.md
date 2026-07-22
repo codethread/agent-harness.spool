@@ -290,7 +290,7 @@ Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-def
 
 **Situation.** The weaver holding your in-flight runs dies. You want headless work to resume where it can and stop loudly where it can't, and you want a live human session to *not* be silently restarted underneath the person in it.
 
-**Composition.** Nothing to wire — `reconcile!` runs on `install!` because runs are durable strands. The two execution modes recover differently, and the shape you choose at spawn time (`:max-attempts` for headless, `:parent` for an interactive claim) is what governs recovery.
+**Composition.** Nothing to wire — `reconcile!` runs during applied module reconciliation because runs are durable strands. The two execution modes recover differently, and the shape you choose at spawn time (`:max-attempts` for headless, `:parent` for an interactive claim) is what governs recovery.
 
 ```clojure
 (require '[ct.spools.agent-run :as agent-run])

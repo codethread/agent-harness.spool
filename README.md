@@ -104,20 +104,21 @@ trusted `init.clj`:
          '[skein.api.runtime.alpha :as runtime])
 
 (def rt (current/runtime))
-(runtime/sync! rt)
-
-(runtime/use! rt :workflow
+(runtime/module! rt :workflow
   {:ns 'skein.spools.workflow
    :spools '[skein.spools/workflow]
+   :contribute 'skein.spools.workflow/contribute
+   :reconcile 'skein.spools.workflow/reconcile
    :required? true})
 
-(runtime/use! rt :agent-run
+(runtime/module! rt :agent-run
   {:ns 'ct.spools.agent-run
    :spools '[ct.spools/agent-run]
-   :call 'ct.spools.agent-run/install!
+   :contribute 'ct.spools.agent-run/contribute
+   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
 
-(runtime/use! rt :delegation
+(runtime/module! rt :delegation
   {:ns 'ct.spools.delegation
    :spools '[ct.spools/delegation ct.spools/agent-run]
    :contribute 'ct.spools.delegation/contribute
@@ -125,7 +126,7 @@ trusted `init.clj`:
    :after [:agent-run]
    :required? true})
 
-(runtime/use! rt :subagent
+(runtime/module! rt :subagent
   {:ns 'ct.spools.executors.subagent
    :spools '[ct.spools/agent-run skein.spools/workflow]
    :contribute 'ct.spools.executors.subagent/contribute
@@ -133,7 +134,7 @@ trusted `init.clj`:
    :after [:workflow :agent-run]
    :required? true})
 
-(runtime/use! rt :bench
+(runtime/module! rt :bench
   {:ns 'ct.spools.bench
    :spools '[ct.spools/bench ct.spools/agent-run]
    :contribute 'ct.spools.bench/contribute
