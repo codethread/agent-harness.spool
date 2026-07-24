@@ -6,10 +6,15 @@
   full readiness-driven spawn engine, result capture, notes, and reconciliation."
   (:require [clojure.java.io :as io]
             [clojure.java.shell]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [next.jdbc :as jdbc]
+            [ct.spools.bench :as bench]
+            [ct.spools.delegation :as delegation]
             [ct.spools.agent-run :as shuttle]
+            [ct.spools.executors.subagent :as subagent]
+            [skein.api.spool.alpha :as spool]
             [skein.test.alpha :as test-alpha]
             [skein.api.graph.alpha :as graph]
             [skein.api.notes.alpha :as notes]
@@ -17,6 +22,20 @@
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
+
+(deftest exported-spool-vars-have-the-exact-convention-shape
+  (doseq [[label actual expected]
+          [["agent-run" shuttle/spool
+            {:contribute 'contribute :reconcile 'reconcile}]
+           ["subagent" subagent/spool
+            {:contribute 'contribute :reconcile 'reconcile}]
+           ["delegation" delegation/spool
+            {:contribute 'contribute :reconcile 'reconcile}]
+           ["bench" bench/spool
+            {:contribute 'contribute :reconcile 'reconcile}]]]
+    (testing label
+      (is (= expected actual))
+      (is (s/valid? ::spool/spool actual)))))
 
 (defn- with-shuttle
   "Run f with a fresh weaver runtime that has the agent-run engine installed.
@@ -29,9 +48,7 @@
   (test-support/with-runtime
     {:publish? true :prefix "skein-shuttle-config"}
     (fn [rt _config-dir]
-      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                     'ct.spools.agent-run/contribute
-                                     'ct.spools.agent-run/reconcile)
+      (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (f rt))))
 
 (defn- attr-namespace-declaration [rt name]
@@ -53,9 +70,7 @@
 (defn- activate-delegation!
   "Activate the delegation module on `rt` so its `agent` op is registered."
   [rt]
-  (test-support/activate-module! rt :delegation 'ct.spools.delegation
-                                 'ct.spools.delegation/contribute
-                                 'ct.spools.delegation/reconcile))
+  (test-support/activate-spool! rt :delegation 'ct.spools.delegation))
 
 (deftest activation-declares-usage-attrs-in-agent-run-vocab
   (with-shuttle
@@ -69,9 +84,7 @@
                      "agent-run/tokens" "agent-run/usage-source"]]
             (is (contains? keys k) (str k " is listed in the agent-run vocab"))))
         (testing "refreshing the same owner is idempotent"
-          (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                         'ct.spools.agent-run/contribute
-                                         'ct.spools.agent-run/reconcile)
+          (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
           (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
 
 (deftest harness-registry-validates-and-resolves-aliases

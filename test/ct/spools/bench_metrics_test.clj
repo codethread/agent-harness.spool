@@ -270,9 +270,7 @@
       (let [sentinel (fn [_ctx] {:cost-usd 9.99})]
         ;; a trusted config that registered its own :claude before activation wins.
         (bench/register-extractor! rt :claude sentinel)
-        (test-support/activate-module! rt :bench 'ct.spools.bench
-                                       'ct.spools.bench/contribute
-                                       'ct.spools.bench/reconcile)
+        (test-support/activate-spool! rt :bench 'ct.spools.bench)
         (is (= #{:claude :codex :generic :pi} (set (bench/extractors rt)))
             "all shipped extractor keys are present")
         (let [reg (registry/effective (bench/registry-handle rt) bench/extractor-kind)]

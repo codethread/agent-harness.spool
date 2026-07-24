@@ -1564,3 +1564,15 @@
          :harnesses (mapv :name (harnesses runtime))
          :suites (mapv :name (suites runtime))
          :reconciled-entries reconciled}))))
+
+(def spool
+  "Entry-point declaration for the bench spool (ADR-004 `def spool`
+  convention).
+
+  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
+  var at every module evaluation, so a consumer declares only a source target
+  and world policy (`{:ns 'ct.spools.bench :spools [...] :after [:agent-run]}`)
+  and never mirrors the pair. Unqualified symbols resolve against this
+  namespace; fn values are rejected (ADR-002.O1)."
+  {:contribute 'contribute
+   :reconcile 'reconcile})

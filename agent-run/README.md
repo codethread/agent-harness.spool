@@ -37,10 +37,15 @@ Agent-run is shipped as an approved-local-root spool example under `spools/agent
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
    :spools ['ct.spools/agent-run]
-   :contribute 'ct.spools.agent-run/contribute
-   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
 ```
+
+The declaration names a source target and world policy only. `contribute` and
+`reconcile` are declared by the spool itself in the public
+`ct.spools.agent-run/spool` var (the `def spool` convention, ADR-004), and the
+refresh coordinator resolves them from the loaded namespace at every module
+evaluation. The Skein checkout must contain or descend from
+`343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible commit.
 
 Applied reconciliation registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, deferred-recovery scheduling, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. The deferred-recovery scheduler is owned by runtime spool state and is shut down during runtime stop before storage closes. This state is registered with a declared shape **version** (`skein.api.runtime.alpha/spool-state`, SPEC-004.C95): spool state survives `reload!`, so after a deploy that adds a new state key a reload deliberately reinits through a migrate hook that carries the durable registries and in-flight tracking over onto fresh executors, rather than silently reusing a preserved map missing the new executor keys (which previously turned scan!'s launch into `(.execute nil ..)` and parked every new run forever). The executor and scheduler accessors fail loudly when their spool-state entry is missing rather than parking runs on a nil executor (TEN-003). The shape is currently **v4**, which added the `:fanout-ceiling` cap the `claim!` window consults: a preserved v3 map lacks the key, so a post-upgrade reload reinits through the migrate hook and lets the default seed it rather than reusing a ceiling-less map. It does **not** register any CLI operations. Load the [delegation spool](../delegation/README.md) after agent-run for the `strand agent` surface, and the companion [subagent executor](../executors/subagent.md) to fulfill workflow `:subagent` gates with agent-run runs.
 

@@ -2870,3 +2870,15 @@
           (state)
           {:reconciled :applied
            :recovered (reconcile!)}))))
+
+(def spool
+  "Entry-point declaration for the agent-run spool (ADR-004 `def spool`
+  convention).
+
+  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
+  var at every module evaluation, so a consumer declares only a source target
+  and world policy (`{:ns 'ct.spools.agent-run :spools [...]}`) and never
+  mirrors the pair. Unqualified symbols resolve against this namespace; fn
+  values are rejected (ADR-002.O1)."
+  {:contribute 'contribute
+   :reconcile 'reconcile})

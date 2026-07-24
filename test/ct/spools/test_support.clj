@@ -12,22 +12,25 @@
             [skein.core.weaver.config :as weaver-config]
             [skein.core.weaver.runtime :as weaver-runtime]))
 
-(defn activate-module!
-  "Declare and publish one config-owned contribution module for a test runtime.
+(defn activate-spool!
+  "Declare and publish one spool module for a test runtime from the JVM image.
 
-  The disposable source file keeps collection scoped to an approved target;
-  `contribute` may then require the tested classpath namespace outside
-  collection, as shared-spool module publication requires."
-  [rt key _ns-sym contribute reconcile & {:keys [after]}]
-  (let [path (str "test-module-" (name key) ".clj")
-        file (io/file (get-in rt [:metadata :config-dir]) path)]
-    (spit file (str "(ns ct.spools.test-support." (name key) ")\n"))
-    (runtime/module! rt key
-                     (cond-> {:file path
-                              :contribute contribute
-                              :reconcile reconcile}
-                       after (assoc :after after)))
-    (runtime/refresh! rt {:only #{key}})))
+  `ns-sym` is the spool's namespace symbol. The helper requires it and declares
+  an image module `{:ns ns-sym :load :image}`, so the coordinator resolves the
+  entry points from that namespace's public `spool` var (ADR-004) and the
+  fixture mirrors no entry-point pair. An optional `:after` edge is added
+  before the module is refreshed on its own. A failed refresh throws with the
+  module result; applied, unchanged, and partial results are returned unchanged."
+  [rt key ns-sym & {:keys [after]}]
+  (require ns-sym)
+  (runtime/module! rt key
+                   (cond-> {:ns ns-sym :load :image}
+                     after (assoc :after after)))
+  (let [result (runtime/refresh! rt {:only #{key}})]
+    (when (= :failed (:status result))
+      (throw (ex-info "Spool activation failed"
+                      {:module key :namespace ns-sym :refresh result})))
+    result))
 
 (defn test-world [config-dir]
   (weaver-config/world config-dir

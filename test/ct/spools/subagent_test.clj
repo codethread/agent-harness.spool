@@ -15,35 +15,23 @@
 (defn- with-treadle [f]
   (with-runtime
     (fn [rt _]
-      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                     'ct.spools.agent-run/contribute
-                                     'ct.spools.agent-run/reconcile)
+      (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (shuttle/register-harness! :sh-tail {:argv ["sh" "-c" "tail -n 1 | sh"]
                                            :prompt-via :stdin
                                            :parse :raw
                                            :preamble? false
                                            :doc "Test harness that executes only the final prompt line."})
-      (test-support/activate-module! rt :workflow 'skein.spools.workflow
-                                     'skein.spools.workflow/contribute
-                                     'skein.spools.workflow/reconcile
-                                     :after [:agent-run])
-      (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
-                                     'ct.spools.executors.subagent/contribute
-                                     'ct.spools.executors.subagent/reconcile)
+      (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+                                    :after [:agent-run])
+      (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent)
       (f rt))))
 
 (defn- activate-treadle! [rt]
-  (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                 'ct.spools.agent-run/contribute
-                                 'ct.spools.agent-run/reconcile)
-  (test-support/activate-module! rt :workflow 'skein.spools.workflow
-                                 'skein.spools.workflow/contribute
-                                 'skein.spools.workflow/reconcile
-                                 :after [:agent-run])
-  (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
-                                 'ct.spools.executors.subagent/contribute
-                                 'ct.spools.executors.subagent/reconcile
-                                 :after [:agent-run :workflow]))
+  (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
+  (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+                                :after [:agent-run])
+  (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
+                                :after [:agent-run :workflow]))
 
 (defn- attr-namespace-declaration [rt name]
   (->> (vocab/declarations rt {:kind :attr-namespace})
@@ -53,26 +41,18 @@
 (deftest finding-subagent-queries-publish-through-module-refresh
   (with-runtime
     (fn [rt _]
-      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                     'ct.spools.agent-run/contribute
-                                     'ct.spools.agent-run/reconcile)
+      (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (let [without-workflow
-            (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
-                                           'ct.spools.executors.subagent/contribute
-                                           'ct.spools.executors.subagent/reconcile
-                                           :after [:agent-run])]
+            (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
+                                          :after [:agent-run])]
         (is (= :partial (:status without-workflow)))
         (is (= [:skein.spools.workflow/executor]
                (get-in without-workflow [:modules :subagent :error :data :kinds]))))
-      (test-support/activate-module! rt :workflow 'skein.spools.workflow
-                                     'skein.spools.workflow/contribute
-                                     'skein.spools.workflow/reconcile
-                                     :after [:agent-run])
+      (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+                                    :after [:agent-run])
       (let [with-workflow
-            (test-support/activate-module! rt :subagent 'ct.spools.executors.subagent
-                                           'ct.spools.executors.subagent/contribute
-                                           'ct.spools.executors.subagent/reconcile
-                                           :after [:agent-run :workflow])]
+            (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
+                                          :after [:agent-run :workflow])]
         (is (not= :partial (:status with-workflow)))
         (is (vector? (weaver/list-query rt 'stalled-subagent-gates {})))
         (is (vector? (weaver/list-query rt 'blocked-deliveries {})))))))
@@ -87,9 +67,7 @@
 (defn- install-agent-failures-query!
   "Activate the delegation module, whose contribution owns `agent-failures`."
   [rt]
-  (test-support/activate-module! rt :delegation 'ct.spools.delegation
-                                 'ct.spools.delegation/contribute
-                                 'ct.spools.delegation/reconcile))
+  (test-support/activate-spool! rt :delegation 'ct.spools.delegation))
 
 (defn- attr [strand k]
   (get-in strand [:attributes k]))

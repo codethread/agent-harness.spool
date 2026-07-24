@@ -18,26 +18,34 @@ concepts. The subagent executor is the small bridge that knows both vocabularies
 
 ## Loading
 
-Load agent-run first, then the subagent executor from the same approved local-root spool:
+Load workflow and agent-run before the subagent executor, approving workflow's
+source coordinate as well as the agent-run root:
 
 ```clojure
 (require '[skein.api.current.alpha :as current]
          '[skein.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
+(runtime/module! runtime :workflow
+  {:ns 'skein.spools.workflow
+   :spools ['skein.spools/workflow]
+   :required? true})
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
    :spools ['ct.spools/agent-run]
-   :contribute 'ct.spools.agent-run/contribute
-   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
 (runtime/module! runtime :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools ['ct.spools/agent-run]
-   :contribute 'ct.spools.executors.subagent/contribute
-   :reconcile 'ct.spools.executors.subagent/reconcile
+   :spools ['ct.spools/agent-run skein.spools/workflow]
+   :after [:workflow :agent-run]
    :required? true})
 ```
+
+Agent-run's and the subagent executor's entry points come from each namespace's
+public `spool` var (the `def spool` convention, ADR-004), so both declarations
+name only a source target and world policy. The Skein checkout must contain or
+descend from `343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible
+commit.
 
 `reconcile` fails loudly unless `:agent-run/engine` is already installed.
 

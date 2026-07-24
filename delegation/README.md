@@ -64,17 +64,20 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
    :spools ['ct.spools/agent-run]
-   :contribute 'ct.spools.agent-run/contribute
-   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
 (runtime/module! runtime :delegation
   {:ns 'ct.spools.delegation
    :spools ['ct.spools/delegation]
-   :contribute 'ct.spools.delegation/contribute
-   :reconcile 'ct.spools.delegation/reconcile
    :required? true
    :after [:agent-run]})
 ```
+
+Both declarations name a source target and world policy only. Each spool
+declares its own `contribute`/`reconcile` entry points in a public `spool` var
+(the `def spool` convention, ADR-004) that the refresh coordinator resolves
+from the loaded namespace at every module evaluation. The Skein checkout must
+contain or descend from `343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first
+compatible commit.
 
 Declarative publication registers:
 

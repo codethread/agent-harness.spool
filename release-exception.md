@@ -1,13 +1,17 @@
-# Owner-scoped live refresh release exception
+# Def-spool convention release exception
 
-This record prepares `v10`. It is not a tag or a publication instruction.
+This record prepares `v14`. It is not a tag or a publication instruction.
 
-- Previous marker: annotated `v9`; immutable peeled commit `befad44de36509cf3636242d14fc39bab35d85c2`.
-- Proposed marker: annotated `v10`.
-- Affected roots and names: `ct.spools/agent-run`, `ct.spools/delegation`, and `ct.spools/bench`; the removed public name is `ct.spools.agent-run/install!`. Consumers declare the module with `contribute` and `reconcile` instead.
-- Required Skein range: the owner-scoped live-refresh candidate from `b8be0c8` through `91bec8ac0caf1cb21bf1119d4b253d4601159ecb` (the latter is the release-preparation baseline).
-- Known consumer: this Skein repository only. Its current immutable old pin remains `v9` at the peeled commit above until human approval changes it.
-- Compatibility alarm: `bin/compat-alarm v9` is expected to fail at archived `ct.spools.agent-run-test` because it resolves the removed `shuttle/install!`. This is the approved lifecycle break. No unrelated failure is accepted.
-- Decision: no compatibility shim. Keeping the old root entry point would preserve the retired activation path and hide a required consumer migration.
+- Previous marker: annotated `v13`; immutable peeled commit `35655ca2b68559e14668b78610388e94ed652efa`.
+- Proposed marker: annotated `v14`.
+- Affected roots and names: the `ct.spools/agent-run`, `ct.spools/delegation`, and `ct.spools/bench` roots, across the four namespaces `ct.spools.agent-run`, `ct.spools.executors.subagent`, `ct.spools.delegation`, and `ct.spools.bench`. Each namespace now exports a public `spool` var holding its `contribute`/`reconcile` entry points (the `def spool` convention, ADR-004), and the published activation contract withdraws the entry-point keys a consumer used to mirror in its own `module!` call: a consumer declares a source target and world policy only. Same published root names with a changed activation contract, so this is a new release rather than accretion.
+- Missing legacy export: none of the four namespaces ever carried the ADR-003.P7 exported `module` datum, so no `module` export is deleted here and no module-named entry-point declaration remains in this repository. The absence is recorded rather than back-filled; no compatibility alias is introduced for a name that was never published.
+- First compatible Skein commit: Phase A merge `343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first commit whose refresh coordinator resolves a `spool` var. A consumer running this release on an earlier Skein gets a module with no contribution unless it declares the entry points itself.
+- The requirement is temporarily unenforced. No Skein release marker yet contains Phase A, so this release adds no `:skein/min` floor: a floor naming a marker that does not carry the convention would be false. The commit above and this record carry the requirement until a later Skein marker can express it, at which point a floor raise (not a break) can encode it.
+- Coordinated release order: tag and publish the reviewed kanban v10 candidate `14390f448cac93fb045d36bcecaf49f11f0a4de2` first, then publish this agent-harness v14 candidate. The committed workspace pin names that future marker and exact candidate SHA so the kanban declaration can use the same convention without legacy entry-point keys.
+- Authorization: pre-`v1` breaking release under TEN-000@1, authorized by the user on 2026-07-24 for the coordinated Phase B sibling cutover (devflow.spool, kanban.spool, agent-harness.spool).
+- Gate evidence: gates ran against skein-src `a110444a10680ead09f8d9a713513f577060e7d3`, verified a descendant of the Phase A merge above. `clojure -M:test` — 221 tests, 1357 assertions, 0 failures, 0 errors. `clojure -M:format` — clean. `clojure -M:lint/clj-kondo` and `clojure -M:lint/splint` — unchanged from the pre-change baseline (17 and 220 warnings respectively; neither alias is zero-exit at baseline).
+- Compatibility alarm: `bin/compat-alarm v13` runs green (220 tests, 1349 assertions, 0 failures, 0 errors). The `v13` fixtures declare explicit entry-point keys and still activate the working tree unchanged, which is the per-key precedence window working as documented. The `v13` suites resolve no removed name — this release removes nothing from the three roots and adds one var to each of four namespaces — so the alarm has nothing to catch. The break lives in the activation contract consumers author, which no producer test suite exercises.
+- Decision: no compatibility shim. A shim would have to re-publish the entry-point pair the release withdraws, keeping two live declaration sources for the one activation path.
 
-Rollback is a consumer action: retain or restore the old `v9` pin and peeled SHA. Do not move or replace the old tag.
+Rollback is a consumer action: retain or restore the `v13` pin and its peeled SHA above. Do not move or replace the old tag.

@@ -142,22 +142,16 @@ esac
    (test-support/with-runtime
      (merge {:prefix "skein-bench"} opts)
      (fn [rt config-dir]
-       (test-support/activate-module! rt :bench 'ct.spools.bench
-                                      'ct.spools.bench/contribute
-                                      'ct.spools.bench/reconcile)
+       (test-support/activate-spool! rt :bench 'ct.spools.bench)
        (f rt config-dir)))))
 
 (defn- with-bench-shuttle [f]
   (test-support/with-runtime
     {:publish? true :prefix "skein-bench-judge"}
     (fn [rt config-dir]
-      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                     'ct.spools.agent-run/contribute
-                                     'ct.spools.agent-run/reconcile)
-      (test-support/activate-module! rt :bench 'ct.spools.bench
-                                     'ct.spools.bench/contribute
-                                     'ct.spools.bench/reconcile
-                                     :after [:agent-run])
+      (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
+      (test-support/activate-spool! rt :bench 'ct.spools.bench
+                                    :after [:agent-run])
       (f rt config-dir))))
 
 (defn- fake-harness! [rt]

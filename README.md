@@ -97,7 +97,13 @@ published-name change and ships as a new release (**v8**), not an accretion:
 ## Activation
 
 After approving the coordinates needed by the workspace, activate them from
-trusted `init.clj`:
+trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and
+`ct.spools.bench`, plus `ct.spools.executors.subagent`, each declare their
+`contribute`/`reconcile` entry points in a public `spool` var (the `def spool`
+convention, ADR-004), which the refresh coordinator resolves from the loaded
+namespace at every module evaluation. A consumer therefore names only a source
+target and world policy. The Skein checkout must contain or descend from
+`343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible commit:
 
 ```clojure
 (require '[skein.api.current.alpha :as current]
@@ -107,38 +113,28 @@ trusted `init.clj`:
 (runtime/module! rt :workflow
   {:ns 'skein.spools.workflow
    :spools '[skein.spools/workflow]
-   :contribute 'skein.spools.workflow/contribute
-   :reconcile 'skein.spools.workflow/reconcile
    :required? true})
 
 (runtime/module! rt :agent-run
   {:ns 'ct.spools.agent-run
    :spools '[ct.spools/agent-run]
-   :contribute 'ct.spools.agent-run/contribute
-   :reconcile 'ct.spools.agent-run/reconcile
    :required? true})
 
 (runtime/module! rt :delegation
   {:ns 'ct.spools.delegation
    :spools '[ct.spools/delegation ct.spools/agent-run]
-   :contribute 'ct.spools.delegation/contribute
-   :reconcile 'ct.spools.delegation/reconcile
    :after [:agent-run]
    :required? true})
 
 (runtime/module! rt :subagent
   {:ns 'ct.spools.executors.subagent
    :spools '[ct.spools/agent-run skein.spools/workflow]
-   :contribute 'ct.spools.executors.subagent/contribute
-   :reconcile 'ct.spools.executors.subagent/reconcile
    :after [:workflow :agent-run]
    :required? true})
 
 (runtime/module! rt :bench
   {:ns 'ct.spools.bench
    :spools '[ct.spools/bench ct.spools/agent-run]
-   :contribute 'ct.spools.bench/contribute
-   :reconcile 'ct.spools.bench/reconcile
    :after [:agent-run]
    :required? true})
 ```

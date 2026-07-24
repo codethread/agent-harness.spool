@@ -29,13 +29,9 @@
   (test-support/with-runtime
     {:nest-skein? true :prefix "skein-agents-config"}
     (fn [rt _config-dir]
-      (test-support/activate-module! rt :agent-run 'ct.spools.agent-run
-                                     'ct.spools.agent-run/contribute
-                                     'ct.spools.agent-run/reconcile)
-      (test-support/activate-module! rt :delegation 'ct.spools.delegation
-                                     'ct.spools.delegation/contribute
-                                     'ct.spools.delegation/reconcile
-                                     :after [:agent-run])
+      (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
+      (test-support/activate-spool! rt :delegation 'ct.spools.delegation
+                                    :after [:agent-run])
       (f rt))))
 
 (defn- attr-namespace-declaration [rt name]
