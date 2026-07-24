@@ -143,7 +143,7 @@
 (def ^:private delegation-glossary
   "Delegation-owned named failure outcomes (DELTA-Dtf-002.CC5).
 
-  Registered from `install!` before the `agent` op whose per-verb `:annotations`
+  Registered from `reconcile` before the `agent` op whose per-verb `:annotations`
   `failure-modes` reference them — the load-order contract (DELTA-Dtf-002.CC7).
   These are the shared lifecycle failures the run/task family raises across
   verbs; defining each once and referencing it by name keeps the prose from

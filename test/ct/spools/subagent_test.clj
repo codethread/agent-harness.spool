@@ -84,17 +84,12 @@
                             {:timeout-ms timeout-ms
                              :on-timeout #(throw (ex-info "Timed out" {}))})))
 
-(defn- install-agent-failures-query! [rt]
-  (if-let [install (try
-                     (requiring-resolve
-                      'skein.api.runtime.glossary.alpha/register-glossary-outcome!)
-                     (requiring-resolve 'ct.spools.delegation/install!)
-                     (catch java.io.FileNotFoundException _ nil))]
-    (install)
-    (graph/register-query!
-     rt 'agent-failures
-     [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"]
-      [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]])))
+(defn- install-agent-failures-query!
+  "Activate the delegation module, whose contribution owns `agent-failures`."
+  [rt]
+  (test-support/activate-module! rt :delegation 'ct.spools.delegation
+                                 'ct.spools.delegation/contribute
+                                 'ct.spools.delegation/reconcile))
 
 (defn- attr [strand k]
   (get-in strand [:attributes k]))
@@ -411,8 +406,8 @@
 (deftest blank-result-gate-fails-loudly-stays-discoverable-and-recovers
   (with-treadle
     (fn [rt]
-      ;; agents install registers the `agent-failures` query the failed run
-      ;; must surface through.
+      ;; delegation's contribution registers the `agent-failures` query the
+      ;; failed run must surface through.
       (install-agent-failures-query! rt)
       (workflow/start! "blank" (workflow/workflow
                                 "Blank"
@@ -620,8 +615,8 @@
         (test-alpha/await-quiescent! rt)
         (is (nil? (run-for-gate rt gate-id)))))))
 
-(deftest install-declares-gate-vocabulary
-  ;; The treadle's install! owns the `gate/*` namespace — the sole treadle-era
+(deftest activation-declares-gate-vocabulary
+  ;; The treadle module owns the `gate/*` namespace — the sole treadle-era
   ;; durable survivor — under the single use-key :skein/spools-treadle.
   (with-treadle
     (fn [rt]

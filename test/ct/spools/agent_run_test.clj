@@ -50,16 +50,14 @@
      :on-timeout #(throw (ex-info "Timed out waiting for matching attribute"
                                   {:id id :attr k :strand (weaver/show rt id)}))})))
 
-(defn- delegation-install
-  "Resolve delegation only on Skein generations carrying its glossary API.
-  The frozen owner-refresh baseline predates that unrelated v8 discovery tier."
-  []
-  (try
-    (requiring-resolve 'skein.api.runtime.glossary.alpha/register-glossary-outcome!)
-    (requiring-resolve 'ct.spools.delegation/install!)
-    (catch java.io.FileNotFoundException _ nil)))
+(defn- activate-delegation!
+  "Activate the delegation module on `rt` so its `agent` op is registered."
+  [rt]
+  (test-support/activate-module! rt :delegation 'ct.spools.delegation
+                                 'ct.spools.delegation/contribute
+                                 'ct.spools.delegation/reconcile))
 
-(deftest install-declares-usage-attrs-in-agent-run-vocab
+(deftest activation-declares-usage-attrs-in-agent-run-vocab
   (with-shuttle
     (fn [rt]
       (let [decl (attr-namespace-declaration rt "agent-run")
@@ -1881,7 +1879,7 @@
 (deftest spend-aggregates-totals-and-groups-by-harness
   (with-shuttle
     (fn [rt]
-      (when-let [install (delegation-install)] (install))
+      (activate-delegation! rt)
       (add-spend-run! rt {:harness "pi" :started "2026-07-08T10:00:00Z" :finished "2026-07-08T10:00:04Z"
                           :cost 0.10 :tokens-total 100 :tokens {"input" 60 "output" 40}})
       (add-spend-run! rt {:harness "pi" :started "2026-07-08T10:10:00Z" :finished "2026-07-08T10:10:06Z"
@@ -1889,9 +1887,7 @@
       (add-spend-run! rt {:harness "claude" :started "2026-07-08T10:20:00Z" :finished "2026-07-08T10:20:01Z"
                           :cost 0.05 :tokens-total 50})
       (let [{:keys [operation totals groups runs]}
-            (if (delegation-install)
-              (weaver/op! rt 'agent ["spend"])
-              (assoc (shuttle/spend) :operation "agent spend"))
+            (weaver/op! rt 'agent ["spend"])
             by-key (into {} (map (juxt :key identity) groups))]
         (is (= "agent spend" operation))
         (testing "totals sum every run's cost, tokens, and derived duration"

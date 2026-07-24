@@ -141,7 +141,7 @@
   ;; gone (see agent-op-dispatches-and-fails-loudly).
   (with-agents
     (fn [rt]
-      (testing "install! registers the delegation-owned glossary outcomes before the op"
+      (testing "reconcile registers the delegation-owned glossary outcomes before the op"
         (is (set/subset?
              #{"delegation/harness-unresolved" "delegation/task-not-found"
                "delegation/task-not-ready" "delegation/task-needs-retry"
@@ -170,7 +170,7 @@
           (is (str/includes? (get glossary "delegation/task-needs-retry") "retry"))))
       (testing "every referenced failure-mode resolves against the runtime glossary"
         ;; the register-op! glossary-ref existence check (DELTA-Dtf-002.CC7) already
-        ;; enforces this at install!; assert the whole closure here too.
+        ;; enforces this at op registration; assert the whole closure here too.
         (let [registered (set (map :name (glossary/glossary-outcomes rt)))
               subcommands (get-in (weaver/resolve-op rt 'agent) [:arg-spec :subcommands])
               referenced (into #{} (mapcat #(get-in % [:annotations :failure-modes]))

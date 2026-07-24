@@ -7,8 +7,8 @@
   the tool taxonomy mapping, claude tool-request dedupe across duplicate and
   split assistant rows, and the malformed/missing-artifact contract (warnings
   recorded, absent-not-zero cost for codex). One weaver-backed test proves
-  `install!` registers the shipped extractors as defaults without clobbering a
-  user-registered one."
+  module activation registers the shipped extractors as defaults without
+  clobbering a user-registered one."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -261,9 +261,9 @@
       (is (some #(str/includes? % "malformed") (:extraction-warnings m))))))
 
 ;; ---------------------------------------------------------------------------
-;; Registration through install!
+;; Registration through module activation
 
-(deftest install-registers-shipped-extractors-without-clobbering-user
+(deftest activation-registers-shipped-extractors-without-clobbering-user
   (test-support/with-runtime
     {:prefix "skein-bench-metrics"}
     (fn [rt _]

@@ -791,8 +791,8 @@ esac
 (deftest bench-op-declares-subcommands-and-routes-loudly
   (with-bench
     (fn [rt _]
-      (is (some #(= "bench" (:name %)) (weaver/ops rt)) "install! registered the op")
-      (is (contains? (graph/queries rt) "bench-runs") "install! registered the query")
+      (is (some #(= "bench" (:name %)) (weaver/ops rt)) "module activation registered the op")
+      (is (contains? (graph/queries rt) "bench-runs") "module activation registered the query")
       (testing "the retired `bench help` sole-token alias loudly redirects to the help grammar"
         ;; DELTA-Dtf-001.CC5: the `<op> help` verb-position sugar is retired in
         ;; alpha; a bare `help` verb fails loudly pointing at `strand help bench`.
