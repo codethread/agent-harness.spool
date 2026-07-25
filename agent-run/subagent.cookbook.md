@@ -70,7 +70,7 @@ normally.
 (workflow/start! "widget-1" build-widget {})
 (workflow/complete! "widget-1")            ; finish :design; :implement becomes ready
 ;; the subagent executor sees the ready :subagent gate, spawns an agent run, and on success
-;; stamps the gate workflow/outcome-by = run id, workflow/outcome-notes = agent-run/result,
+;; stamps the gate workflow/outcome-by = run id and agent-run/result = the run's result,
 ;; then :review becomes ready.
 ```
 
@@ -85,9 +85,10 @@ normally.
   `:design` closes, not before, because `depends-on` readiness is the only trigger. A gate blocked
   behind an unfinished step is left untouched until it unblocks.
 - **The result comes back as a gate outcome, not a side channel.** The run's `agent-run/result` lands
-  on the gate as `workflow/outcome-notes`, and `workflow/outcome-by` records the run id. The
-  delegated output is part of the workflow's own audit trail, and the next step reads it like any
-  other completed step.
+  on the gate under that same key, and `workflow/outcome-by` records the run id. The workflow engine
+  keeps no outcome-prose field of its own, so this spool names the result once and uses that name
+  wherever it is read. The delegated output is part of the workflow's own audit trail, and the next
+  step reads it like any other completed step.
 
 Honest source: `happy-path-spawns-delivers-and-unblocks-next-step` in
 ``test/skein/executors/subagent_test.clj``, and the worked example in
@@ -226,8 +227,8 @@ itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a
 **Why this shape.**
 
 - **Only the workflow may close a workflow step.** Delivery through `workflow/complete!` means the
-  gate closes with the engine's own bookkeeping: `workflow/outcome-by`, `workflow/outcome-notes`,
-  and the auto-close of any procedure join. A run reaching in to close the gate strand directly
+  gate closes with the engine's own bookkeeping — `workflow/outcome-by` and the auto-close of any
+  procedure join — plus the `agent-run/result` this spool merges in the same mutation. A run reaching in to close the gate strand directly
   would bypass all of it. The result travels as a gate outcome, keeping the workflow the single
   authority over its own graph.
 - **A silently dead worker must not satisfy a gate.** Because delivery selects only phase-`done`

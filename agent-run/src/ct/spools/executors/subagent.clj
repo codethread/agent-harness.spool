@@ -168,9 +168,13 @@
             ;; existing durable error surface makes the blocked queue loud.
             (when-not (non-blank (attr gate :gate/error))
               (stamp! gate-id {"gate/error" error}))
+            ;; The worker's report lands on the gate in this spool's own
+            ;; vocabulary: the engine keeps no outcome-prose field, so
+            ;; `agent-run/result` is the one name for a run's result whether it
+            ;; is read off the run or off the gate the run served.
             (let [result (attr run :agent-run/result)
                   completion (cond-> {:step gate-id :by run-id}
-                               (non-blank result) (assoc :notes result))]
+                               (non-blank result) (assoc :attributes {"agent-run/result" result}))]
               (return-shape/check! :string result)
               (workflow/complete! workflow-run-id completion)
               (stamp! run-id {"gate/delivered" "true"})))

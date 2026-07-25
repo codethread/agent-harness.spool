@@ -78,6 +78,7 @@ after the id and title, fixes the waiter to `:subagent`, and always emits the st
 |---|---|---|
 | `gate/error` | gate step | Durable spawn- or completion-policy failure detail; the gate is skipped until a coordinator clears it. |
 | `gate/completion-policy` | gate step | `run-done` or `status-implemented`; absent means `run-done` for compatibility. |
+| `agent-run/result` | gate step | The run's result, merged onto the gate in the same mutation that closes it. The engine has no outcome-prose field, so the result keeps its own name wherever it is read. Absent when the run's result was blank. |
 | `workflow/run-id` | run strand | Workflow `run-id` owning the gate. Workflow's own key, stamped onto the run as-is: the executor inherits it rather than declaring a synonym. |
 | `gate/delivered` | run strand | `"true"`, `"gate-closed"`, or `"error: …"`; presence means delivery is terminal for this run. |
 | `gate/delivery-blocked` | run strand | Written once when a finished run's gate is active but not ready; delivery retries when the gate becomes ready. |
@@ -108,7 +109,7 @@ uses `supersedes` edges; retry successors inherit the same `serves` target.
 (workflow/complete! "widget-1")
 ;; The subagent executor observes :implement as a ready subagent gate, spawns an agent run
 ;; run, then completes the gate with workflow/outcome-by = run id and
-;; workflow/outcome-notes = agent-run/result when the run closes successfully.
+;; agent-run/result = the run's result when the run closes successfully.
 ```
 
 ## Failure and recovery

@@ -154,7 +154,7 @@
             after (first (workflow/ready "happy"))]
         (is (= "true" (attr run :gate/delivered)))
         (is (= (:id run) (attr gate :workflow/outcome-by)))
-        (is (= "gate-result" (attr gate :workflow/outcome-notes)))
+        (is (= "gate-result" (attr gate :agent-run/result)))
         (is (= "happy" (attr run :workflow/run-id)))
         (is (= "After" (:title after)))
         ;; the run↔gate link is the run's own outgoing `serves` edge — placement
@@ -191,7 +191,7 @@
           (is (str/includes? (attr run :gate/delivered) ":expected :string"))
           (is (= "active" (:state gate)))
           (is (nil? (attr gate :workflow/outcome-by)))
-          (is (nil? (attr gate :workflow/outcome-notes)))
+          (is (nil? (attr gate :agent-run/result)))
           (is (= [gate-id]
                  (mapv :id (workflow/ready "invalid-result")))))))))
 
@@ -379,7 +379,7 @@
           (is (= "true" (attr delivered :gate/delivered)))
           (is (= gate-id (:to_strand_id (edge-row rt (:id fresh) gate-id "serves"))))
           (is (= "superseded" (attr (weaver/show rt (:id failed)) :agent-run/phase)))
-          (is (= "recovered" (attr (weaver/show rt gate-id) :workflow/outcome-notes))))))))
+          (is (= "recovered" (attr (weaver/show rt gate-id) :agent-run/result))))))))
 
 (deftest blank-result-gate-fails-loudly-stays-discoverable-and-recovers
   (with-treadle
@@ -405,7 +405,7 @@
         (is (= gate-id (:to_strand_id (edge-row rt (:id failed) gate-id "serves"))))
         ;; (b) the gate is never delivered and its downstream step stays blocked
         (is (nil? (attr failed :gate/delivered)))
-        (is (nil? (attr (weaver/show rt gate-id) :workflow/outcome-notes)))
+        (is (nil? (attr (weaver/show rt gate-id) :agent-run/result)))
         (is (= [gate-id] (mapv :id (filter #(= "subagent" (:gate %)) (workflow/ready "blank")))))
         ;; (c) discoverable: the run through agent-failures, the gate through both
         ;; the stall predicate and the stalled-subagent-gates coordinator query.
@@ -420,7 +420,7 @@
                                                      :carry-attrs {"workflow/run-id" (attr failed :workflow/run-id)}})
               delivered (await-delivered rt (:id fresh))]
           (is (= "true" (attr delivered :gate/delivered)))
-          (is (= "recovered" (attr (weaver/show rt gate-id) :workflow/outcome-notes)))
+          (is (= "recovered" (attr (weaver/show rt gate-id) :agent-run/result)))
           (is (= "After" (:title (first (workflow/ready "blank"))))))))))
 
 (deftest recovery-respawn-keeps-stalled-subagent-gates-in-lockstep-with-predicate
@@ -488,11 +488,11 @@
         ;; a scan over the superseded run must not deliver its stale blank result
         (treadle/scan!)
         (is (nil? (attr (weaver/show rt (:id failed)) :gate/delivered)))
-        (is (nil? (attr (weaver/show rt gate-id) :workflow/outcome-notes)))
+        (is (nil? (attr (weaver/show rt gate-id) :agent-run/result)))
         ;; the healthy successor still serves the gate and delivers on success
         (let [delivered (await-delivered rt (:id fresh) (test-support/await-budget-ms 15000))]
           (is (= "true" (attr delivered :gate/delivered)))
-          (is (= "recovered" (attr (weaver/show rt gate-id) :workflow/outcome-notes))))))))
+          (is (= "recovered" (attr (weaver/show rt gate-id) :agent-run/result))))))))
 
 (deftest routed-away-gate-marks-run-gate-closed
   (with-treadle
@@ -531,7 +531,7 @@
         (weaver/update! rt (:id hold) {:state "closed"})
         (let [delivered (await-delivered rt run-id)]
           (is (= "true" (attr delivered :gate/delivered)))
-          (is (= "held-result" (attr (weaver/show rt gate-id) :workflow/outcome-notes))))))))
+          (is (= "held-result" (attr (weaver/show rt gate-id) :agent-run/result))))))))
 
 (deftest treadle-registers-executor-for-flow-await
   (with-treadle
