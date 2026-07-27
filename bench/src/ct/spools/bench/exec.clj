@@ -20,7 +20,6 @@
             [skein.api.spool.alpha :refer [fail!]])
   (:import [java.io File]
            [java.lang ProcessBuilder$Redirect]
-           [java.util Map]
            [java.util.concurrent ConcurrentHashMap TimeUnit]
            [java.util.function Function]))
 
@@ -158,7 +157,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Git host-side preparation
 
-(defn- ^File file [& parts] (apply io/file parts))
+(defn- file ^File [& parts] (apply io/file parts))
 
 (defn- git!
   "Run a git subcommand, failing loudly on non-zero exit.
@@ -344,7 +343,7 @@
   (str "skein-bench-" run-id "-" slug))
 
 (defn- env-args [env]
-  (into [] (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env)))
+  (vec (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env)))
 
 (defn compile-argv
   "Compile the engine `run` argv for one container invocation.
@@ -360,11 +359,11 @@
         base-env (merge {"HOME" "/bench/home" "SKEIN_BENCH_RUN" run-id} env)
         auth-names (:env auth)
         present-auth (filter #(System/getenv %) auth-names)
-        auth-real (into [] (mapcat (fn [n] ["-e" (str n "=" (System/getenv n))]) present-auth))
-        auth-masked (into [] (mapcat (fn [n] ["-e" (str n "=<redacted>")]) present-auth))
-        auth-mounts (into [] (mapcat (fn [{:keys [host container]}]
-                                       ["-v" (str (expand-home host) ":" container ":ro")])
-                                     (:mounts auth)))
+        auth-real (vec (mapcat (fn [n] ["-e" (str n "=" (System/getenv n))]) present-auth))
+        auth-masked (vec (mapcat (fn [n] ["-e" (str n "=<redacted>")]) present-auth))
+        auth-mounts (vec (mapcat (fn [{:keys [host container]}]
+                                   ["-v" (str (expand-home host) ":" container ":ro")])
+                                 (:mounts auth)))
         prefix (into (vec engine) ["run" "--rm" "-i" "--name" name])
         tail (-> ["-v" home-mount "-v" ws-mount]
                  (into auth-mounts)

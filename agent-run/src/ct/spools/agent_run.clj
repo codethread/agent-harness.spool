@@ -102,7 +102,7 @@
 (defn- rt []
   (or *runtime* (current/runtime)))
 
-(defn- ^ThreadFactory daemon-thread-factory [prefix]
+(defn- daemon-thread-factory ^ThreadFactory [prefix]
   (let [counter (atom 0)]
     (reify ThreadFactory
       (newThread [_ runnable]
@@ -274,8 +274,8 @@
 (defn- launch-bindings [] (:launch-bindings (state)))
 (defn- preamble-extension [] (:preamble-extension (state)))
 (defn- preamble-conflicts-atom [] (:preamble-conflicts (state)))
-(defn- ^ScheduledThreadPoolExecutor recovery-scheduler [] (require-state-entry :recovery-scheduler))
-(defn- ^java.util.concurrent.ExecutorService worker-executor [] (require-state-entry :worker-executor))
+(defn- recovery-scheduler ^ScheduledThreadPoolExecutor [] (require-state-entry :recovery-scheduler))
+(defn- worker-executor ^java.util.concurrent.ExecutorService [] (require-state-entry :worker-executor))
 
 (defn in-flight-run-ids
   "Return the set of run ids the engine is currently tracking in-flight
@@ -804,7 +804,8 @@
 
 (def ^:private default-backend-defs
   {:tmux {:start ["tmux" "new-session" "-d" "-s" :session "-c" :cwd
-                  "-P" "-F" "{\"session\":\"#{session_name}\",\"pane\":\"#{pane_id}\"}"
+                  "-P" "-F" (json/write-str {:session "#{session_name}"
+                                             :pane "#{pane_id}"})
                   :command]
           :alive ["tmux" "has-session" "-t" :handle/session]
           :stop ["tmux" "kill-session" "-t" :handle/session]
@@ -1465,7 +1466,7 @@
 (defn- sh-quote [s]
   (str "'" (str/replace (str s) "'" "'\\''") "'"))
 
-(defn- ^java.io.File launcher-script-file [id]
+(defn- launcher-script-file ^java.io.File [id]
   (io/file (log-dir) (str id ".launch.sh")))
 
 (defn- write-launcher-script!
@@ -1476,8 +1477,8 @@
   [id argv env cwd]
   (let [file (launcher-script-file id)]
     (spit file (str "#!/bin/sh\n"
-                    (apply str (for [[k v] env]
-                                 (str "export " (str k) "=" (sh-quote v) "\n")))
+                    (str/join (for [[k v] env]
+                                (str "export " k "=" (sh-quote v) "\n")))
                     "export SKEIN_RUN_ID=" (sh-quote id) "\n"
                     "export XDG_STATE_HOME=" (sh-quote (state-root)) "\n"
                     "cd " (sh-quote cwd) " || exit 1\n"
@@ -1697,9 +1698,9 @@
   "Record the immutable declarations and effective cwd used for one actual
   process/session launch. A later owner refresh may replace or remove those
   names, but lifecycle operations for this launch keep this snapshot."
-  [id binding]
-  (swap! (launch-bindings) assoc id binding)
-  binding)
+  [id launch-binding]
+  (swap! (launch-bindings) assoc id launch-binding)
+  launch-binding)
 
 (defn- launch-binding
   "Return the captured binding for `run`. A recovered interactive session from
@@ -1811,9 +1812,9 @@
   "Best-effort transcript capture before teardown; returns the capture file
   path, or nil when no capture op is configured or capture fails (capture is
   forensics, never a teardown blocker)."
-  [id run binding]
+  [id run launch-binding]
   (try
-    (run-capture-op! id run binding)
+    (run-capture-op! id run launch-binding)
     (catch Exception _ nil)))
 
 (defn- finish-interactive!
@@ -1827,8 +1828,9 @@
       (let [current (weaver/show (rt) id)]
         ;; a racing path may have finished the run between selection and claim
         (when (= "running" (sattr current "phase"))
-          (let [{:keys [backend-name backend] :as binding} (launch-binding id current)
-                capture-path (capture-session! id current binding)
+          (let [{:keys [backend-name backend] :as launch-binding}
+                (launch-binding id current)
+                capture-path (capture-session! id current launch-binding)
                 reap (or (sattr current "reap") "auto")
                 stop-error (when (= "auto" reap)
                              (stop-session! id current backend-name backend))]
@@ -2229,7 +2231,7 @@
 ;; Run creation, inspection, notes
 
 (defn- truncate [s n]
-  (if (> (count s) n) (str (subs s 0 (- n 1)) "…") s))
+  (if (> (count s) n) (str (subs s 0 (dec n)) "…") s))
 
 (defn- validate-resume!
   "Validate a `:resume <predecessor-id>` spawn against its predecessor, failing
@@ -2770,8 +2772,8 @@
   (let [run (or (weaver/show (rt) id) (fail! "Run not found" {:id id}))]
     (when-not (interactive? run)
       (fail! "Capture applies to interactive runs; headless runs already write agent-run/log" {:id id}))
-    (let [binding (launch-binding id run)
-          path (run-capture-op! id run binding)]
+    (let [launch-binding (launch-binding id run)
+          path (run-capture-op! id run launch-binding)]
       (update-run! id {"agent-run/log" path} {})
       {:id id :path path :text (slurp path)})))
 
@@ -2834,7 +2836,10 @@
                    :name "agent-run"
                    :owner :skein/spools-shuttle
                    :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
-                   :doc "Agent-run engine control attributes reserved by spawn-run! and the supervision engine, plus usage attributes finish-run! records at completion and the prompt forms higher-level spools carry onto a run."}))
+                   :doc (fmt/reflow
+                         "|Agent-run engine control attributes reserved by spawn-run! and the
+                          |supervision engine, plus usage attributes finish-run! records at
+                          |completion and the prompt forms higher-level spools carry onto a run.")}))
 
 (defn- register-engine-handler! [runtime]
   (events/register-handler! runtime :agent-run/engine engine-event-types

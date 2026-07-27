@@ -7,7 +7,6 @@
             [skein.spools.workflow :as workflow]
             [ct.spools.test-support :as test-support :refer [with-runtime]]
             [skein.core.db :as db]
-            [skein.api.graph.alpha :as graph]
             [skein.api.weaver.alpha :as weaver]
             [skein.test.alpha :as test-alpha]
             [skein.api.vocab.alpha :as vocab]))
@@ -611,6 +610,5 @@
   (test-support/assert-state-shape
    ;; white-box read of a private var: kondo flags cross-ns private access, but
    ;; #'ns/private is legal and intentional here.
-   #_{:clj-kondo/ignore [:unresolved-var]}
    #'treadle/new-state
    #{:scan-monitor}))
