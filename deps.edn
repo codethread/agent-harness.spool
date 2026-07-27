@@ -8,8 +8,10 @@
                        "delegation/src"
                        "bench/src"
                        "../skein-src/test"
-                       "../skein-src/spools/workflow/src"]
-         :extra-deps {io.skein/skein {:local/root "../skein-src"}}
+                       "../skein-src/spools/workflow/src"
+                       "scripts"]
+         :extra-deps {io.skein/skein {:local/root "../skein-src"}
+                      clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "ct.spools.test-runner"]}
   :format {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
@@ -19,4 +21,18 @@
   :lint/clj-kondo {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                    :main-opts ["-m" "clj-kondo.main" "--lint" "agent-run/src" "delegation/src" "bench/src" "test"]}
   :lint/splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
-                :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "agent-run/src" "delegation/src" "bench/src" "test"]}}}
+                :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "agent-run/src" "delegation/src" "bench/src" "test"]}
+  :lint/conventions {:extra-paths ["scripts"
+                                   "agent-run/src"
+                                   "delegation/src"
+                                   "bench/src"]
+                     :extra-deps {io.skein/skein {:local/root "../skein-src"}
+                                  clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
+                     :main-opts ["-m" "quality.conventions-check"]}
+  :reflect-check {:extra-paths ["scripts"
+                                "agent-run/src"
+                                "delegation/src"
+                                "bench/src"
+                                "../skein-src/spools/workflow/src"]
+                  :extra-deps {io.skein/skein {:local/root "../skein-src"}}
+                  :main-opts ["-m" "quality.reflect-check"]}}}

@@ -1,0 +1,20 @@
+{:output {:format "clj-kondo"}
+ :parallel true
+ :silent false
+
+ ;; Traditional interop is used consistently throughout these process-heavy spools.
+ ;; Splint cannot safely autocorrect receiver classes, so method-value syntax belongs
+ ;; to a deliberate whole-repository migration rather than incidental lint cleanup.
+ lint/prefer-method-values {:enabled false}
+
+ ;; These are supervision and process boundaries: Errors must be captured, recorded,
+ ;; and surfaced without silently killing a long-lived worker or cleanup path.
+ lint/catch-throwable {:enabled false}
+
+ ;; The flagged branches intentionally converge after validating different input
+ ;; shapes; combining them would erase the fail-loud decision table.
+ lint/identical-branches {:enabled false}
+
+ ;; Locks are returned from runtime-owned registries. Splint sees a call expression,
+ ;; not the stable Object identity those helpers return.
+ lint/locking-object {:enabled false}}

@@ -22,7 +22,6 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.current.alpha :as current]
             [skein.api.registry.alpha :as registry]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]
@@ -39,13 +38,23 @@
 ;; ---------------------------------------------------------------------------
 ;; Runtime-owned state
 
-(def harness-kind :ct.spools.bench/harness)
-(def suite-kind :ct.spools.bench/suite)
-(def extractor-kind :ct.spools.bench/extractor)
+(def harness-kind
+  "Owner-partitioned kind id for benchmark harness declarations."
+  :ct.spools.bench/harness)
+
+(def suite-kind
+  "Owner-partitioned kind id for benchmark suite declarations."
+  :ct.spools.bench/suite)
+
+(def extractor-kind
+  "Owner-partitioned kind id for metrics extractor declarations."
+  :ct.spools.bench/extractor)
 (def ^:private direct-owner :skein.owner/repl)
 (def ^:private system-owner :skein.owner/system)
 
-(defn registry-handle [runtime]
+(defn registry-handle
+  "Return the runtime-owned registry for harnesses, suites, and extractors."
+  [runtime]
   (runtime/spool-state runtime ::registry {:version 1}
                        #(let [handle (registry/registry)]
                           (registry/declare-kind! handle {:id harness-kind :entry-spec ::registered-harness :binding-moment :run})
@@ -61,7 +70,7 @@
   this version drift apart."
   4)
 
-(defn- ^ThreadFactory daemon-thread-factory [prefix]
+(defn- daemon-thread-factory ^ThreadFactory [prefix]
   (let [counter (atom 0)]
     (reify ThreadFactory
       (newThread [_ runnable]
@@ -99,13 +108,13 @@
 (defn- engine-atom [runtime] (:engine (state runtime)))
 (defn- semaphores-atom [runtime] (:semaphores (state runtime)))
 (defn- in-flight-atom [runtime] (:in-flight (state runtime)))
-(defn- ^ExecutorService executor [runtime] (:executor (state runtime)))
+(defn- executor ^ExecutorService [runtime] (:executor (state runtime)))
 
-(defn- ^Semaphore run-semaphore!
+(defn- run-semaphore!
   "Return the shared parallelism semaphore for `run-id`, creating it once at
   `parallel` permits and reusing it thereafter so a retry contends for the same
   run's :parallel budget as its still-in-flight original entries."
-  [runtime run-id parallel]
+  ^Semaphore [runtime run-id parallel]
   (let [a (semaphores-atom runtime)]
     (or (get @a run-id)
         (get (swap! a (fn [m] (if (contains? m run-id) m (assoc m run-id (Semaphore. (int parallel))))))
@@ -155,7 +164,6 @@
 (s/def :bench.cell/prompt keyword?)
 (s/def :bench.cell/slug ::non-blank)
 (s/def :bench.cell/env (s/map-of string? string?))
-(def ^:private cell-keys #{:harness :model :thinking :prompt :slug :env})
 (s/def ::cell
   (s/keys :req-un [:bench.cell/harness]
           :opt-un [:bench.cell/model :bench.cell/thinking :bench.cell/prompt
@@ -446,10 +454,10 @@
 ;; ---------------------------------------------------------------------------
 ;; Paths
 
-(defn- ^File data-root [runtime]
+(defn- data-root ^File [runtime]
   (io/file (get-in runtime [:metadata :state-dir]) "bench"))
 
-(defn- ^File run-dir [runtime run-id]
+(defn- run-dir ^File [runtime run-id]
   (io/file (data-root runtime) run-id))
 
 (defn- workspace-root
@@ -1033,7 +1041,7 @@
   judge is an agent run or an external seam); an agent-run judge additionally
   gets `agent-run/phase \"superseded\"` so the run engine treats it as retired."
   [runtime run-id]
-  (let [root (or (weaver/show runtime run-id) (fail! "bench abort: no such run" {:id run-id}))
+  (let [_ (or (weaver/show runtime run-id) (fail! "bench abort: no such run" {:id run-id}))
         eng (engine runtime)
         entries (run-entries runtime run-id)
         outstanding #{"pending" "preparing" "running"}

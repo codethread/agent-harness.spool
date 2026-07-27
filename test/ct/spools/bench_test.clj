@@ -314,7 +314,6 @@ esac
 
 (deftest state-shape-matches-declared-version
   (test-support/assert-state-shape
-   #_{:clj-kondo/ignore [:unresolved-var]}
    #'bench/new-state
    #{:engine :executor :semaphores :in-flight :close-fn}))
 
@@ -379,7 +378,7 @@ esac
         result (binding [*err* stderr]
                  (with-redefs [exec/capture! (constantly {:exit 0 :out "killed" :err ""})]
                    (exec/kill-container! ["podman"] "bench-cell")))]
-    (is (= 0 (:exit result)))
+    (is (zero? (:exit result)))
     (is (= "" (str stderr)))))
 
 (deftest compile-argv-redacts-auth-env

@@ -2,6 +2,8 @@
 
 - Validate with `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test` and
   `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:format` from the repo root.
+- Run `make quality` for the complete local gate: format, clj-kondo, Splint,
+  repository conventions, reflection warnings, and the cold test suite.
 - Root `deps.edn` deliberately targets the sibling `../skein-src` checkout,
   including its off-classpath `spools/workflow/src` root.
 - Never run `make install` while developing or testing this repository.

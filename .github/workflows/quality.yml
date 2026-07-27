@@ -1,0 +1,52 @@
+name: Quality Gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: agent-harness.spool
+      - uses: actions/checkout@v4
+        with:
+          repository: codethread/skein
+          ref: acbb14d18a5b7ccee79d7f1fb229782d3bcfe262
+          path: skein-src
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - name: Clojure format
+        working-directory: agent-harness.spool
+        run: make fmt-check
+      - name: clj-kondo
+        working-directory: agent-harness.spool
+        run: make lint-clj
+      - name: splint
+        working-directory: agent-harness.spool
+        run: make lint-splint
+      - name: Conventions
+        working-directory: agent-harness.spool
+        run: make lint-conventions
+      - name: Reflection warnings
+        working-directory: agent-harness.spool
+        run: make reflect-check
+      - name: Clojure test suite
+        working-directory: agent-harness.spool
+        run: make test
+        env:
+          SKEIN_TEST_AWAIT_SCALE: '3'
