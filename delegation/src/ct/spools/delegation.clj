@@ -239,6 +239,13 @@
       |delegated. ps doubles as its liveness check and hands you the attach command;
       |a session that dies early fails the run loudly.")
     (fmt/reflow "
+      |For interactive work, create a tracking task with the complete brief in body,
+      |attach it beneath the work root with parent-of, then run agent delegate
+      |<task-id> --interactive. The brief tells the worker to record decisions as
+      |notes, write an outcome summary, and close the task only after its final
+      |commit. Closing the served task completes the run and reaps the session;
+      |agent ps supplies the attach command.")
+    (fmt/reflow "
       |council and review are presets over an internal PANEL primitive — seats over
       |a shared blackboard, turn-as-run rows, and a synthesis pass. review freezes
       |its reviewer prompts through rosters; council opens a fresh deliberation.
