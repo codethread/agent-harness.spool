@@ -19,6 +19,25 @@ One consistent way to run and coordinate coding-agent subagents, across every ha
 - **The graph is the scheduler.** You describe work and its dependencies once as a plan; readiness starts each piece the moment its blockers close. There is no separate queue to babysit.
 - **Human-in-the-loop tasks are plan nodes too.** `delegate --interactive` opens the agent in a live terminal-multiplexer session (tmux by default; your multiplexer is one `register-backend!` in trusted config) serving the task. You attach with the command `ps` hands you, pair with the agent, and when you agree the work is done the agent closes the task — the session is torn down and dependents unblock, exactly like any other task. This is how `hitl=true` tasks get delegated instead of stalling the plan.
 
+Create an interactive tracking task from generic graph primitives, then delegate it:
+
+```sh
+parent=WORK_ROOT_ID
+tracking="$(
+  strand add "Interactive review: storage boundary" \
+    --attr hitl=true \
+    --attr body="Review the storage boundary with the user. Record decisions as notes. Before closing this strand, write outcome with decisions, commits, and open questions." |
+  jq -r '.id'
+)"
+test -n "$parent" && test -n "$tracking"
+strand update "$parent" --edge "parent-of:$tracking"
+strand agent delegate "$tracking" \
+  --interactive --backend tmux --harness hitl-fable --cwd "$PWD"
+strand agent ps
+```
+
+The task body is the session contract. It must tell the worker to record significant decisions as notes, write an `outcome` summary, and close the tracking task only after its final commit. Closing the served task completes the run and lets agent-run reap the session. The coordinator reads the task, its notes, and `outcome` after the session.
+
 ### The vocabulary your agents already know
 
 The surface is deliberately built from words coding agents are already trained on. Use these exact words when you prompt — they map one-to-one onto the tool:
