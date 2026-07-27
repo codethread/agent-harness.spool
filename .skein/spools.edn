@@ -1,4 +1,11 @@
 {:spools {skein.spools/batteries {:skein/source-root "spools/batteries"}
+          ct.spools/agent-run
+          {:git/url "https://github.com/codethread/agent-harness.spool.git"
+           :git/sha "0e3f43f695b0d4d1695754a59348c339220281a8"
+           :git/tag "v15"
+           :roots {ct.spools/agent-run "agent-run"
+                   ct.spools/delegation "delegation"
+                   ct.spools/bench "bench"}}
           codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
                              :git/sha "14390f448cac93fb045d36bcecaf49f11f0a4de2"
                              :git/tag "v10"

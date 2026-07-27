@@ -8,6 +8,12 @@
 - Kill spawned processes by exact PID only; never use pattern kills.
 - Shared-spool publishing, activation, override, and test conventions live in
   `../skein-src/docs/spools/writing-shared-spools.md`.
+- Working with users: claim a kanban card first; run `strand kanban prime`.
+- Delegating: run `strand prime agent`; use tracked agent runs, not
+  harness-native subagents. List seats with `strand agent harnesses`; routing
+  policy lives in `.skein/harnesses.clj`.
+- Recover runs with `strand list --query agent-failures` and
+  `strand agent logs <run-id> --tail 80`.
 
 <!-- mill:skein-prime -->
 ## Skein / strand
