@@ -88,6 +88,23 @@
     :extra-args ["-m" "gpt-5.6-luna" "-c" "model_reasoning_effort=low"]
     :cost-rates luna-rates
     :doc "Read-only-sandbox variant of :luna-low; no writes or strand CLI access."}
+   :terra-low
+   {:alias-of :codex
+    :extra-args ["-m" "gpt-5.6-terra" "-c" "model_reasoning_effort=low"]
+    :cost-rates terra-rates
+    :doc (format-alpha/reflow
+          "|{:complexity 4 :code-taste 6 :resilience 2 :ui-design 3
+           | :coordination - :cost 8}
+           |gpt-5.6-terra low via Codex. The cheap diff-review seat: single-pass
+           |cross-vendor review of a branch or patch diff where the findings are
+           |the whole product. Scores are :terra-med's discounted for effort and
+           |are unbenched; escalate to :terra-med or :sol-med when a review must
+           |reason across packages.")}
+   :terra-low-ro
+   {:alias-of :codex-ro
+    :extra-args ["-m" "gpt-5.6-terra" "-c" "model_reasoning_effort=low"]
+    :cost-rates terra-rates
+    :doc "Read-only-sandbox variant of :terra-low; no writes or strand CLI access."}
    :terra-med
    {:alias-of :codex
     :extra-args ["-m" "gpt-5.6-terra" "-c" "model_reasoning_effort=medium"]

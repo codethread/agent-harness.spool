@@ -82,7 +82,7 @@ The recipes lean on the shipped `sh` harness, whose "argv" is a plain shell and 
   `:fast-reviewer` over `:explore` over `:claude` composes without repetition.
   Cycles and missing bases fail loudly at `resolve-harness` time.
 
-Honest source: the registry tests `harness-registry-validates-and-resolves-aliases` and `stdin-prompt-stays-off-argv` in ``test/skein/agent_run_test.clj``. This repo applies the same shape in its own harness roster ([`.skein/harnesses.clj`](../.skein/harnesses.clj), `register-harness-aliases!`) — one concrete harness plus named tiers over it.
+Honest source: the registry tests `harness-registry-validates-and-resolves-aliases` and `stdin-prompt-stays-off-argv` in ``test/skein/agent_run_test.clj``. This repo applies the same shape in its own harness roster ([`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj), `register-harness-aliases!`) — one concrete harness plus named tiers over it.
 
 ---
 
@@ -130,7 +130,7 @@ Honest source: the registry tests `harness-registry-validates-and-resolves-alias
   even declares a splice that stays inert until a session-capturing parse lands
   — declared but harmless.
 
-Honest source: `register-harness-validates-resume-splice` and `resume-continues-a-captured-session` (with the `session-echo` fake harness) in ``test/skein/agent_run_test.clj``, and the `:codex` resume note in [`.skein/harnesses.clj`](../.skein/harnesses.clj).
+Honest source: `register-harness-validates-resume-splice` and `resume-continues-a-captured-session` (with the `session-echo` fake harness) in ``test/skein/agent_run_test.clj``, and the `:codex` resume note in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
 
 ---
 
@@ -282,7 +282,7 @@ Honest source: `dependent-run-waits-for-blocker-and-fans-in` in ``test/skein/age
   interactive session's contract, where closing the served strand is how the
   session ends. The interactive preamble variant deliberately excludes them.
 
-Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-default-task-contract-validates-and-clears`, and `set-preamble-extension-tolerates-reload` / `set-preamble-extension-records-conflicts-durably` in ``test/skein/agent_run_test.clj``; this repo's own opt-in in [`.skein/harnesses.clj`](../.skein/harnesses.clj).
+Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-default-task-contract-validates-and-clears`, and `set-preamble-extension-tolerates-reload` / `set-preamble-extension-records-conflicts-durably` in ``test/skein/agent_run_test.clj``; this repo's own opt-in in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
 
 ---
 

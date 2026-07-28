@@ -1,4 +1,8 @@
 {:spools {skein.spools/batteries {:skein/source-root "spools/batteries"}
+          skein.spools/workflow {:skein/source-root "spools/workflow"}
+          ct.spools/harness-core {:local/root "../harness-core"}
+          ct.spools/claude-harness {:local/root "../claude-harness"}
+          ct.spools/agent-cli {:local/root "../agent-cli"}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
            :git/sha "0e3f43f695b0d4d1695754a59348c339220281a8"
