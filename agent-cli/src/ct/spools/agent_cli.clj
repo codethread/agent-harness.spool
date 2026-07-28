@@ -3,7 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [ct.spools.harness-core :as core]
+            [ct.spools.harness-core :as harness]
             [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
             [skein.api.runtime.alpha :as runtime]
@@ -37,10 +37,10 @@
          #(contains? % :event/id)))
 (s/def ::op-context
   (s/and map?
-         #(s/valid? ::core/runtime (:op/runtime %))
+         #(s/valid? ::harness/runtime (:op/runtime %))
          #(map? (:op/args %))))
 (s/def ::contribute-context
-  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
+  (s/and map? #(s/valid? ::harness/runtime (:runtime %))))
 (s/def ::contribution
   (s/and map?
          #(map? (get-in % [:ops :entries]))
@@ -56,18 +56,18 @@
 (s/def ::error string?)
 (s/def ::resumes string?)
 (s/def ::run-summary
-  (s/keys :req-un [::core/id ::core/title ::core/state
+  (s/keys :req-un [::harness/id ::harness/title ::harness/state
                    ::alias ::harness ::mode ::phase ::session-id]
           :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
 (s/def ::runs (s/coll-of ::run-summary :kind vector?))
-(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
-(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
+(s/def ::timed-out (s/coll-of ::harness/id :kind vector?))
+(s/def ::claimed-run-ids (s/coll-of ::harness/id :kind vector?))
 (s/def ::await-result
   (s/keys :req-un [::runs ::timed-out]))
 (s/def ::op-result
   (s/or :run ::run-summary
         :await ::await-result
-        :registry ::core/registry-list))
+        :registry ::harness/registry-list))
 
 (defn on-event
   "Schedule newly ready headless runs after a graph event.
@@ -102,10 +102,10 @@
      "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
      "retry" (op-retry runtime args)
      "resume" (op-resume runtime args)
-     "self-complete" (summary (core/self-complete! runtime (:run-id args) (:result args)))
+     "self-complete" (summary (harness/self-complete! runtime (:run-id args) (:result args)))
      "_started" (summary (mark-interactive-running! runtime (:run-id args)))
      "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
-     "list" (core/harnesses runtime))
+     "list" (harness/harnesses runtime))
    "harness op produced an invalid result"))
 
 (s/fdef harness-op
@@ -135,10 +135,10 @@
 
 (defn reconcile
   [{:keys [runtime] :as ctx}]
-  (require-valid! ::core/reconcile-context ctx
+  (require-valid! ::harness/reconcile-context ctx
                   "agent-cli reconcile received an invalid context")
   (require-valid!
-   ::core/reconcile-result
+   ::harness/reconcile-result
    (case (get-in ctx [:module/contribution :status])
      :removed (do
                 (events/unregister-handler! runtime :harness/engine)
@@ -152,8 +152,8 @@
    "agent-cli reconcile produced an invalid result"))
 
 (s/fdef reconcile
-  :args (s/cat :ctx ::core/reconcile-context)
-  :ret ::core/reconcile-result)
+  :args (s/cat :ctx ::harness/reconcile-context)
+  :ret ::harness/reconcile-result)
 
 (defn- daemon-thread-factory []
   (reify ThreadFactory
@@ -201,7 +201,7 @@
   (or (weaver/show rt id) (fail! "Harness run not found" {:id id})))
 
 (defn- resolved-definition [rt run]
-  (core/concrete-harness rt (attr-get run :harness/harness)))
+  (harness/concrete-harness rt (attr-get run :harness/harness)))
 
 (defn- valid-argv [argv]
   (when-not (and (vector? argv) (seq argv)
@@ -225,19 +225,19 @@
   "Launch one already-claimed pending headless run."
   [rt id]
   (try
-    (core/mark-running! rt id)
+    (harness/mark-running! rt id)
     (let [run (full-run rt id)
           definition (resolved-definition rt run)
           argv (valid-argv ((callback (:prepare definition)) rt definition run))
           observed (process-result run argv)
           outcome ((callback (:finish definition)) rt definition run observed)]
-      (core/finish! rt id outcome))
+      (harness/finish! rt id outcome))
     (catch Exception e
       (try
-        (core/finish! rt id {:status :failed
-                             :error (str (ex-message e)
-                                         (when-let [data (ex-data e)]
-                                           (str " " (pr-str data))))})
+        (harness/finish! rt id {:status :failed
+                                :error (str (ex-message e)
+                                            (when-let [data (ex-data e)]
+                                              (str " " (pr-str data))))})
         (catch Exception finish-error
           (binding [*out* *err*]
             (println "[harness] failed to record launch failure"
@@ -309,14 +309,14 @@
           argv (valid-argv ((callback (:prepare definition)) rt definition run))]
       (assoc (summary run) :launcher (write-launcher! rt run argv)))
     (catch Exception e
-      (core/finish! rt (:id run) {:status :failed
-                                  :error (str (ex-message e)
-                                              (when-let [data (ex-data e)]
-                                                (str " " (pr-str data))))})
+      (harness/finish! rt (:id run) {:status :failed
+                                     :error (str (ex-message e)
+                                                 (when-let [data (ex-data e)]
+                                                   (str " " (pr-str data))))})
       (throw e))))
 
 (defn- op-run [rt {:keys [harness interactive prompt cwd attributes title]} op-cwd]
-  (let [run (core/create!
+  (let [run (harness/create!
              rt
              (cond-> {:harness harness
                       :mode (if interactive :interactive :headless)
@@ -347,7 +347,7 @@
 
 (defn- op-retry [rt args]
   (summary
-   (core/retry!
+   (harness/retry!
     rt (:run-id args)
     (cond-> {}
       (contains? args :harness) (assoc :harness (:harness args))
@@ -355,7 +355,7 @@
       (contains? args :attributes) (assoc :attributes (overlay-map (:attributes args)))))))
 
 (defn- op-resume [rt args]
-  (let [run (core/resume!
+  (let [run (harness/resume!
              rt (:run-id args)
              (cond-> {:mode (if (:interactive args) :interactive :headless)}
                (contains? args :prompt) (assoc :prompt (:prompt args))
@@ -370,7 +370,7 @@
   (let [run (full-run rt id)]
     (when-not (= "interactive" (attr-get run :harness/mode))
       (fail! "_started applies only to interactive harness runs" {:id id}))
-    (core/mark-running! rt id)))
+    (harness/mark-running! rt id)))
 
 (defn- finish-interactive! [rt id exit-code]
   (let [run (full-run rt id)]
@@ -381,13 +381,13 @@
             outcome ((callback (:finish definition))
                      rt definition run
                      {:exit-code exit-code :stdout nil :stderr nil})]
-        (core/finish! rt id outcome))
+        (harness/finish! rt id outcome))
       (catch Exception e
-        (core/finish! rt id {:status :failed
-                             :exit-code exit-code
-                             :error (str (ex-message e)
-                                         (when-let [data (ex-data e)]
-                                           (str " " (pr-str data))))})))))
+        (harness/finish! rt id {:status :failed
+                                :exit-code exit-code
+                                :error (str (ex-message e)
+                                            (when-let [data (ex-data e)]
+                                              (str " " (pr-str data))))})))))
 
 (def ^:private harness-arg-spec
   {:op "harness"
