@@ -458,7 +458,6 @@
                (some? title) (assoc :title title)))))
 
 (defn reconcile
-  "Initialize the runtime-local registry and declare core vocabulary."
   [{:keys [runtime] :as ctx}]
   (require-valid! ::reconcile-context ctx "harness-core reconcile received invalid context")
   (require-valid!
@@ -494,6 +493,4 @@
 (s/fdef resume! :args (s/cat :runtime ::runtime :id ::id :request ::resume-request) :ret ::strand)
 (s/fdef reconcile :args (s/cat :ctx ::reconcile-context) :ret ::reconcile-result)
 
-(def ^{:doc "Skein spool entrypoint for provider-neutral harness lifecycle support."}
-  spool
-  {:reconcile 'reconcile})
+(def spool {:reconcile 'reconcile})

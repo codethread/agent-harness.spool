@@ -383,7 +383,6 @@
    "agent-cli contribute produced an invalid contribution"))
 
 (defn reconcile
-  "Install the headless graph handler and perform an initial scan."
   [{:keys [runtime] :as ctx}]
   (require-valid! ::core/reconcile-context ctx
                   "agent-cli reconcile received an invalid context")
@@ -414,7 +413,5 @@
   :args (s/cat :ctx ::core/reconcile-context)
   :ret ::core/reconcile-result)
 
-(def ^{:doc "Skein spool entrypoint for provider-neutral harness CLI support."}
-  spool
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+(def spool {:contribute 'contribute
+            :reconcile 'reconcile})

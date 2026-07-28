@@ -133,7 +133,6 @@
      "Claude finish produced an invalid outcome")))
 
 (defn reconcile
-  "Declare Claude overlay vocabulary and register the concrete Claude harness."
   [{:keys [runtime] :as ctx}]
   (require-valid! ::core/reconcile-context ctx
                   "claude-harness reconcile received invalid context")
@@ -177,6 +176,4 @@
   :args (s/cat :ctx ::core/reconcile-context)
   :ret ::core/reconcile-result)
 
-(def ^{:doc "Skein spool entrypoint for the Claude Code harness provider."}
-  spool
-  {:reconcile 'reconcile})
+(def spool {:reconcile 'reconcile})
