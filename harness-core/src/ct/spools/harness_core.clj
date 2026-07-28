@@ -221,9 +221,8 @@
         resolved (try
                    (resolve-harness rt requested)
                    (catch Exception e
-                     (if explicit-alias?
-                       (throw e)
-                       nil)))
+                     (when explicit-alias?
+                       (throw e))))
         generated (or (:generated resolved) old-generated)
         concrete (or (:harness resolved) (attr-get run :harness/harness))
         _ (concrete-harness rt concrete)

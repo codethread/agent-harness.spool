@@ -1,12 +1,11 @@
 (ns ct.spools.delegation
   "Agent coordination spool layered over the agent-run engine."
-  (:require [clojure.java.shell :as shell]
+  (:require [clojure.java.shell :as sh]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.cli.alpha :as cli]
             [skein.api.current.alpha :as current]
             [skein.api.registry.alpha :as registry]
-            [skein.api.patterns.alpha :as patterns]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.runtime.glossary.alpha :as glossary]
             [skein.api.graph.alpha :as graph]
@@ -90,7 +89,7 @@
 (defn- truncate
   [s n]
   (if (> (count s) n)
-    (str (subs s 0 (- n 1)) "…")
+    (str (subs s 0 (dec n)) "…")
     s))
 
 (def review-contract
@@ -168,7 +167,10 @@
    {:name "delegation/backend-unresolved"
     :definition "An interactive run resolves no backend: neither a --backend flag nor the task's agent-run/backend attribute names one."}
    {:name "delegation/interactive-flags-misused"
-    :definition "--backend or --reap was passed without --interactive, --interactive was passed without a backend source, or interactive flags were passed to the headless --ready fan-out."}
+    :definition (fmt/reflow
+                 "|--backend or --reap was passed without --interactive, --interactive was
+                  |passed without a backend source, or interactive flags were passed to the
+                  |headless --ready fan-out.")}
    {:name "delegation/nothing-to-retry"
     :definition "retry found no failed or exhausted serving run to supersede for the target."}
    {:name "delegation/ambiguous-retry-target"
@@ -186,7 +188,10 @@
    {:name "delegation/roster-unknown"
     :definition "A named reviewer roster is not registered by trusted config."}
    {:name "delegation/review-surface-invalid"
-    :definition "The review diff surface is unresolvable: --base and --commit-range conflict, --base lacks --cwd, the range is not expandable at --cwd, or a two-dot base is not an ancestor of its tip."}
+    :definition (fmt/reflow
+                 "|The review diff surface is unresolvable: --base and --commit-range conflict,
+                  |--base lacks --cwd, the range is not expandable at --cwd, or a two-dot base
+                  |is not an ancestor of its tip.")}
    {:name "delegation/council-underspecified"
     :definition "A council is underspecified: blank topic, non-positive seats or rounds, no resolvable harness, or a seat count combined with an explicit seat vector."}
    {:name "delegation/spend-filter-invalid"
@@ -393,7 +398,7 @@
 (defn- ready? [id]
   (contains? (set (map :id (weaver/ready (rt) [:= :state "active"] {}))) id))
 
-(defn- hitl? [task] (let [v (attr task :hitl)] (or (= true v) (= "true" v))))
+(defn- hitl? [task] (let [v (attr task :hitl)] (or (true? v) (= "true" v))))
 (defn- harness-for [task flags]
   (or (get flags "--harness") (attr task :agent-run/harness)
       (fail! "delegate requires --harness or task agent-run/harness attribute" {:task (:id task)})))
@@ -531,10 +536,13 @@
 ;; config (the git-reviewable rules file is the source of truth; this registry
 ;; is its weaver-lifetime, in-band mirror).
 
-(def roster-kind :ct.spools.delegation/roster)
+(def roster-kind
+  "Owner-partitioned kind id for reviewer roster declarations."
+  :ct.spools.delegation/roster)
 (def ^:private direct-owner :skein.owner/repl)
 
 (defn registry-handle
+  "Return the runtime-owned registry containing reviewer roster declarations."
   ([] (registry-handle (rt)))
   ([runtime]
    (runtime/spool-state runtime ::registry {:version 1}
@@ -743,10 +751,10 @@
         (sort-by key (registry/effective (registry-handle) roster-kind))))
 
 (defn- resolve-roster! [roster-name]
-  (let [key (roster-key roster-name)]
-    (let [entries (registry/effective (registry-handle) roster-kind)]
-      (or (get entries key)
-          (fail! "Roster not found" {:roster key :available (sort (keys entries))})))))
+  (let [key (roster-key roster-name)
+        entries (registry/effective (registry-handle) roster-kind)]
+    (or (get entries key)
+        (fail! "Roster not found" {:roster key :available (sort (keys entries))}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Blackboard prompt protocol (PLAN-Pnl-001.A6)
@@ -871,9 +879,9 @@
 (defn- review-prompt [{:keys [target-id focus contract scope note-tag change-context]}]
   (str contract "\n\n"
        "Review target strand " target-id " and its subtree.\n"
-       (when (not (str/blank? focus))
+       (when-not (str/blank? focus)
          (str "Focus: " focus "\n"))
-       (when (not (str/blank? scope))
+       (when-not (str/blank? scope)
          (str "Scope: confine this review to " scope "\n"))
        (change-context-block change-context)
        (read-the-board-fragment {:view :strand :board-id target-id})
@@ -1314,7 +1322,7 @@
                              (reject-card-target! "A :target-blackboard panel" id
                                                   (weaver/show (rt) id))
                              id)
-                   :fresh (:id (weaver/add! (rt) {:title (truncate (str "Panel: " (:name (first (first (:turns specs))))) 72)
+                   :fresh (:id (weaver/add! (rt) {:title (truncate (str "Panel: " (:name (ffirst (:turns specs)))) 72)
                                                   :attributes (cond-> {"panel/pass" (:pass specs)}
                                                                 spawned-by (assoc "agent-run/spawned-by" spawned-by))})))
         resolve-board (fn [s] (str/replace (str s) board-placeholder board-id))
@@ -1605,7 +1613,7 @@
   its paths. A git failure fails loudly so a bad range or missing worktree
   surfaces instead of silently dropping the change context."
   [cwd commit-range]
-  (let [{:keys [exit out err]} (shell/sh "git" "-C" cwd "diff" "--name-only" commit-range)]
+  (let [{:keys [exit out err]} (sh/sh "git" "-C" cwd "diff" "--name-only" commit-range)]
     (if (zero? exit)
       (into [] (remove str/blank?) (str/split-lines out))
       (fail! "Could not expand commit range in worktree"
@@ -1620,7 +1628,7 @@
   loudly when git cannot resolve it (unknown ref, no common ancestor, missing
   worktree)."
   [cwd base-ref]
-  (let [{:keys [exit out err]} (shell/sh "git" "-C" cwd "merge-base" base-ref "HEAD")]
+  (let [{:keys [exit out err]} (sh/sh "git" "-C" cwd "merge-base" base-ref "HEAD")]
     (if (zero? exit)
       (str/trim out)
       (fail! "Could not resolve the merge base pinning the review surface"
@@ -1643,7 +1651,7 @@
             right (subs commit-range (+ dots 2))
             right (if (non-blank? right) right "HEAD")]
         (when (non-blank? left)
-          (let [{:keys [exit err]} (shell/sh "git" "-C" cwd "merge-base" "--is-ancestor" left right)]
+          (let [{:keys [exit err]} (sh/sh "git" "-C" cwd "merge-base" "--is-ancestor" left right)]
             (case (long exit)
               0 nil
               1 (fail! (str "Two-dot commit range base is not an ancestor of its tip: the diff "
@@ -1889,7 +1897,11 @@
                      :backend {:doc "Interactive backend name."}
                      :reap {:doc "Interactive session reap policy: auto or manual."}}
              :annotations {:use-when ["Minting a raw, one-off run — recon, a helper, or a hand-wired run — that carries no task-serving contract."]
-                           :notes ["A --for helper never gates that strand's later delegation; delegate owns serving a task's own work. --reap manual leaves the interactive session for the human to reap after it completes."]
+                           :notes [(fmt/reflow
+                                    "|A --for helper never gates that strand's later delegation;
+                                     |delegate owns serving a task's own work. --reap manual leaves
+                                     |the interactive session for the human to reap after it
+                                     |completes.")]
                            :failure-modes ["delegation/interactive-flags-misused" "delegation/backend-unresolved"]}}
     "ps" {:doc "List agent run summaries."
           :hook-class :read :deadline-class :standard
@@ -1948,7 +1960,15 @@
                         :fanout-cap {:type :int :doc "With --ready, cap this fan-out to K concurrent runs (min(W, K)); ignored on single delegation."}}
                 :positionals [{:name :task-id :doc "Task id for single-task delegation."}]
                 :annotations {:use-when ["Handing a ready task's own work to a worker run, or fanning out every ready non-hitl task below a plan with --ready."]
-                              :notes ["The worker prompt is built from the task's title, body, and validation attribute plus the injected worker contract, and the run is attached --for the task (a serves edge). Harness resolves flag > task attr > loud failure; cwd resolves flag > task attr > workspace root. --interactive opens a live session for hitl tasks. --ready classifies every task once against pre-spawn state, so a task delegated this pass is never also reported as skipped."]
+                              :notes [(fmt/reflow
+                                       "|The worker prompt is built from the task's title, body, and
+                                        |validation attribute plus the injected worker contract, and
+                                        |the run is attached --for the task (a serves edge). Harness
+                                        |resolves flag > task attr > loud failure; cwd resolves flag
+                                        |> task attr > workspace root. --interactive opens a live
+                                        |session for hitl tasks. --ready classifies every task once
+                                        |against pre-spawn state, so a task delegated this pass is
+                                        |never also reported as skipped.")]
                               :failure-modes ["delegation/task-not-found" "delegation/task-not-active"
                                               "delegation/task-not-ready" "delegation/task-has-active-run"
                                               "delegation/task-needs-retry" "delegation/task-awaits-verification"
@@ -1961,15 +1981,26 @@
                      :cwd {:doc "Working directory override."}
                      :prompt {:doc "Extra prompt text."}}
              :positionals [{:name :id :required? true :doc "Task or run id."}]
-             :annotations {:use-when ["Recovering a failed/exhausted task by task id (supersede its failed serving run and respawn from the current body), or a raw run by run id (respawn preserving target, provenance, depends-on, cwd, and max-attempts)."]
-                           :notes ["When the contract was wrong, edit the task body first, then retry. A resumed run re-resumes its predecessor's session by default; --fresh severs the linkage and respawns cold on the full-brief prompt."]
+             :annotations {:use-when [(fmt/reflow
+                                       "|Recovering a failed/exhausted task by task id (supersede its
+                                        |failed serving run and respawn from the current body), or a
+                                        |raw run by run id (respawn preserving target, provenance,
+                                        |depends-on, cwd, and max-attempts).")]
+                           :notes [(fmt/reflow
+                                    "|When the contract was wrong, edit the task body first, then
+                                     |retry. A resumed run re-resumes its predecessor's session by
+                                     |default; --fresh severs the linkage and respawns cold on the
+                                     |full-brief prompt.")]
                            :failure-modes ["delegation/task-not-found" "delegation/nothing-to-retry"
                                            "delegation/ambiguous-retry-target" "delegation/resume-needs-fresh"]}}
     "status" {:doc "Return the coordinator dashboard."
               :hook-class :read :deadline-class :standard
               :positionals [{:name :root-id :doc "Optional plan or task root id."}]
               :annotations {:use-when ["Reading the coordinator dashboard for a plan or task, or workspace-wide active delegation when given no root."]
-                            :notes ["Tree renders active tasks and their runs; ready matches delegate --ready's selection; awaiting_verification lists active tasks a worker marked implemented."]}}
+                            :notes [(fmt/reflow
+                                     "|Tree renders active tasks and their runs; ready matches
+                                      |delegate --ready's selection; awaiting_verification lists
+                                      |active tasks a worker marked implemented.")]}}
     "note" {:doc "Append a note to a strand; its note/text/note/at content is write-once."
             :hook-class :mutating :deadline-class :standard
             :flags {:by {:doc "Author run id."}
@@ -1978,7 +2009,11 @@
             :positionals [{:name :strand-id :required? true :doc "Target strand id."}
                           {:name :text :required? true :doc "Note text."}]
             :annotations {:use-when ["Appending a durable, write-once note to any strand's memory — findings, handovers, or progress."]
-                          :notes ["Notes are append-only: a note-content rewrite throws, and burn is the only escape hatch. Workers may note any strand, including parents, without violating their contract. --round is for councils."]}}
+                          :notes [(fmt/reflow
+                                   "|Notes are append-only: a note-content rewrite throws, and burn
+                                    |is the only escape hatch. Workers may note any strand, including
+                                    |parents, without violating their contract. --round is for
+                                    |councils.")]}}
     "notes" {:doc "Read a strand's notes."
              :hook-class :read :deadline-class :standard
              :flags {:round {:type :int :doc "Council round filter."}}
@@ -1999,7 +2034,14 @@
                       :fanout-cap {:type :int :doc "Cap this review fan-out to K concurrent runs (min(W, K))."}}
               :positionals [{:name :target-id :required? true :doc "Target strand id."}]
               :annotations {:use-when ["Spawning independent read-only reviewers of a target strand and its subtree; reviewing a plan root reviews the whole feature."]
-                            :notes ["Reviewer and synthesizer runs are read-only helpers with no serves edge, so a target can be reviewed before or after it is delegated, and findings append as notes on the target. Prefer --base <ref> (pins merge-base(<ref>, HEAD)..HEAD) over --commit-range so the surface cannot drift. --roster fans out a named roster and is authoritative, so --seats/--harness/--contract are rejected with it."]
+                            :notes [(fmt/reflow
+                                     "|Reviewer and synthesizer runs are read-only helpers with no
+                                      |serves edge, so a target can be reviewed before or after it is
+                                      |delegated, and findings append as notes on the target. Prefer
+                                      |--base <ref> (pins merge-base(<ref>, HEAD)..HEAD) over
+                                      |--commit-range so the surface cannot drift. --roster fans out
+                                      |a named roster and is authoritative, so
+                                      |--seats/--harness/--contract are rejected with it.")]
                             :failure-modes ["delegation/review-target-invalid" "delegation/harness-unresolved"
                                             "delegation/roster-unknown" "delegation/review-surface-invalid"]}}
     "rosters" {:doc "List configured reviewer rosters."
@@ -2016,8 +2058,15 @@
                        :cwd {:doc "Working directory."}
                        :spawned-by {:doc "Caller run id for provenance."}
                        :fanout-cap {:type :int :doc "Cap this council fan-out to K concurrent runs (min(W, K))."}}
-               :annotations {:use-when ["Convening a fresh-blackboard deliberation panel: seats deliberate over a shared strand across rounds, then a synthesizer weighs the whole deliberation."]
-                             :notes ["The CLI is scalar-only; per-seat harness/brief is trusted-Clojure territory (ct.spools.delegation/council! or panel!). The synthesizer runs --synthesizer or the first seat's harness."]
+               :annotations {:use-when [(fmt/reflow
+                                         "|Convening a fresh-blackboard deliberation panel: seats
+                                          |deliberate over a shared strand across rounds, then a
+                                          |synthesizer weighs the whole deliberation.")]
+                             :notes [(fmt/reflow
+                                      "|The CLI is scalar-only; per-seat harness/brief is
+                                       |trusted-Clojure territory
+                                       |(ct.spools.delegation/council! or panel!). The synthesizer
+                                       |runs --synthesizer or the first seat's harness.")]
                              :failure-modes ["delegation/council-underspecified" "delegation/harness-unresolved"]}}}})
 
 (def ^:private run-summary-return

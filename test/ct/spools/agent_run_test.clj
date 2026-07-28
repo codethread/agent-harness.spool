@@ -1429,8 +1429,12 @@
     (let [stdout (str/join "\n"
                            ["{\"type\":\"session\",\"id\":\"sess-3\"}"
                             "{\"type\":\"message_end\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"do the review\"}]}}"
-                            "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[],\"stopReason\":\"error\",\"errorMessage\":\"Codex error: The usage limit has been reached\"}}"
-                            "{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"content\":[],\"stopReason\":\"error\",\"errorMessage\":\"Codex error: The usage limit has been reached\"}}"])
+                            (str "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\","
+                                 "\"content\":[],\"stopReason\":\"error\",\"errorMessage\":"
+                                 "\"Codex error: The usage limit has been reached\"}}")
+                            (str "{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\","
+                                 "\"content\":[],\"stopReason\":\"error\",\"errorMessage\":"
+                                 "\"Codex error: The usage limit has been reached\"}}")])
           parsed (#'shuttle/parse-pi-json stdout)]
       (is (= "Codex error: The usage limit has been reached" (:error parsed)))
       (is (str/blank? (:result parsed)))
