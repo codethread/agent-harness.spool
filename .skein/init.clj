@@ -3,18 +3,28 @@
 
 (def runtime (current/runtime))
 
-;; batteries is approved as a shipped source-root spool (spools.edn resolves it
-;; relative to the mill-selected skein checkout). The module guard keeps source
-;; loading behind that visible approval; its entry points come from the
-;; `skein.spools.batteries/spool` var (ADR-004), so this declaration names only
-;; the source target and world policy. The selected Skein checkout must contain
-;; or descend from 343f886880092bc38ed3e0522eca2d95a7cf04bc.
 (runtime/module! runtime :skein/spools-batteries
                  {:ns 'skein.spools.batteries
                   :spools ['skein.spools/batteries]})
+(runtime/module! runtime :module-adapters
+                 {:file "config/module_adapters.clj"
+                  :after [:skein/spools-batteries]})
 
-;; This checkout consumes its own agent-run and delegation roots so its
-;; coordination world can use the same harness seats as skein-src.
+(runtime/module! runtime :skein/spools-workflow
+                 {:ns 'skein.spools.workflow
+                  :spools ['skein.spools/workflow]
+                  :required? true})
+(runtime/module! runtime :skein/spools-workflow-cli
+                 {:ns 'skein.spools.workflow.cli
+                  :spools ['skein.spools/workflow]
+                  :after [:skein/spools-workflow]
+                  :required? true})
+(runtime/module! runtime :skein/spools-shell
+                 {:ns 'skein.spools.executors.shell
+                  :spools ['skein.spools/workflow]
+                  :after [:skein/spools-workflow]
+                  :required? true})
+
 (runtime/module! runtime :skein/spools-agent-run
                  {:ns 'ct.spools.agent-run
                   :spools ['ct.spools/agent-run]
@@ -25,14 +35,47 @@
                   :after [:skein/spools-agent-run]
                   :required? true})
 (runtime/module! runtime :harnesses
-                 {:file "harnesses.clj"
+                 {:file "config/harnesses.clj"
                   :spools ['ct.spools/delegation 'ct.spools/agent-run]
                   :after [:skein/spools-agent-run :skein/spools-delegation]
                   :required? true})
 
-;; kanban board for this repo's own coordination cards. The reviewed v10
-;; candidate exports its entry points from `ct.spools.kanban/spool`; release
-;; agent-harness v14 only after kanban v10 is tagged and its pin is publishable.
+(runtime/module! runtime :skein/spools-harness-core
+                 {:ns 'ct.spools.harness-core
+                  :spools ['ct.spools/harness-core]
+                  :required? true})
+(runtime/module! runtime :skein/spools-claude-harness
+                 {:ns 'ct.spools.claude-harness
+                  :spools ['ct.spools/claude-harness 'ct.spools/harness-core]
+                  :after [:skein/spools-harness-core]
+                  :required? true})
+(runtime/module! runtime :skein/spools-agent-cli
+                 {:ns 'ct.spools.agent-cli
+                  :spools ['ct.spools/agent-cli 'ct.spools/harness-core]
+                  :after [:skein/spools-harness-core
+                          :skein/spools-claude-harness]
+                  :required? true})
+(runtime/module! runtime :harness-next
+                 {:file "config/harness-next.clj"
+                  :spools ['ct.spools/harness-core]
+                  :after [:skein/spools-harness-core
+                          :skein/spools-claude-harness
+                          :skein/spools-agent-cli]
+                  :required? true})
+
+(runtime/module! runtime :workflows
+                 {:file "config/workflows.clj"
+                  :spools ['skein.spools/workflow]
+                  :after [:skein/spools-workflow]
+                  :required? true})
+
+(runtime/module! runtime :skein/spools-subagent
+                 {:ns 'ct.spools.executors.subagent
+                  :spools ['ct.spools/agent-run 'skein.spools/workflow]
+                  :after [:skein/spools-agent-run :skein/spools-workflow
+                          :harnesses :workflows]
+                  :required? true})
+
 (runtime/module! runtime :skein/spools-kanban
                  {:ns 'ct.spools.kanban
                   :spools ['codethread/kanban]

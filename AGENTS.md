@@ -1,9 +1,13 @@
 # Agent notes
 
-- Validate with `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:test` and
-  `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" clojure -M:format` from the repo root.
-- Run `make quality` for the complete local gate: format, clj-kondo, Splint,
-  repository conventions, reflection warnings, and the cold test suite.
+- When iterating with the user, always run the feature iteration workflow loop:
+  `strand workflow start <run-id> --workflow feature-iteration --params
+  '{"brief":"…","cwd":"…"}'`, then drive it with `strand workflow next`. Taking
+  the brief, changing the code, gating on `make quality`, reviewing the diff on a
+  read-only cross-vendor seat, and presenting back are encoded there — read them
+  with `strand workflow show feature-iteration`, not from this file.
+- Workflow definitions live in `.skein/config/workflows`, one file each, loaded
+  and registered by `.skein/config/workflows.clj`.
 - Root `deps.edn` deliberately targets the sibling `../skein-src` checkout,
   including its off-classpath `spools/workflow/src` root.
 - Never run `make install` while developing or testing this repository.
@@ -13,7 +17,7 @@
 - Working with users: claim a kanban card first; run `strand kanban prime`.
 - Delegating: run `strand prime agent`; use tracked agent runs, not
   harness-native subagents. List seats with `strand agent harnesses`; routing
-  policy lives in `.skein/harnesses.clj`.
+  policy lives in `.skein/config/harnesses.clj`.
 - Recover runs with `strand list --query agent-failures` and
   `strand agent logs <run-id> --tail 80`.
 
