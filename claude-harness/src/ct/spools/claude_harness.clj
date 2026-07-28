@@ -9,6 +9,17 @@
 
 (def ^:private efforts #{"low" "medium" "high" "xhigh" "max"})
 
+(s/def ::argv
+  (s/coll-of (s/and string? (complement str/blank?))
+             :kind vector? :min-count 1))
+(s/def ::exit-code int?)
+(s/def ::stdout (s/nilable string?))
+(s/def ::stderr (s/nilable string?))
+(s/def ::process-result
+  (s/and
+   (s/keys :req-un [::exit-code ::stdout ::stderr])
+   #(every? #{:exit-code :stdout :stderr} (keys %))))
+
 (declare ^:private attribute
          ^:private prepare-options
          ^:private validate-prepare-options!
@@ -31,6 +42,12 @@
                     :attributes attributes}
                    "harness produced an invalid Claude definition")))
 
+(s/fdef harness
+  :args (s/or :defaults (s/cat :runtime ::core/runtime)
+              :attributes (s/cat :runtime ::core/runtime
+                                 :attributes ::core/overlay-attributes))
+  :ret ::core/harness-definition)
+
 (defn prepare
   "Turn the resolved harness and full run strand into Claude argv."
   [_rt resolved-harness run]
@@ -42,6 +59,12 @@
     (validate-prepare-options! options run)
     (require-valid! ::argv (claude-command options)
                     "Claude prepare produced invalid argv")))
+
+(s/fdef prepare
+  :args (s/cat :runtime ::core/runtime
+               :resolved-harness ::core/harness-definition
+               :run ::core/strand)
+  :ret ::argv)
 
 (defn finish
   "Normalize Claude's process result into the core outcome."
@@ -59,6 +82,13 @@
                   (headless-outcome exit-code known-session stdout stderr))]
     (require-valid! ::core/outcome outcome
                     "Claude finish produced an invalid outcome")))
+
+(s/fdef finish
+  :args (s/cat :runtime ::core/runtime
+               :resolved-harness ::core/harness-definition
+               :run ::core/strand
+               :process-result ::process-result)
+  :ret ::core/outcome)
 
 (defn reconcile
   [{:keys [runtime] :as ctx}]
@@ -83,6 +113,10 @@
                  {:harness.claude/extra-argv ["--dangerously-skip-permissions"]}))
        {:reconciled :applied :harness "claude"}))
    "claude-harness reconcile produced an invalid result"))
+
+(s/fdef reconcile
+  :args (s/cat :ctx ::core/reconcile-context)
+  :ret ::core/reconcile-result)
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -158,36 +192,5 @@
          :session-id known-session
          :error (str "Claude JSON parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
-
-(s/def ::argv
-  (s/coll-of (s/and string? (complement str/blank?))
-             :kind vector? :min-count 1))
-(s/def ::exit-code int?)
-(s/def ::stdout (s/nilable string?))
-(s/def ::stderr (s/nilable string?))
-(s/def ::process-result
-  (s/and
-   (s/keys :req-un [::exit-code ::stdout ::stderr])
-   #(every? #{:exit-code :stdout :stderr} (keys %))))
-
-(s/fdef harness
-  :args (s/or :defaults (s/cat :runtime ::core/runtime)
-              :attributes (s/cat :runtime ::core/runtime
-                                 :attributes ::core/overlay-attributes))
-  :ret ::core/harness-definition)
-(s/fdef prepare
-  :args (s/cat :runtime ::core/runtime
-               :resolved-harness ::core/harness-definition
-               :run ::core/strand)
-  :ret ::argv)
-(s/fdef finish
-  :args (s/cat :runtime ::core/runtime
-               :resolved-harness ::core/harness-definition
-               :run ::core/strand
-               :process-result ::process-result)
-  :ret ::core/outcome)
-(s/fdef reconcile
-  :args (s/cat :ctx ::core/reconcile-context)
-  :ret ::core/reconcile-result)
 
 (def spool {:reconcile 'reconcile})

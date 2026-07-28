@@ -31,6 +31,44 @@
          finish-interactive!
          harness-arg-spec)
 
+(s/def ::event
+  (s/and map?
+         #(keyword? (:event/type %))
+         #(contains? % :event/id)))
+(s/def ::op-context
+  (s/and map?
+         #(s/valid? ::core/runtime (:op/runtime %))
+         #(map? (:op/args %))))
+(s/def ::contribute-context
+  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
+(s/def ::contribution
+  (s/and map?
+         #(map? (get-in % [:ops :entries]))
+         #(set? (get-in % [:ops :overrides]))))
+(s/def ::alias string?)
+(s/def ::harness string?)
+(s/def ::mode #{"headless" "interactive"})
+(s/def ::phase #{"pending" "running" "done" "failed"})
+(s/def ::session-id string?)
+(s/def ::launcher string?)
+(s/def ::exit-code int?)
+(s/def ::result string?)
+(s/def ::error string?)
+(s/def ::resumes string?)
+(s/def ::run-summary
+  (s/keys :req-un [::core/id ::core/title ::core/state
+                   ::alias ::harness ::mode ::phase ::session-id]
+          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
+(s/def ::runs (s/coll-of ::run-summary :kind vector?))
+(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
+(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
+(s/def ::await-result
+  (s/keys :req-un [::runs ::timed-out]))
+(s/def ::op-result
+  (s/or :run ::run-summary
+        :await ::await-result
+        :registry ::core/registry-list))
+
 (defn on-event
   "Schedule newly ready headless runs after a graph event.
 
@@ -44,6 +82,10 @@
     (doseq [run claimed]
       (.execute executor ^Runnable #(launch-headless! rt (:id run))))
     (mapv :id claimed)))
+
+(s/fdef on-event
+  :args (s/cat :event ::event)
+  :ret ::claimed-run-ids)
 
 (defn harness-op
   "Dispatch one parsed `strand harness` subcommand.
@@ -66,6 +108,10 @@
      "list" (core/harnesses runtime))
    "harness op produced an invalid result"))
 
+(s/fdef harness-op
+  :args (s/cat :ctx ::op-context)
+  :ret ::op-result)
+
 (defn contribute
   "Publish the `strand harness` CLI operation."
   [ctx]
@@ -82,6 +128,10 @@
                       :arg-spec harness-arg-spec}}
           :overrides #{}}}
    "agent-cli contribute produced an invalid contribution"))
+
+(s/fdef contribute
+  :args (s/cat :ctx ::contribute-context)
+  :ret ::contribution)
 
 (defn reconcile
   [{:keys [runtime] :as ctx}]
@@ -100,6 +150,10 @@
                                  {:spool "agent-cli"})
        {:reconciled :applied :claimed (scan! runtime)}))
    "agent-cli reconcile produced an invalid result"))
+
+(s/fdef reconcile
+  :args (s/cat :ctx ::core/reconcile-context)
+  :ret ::core/reconcile-result)
 
 (defn- daemon-thread-factory []
   (reify ThreadFactory
@@ -378,57 +432,6 @@
                  :positionals [{:name :run-id :type :string :required? true :doc "Interactive run ID."}]}
     "list" {:doc "List registered concrete harnesses and aliases."
             :hook-class :read :deadline-class :standard}}})
-
-(s/def ::event
-  (s/and map?
-         #(keyword? (:event/type %))
-         #(contains? % :event/id)))
-(s/def ::op-context
-  (s/and map?
-         #(s/valid? ::core/runtime (:op/runtime %))
-         #(map? (:op/args %))))
-(s/def ::contribute-context
-  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
-(s/def ::contribution
-  (s/and map?
-         #(map? (get-in % [:ops :entries]))
-         #(set? (get-in % [:ops :overrides]))))
-(s/def ::alias string?)
-(s/def ::harness string?)
-(s/def ::mode #{"headless" "interactive"})
-(s/def ::phase #{"pending" "running" "done" "failed"})
-(s/def ::session-id string?)
-(s/def ::launcher string?)
-(s/def ::exit-code int?)
-(s/def ::result string?)
-(s/def ::error string?)
-(s/def ::resumes string?)
-(s/def ::run-summary
-  (s/keys :req-un [::core/id ::core/title ::core/state
-                   ::alias ::harness ::mode ::phase ::session-id]
-          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
-(s/def ::runs (s/coll-of ::run-summary :kind vector?))
-(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
-(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
-(s/def ::await-result
-  (s/keys :req-un [::runs ::timed-out]))
-(s/def ::op-result
-  (s/or :run ::run-summary
-        :await ::await-result
-        :registry ::core/registry-list))
-
-(s/fdef on-event
-  :args (s/cat :event ::event)
-  :ret ::claimed-run-ids)
-(s/fdef harness-op
-  :args (s/cat :ctx ::op-context)
-  :ret ::op-result)
-(s/fdef contribute
-  :args (s/cat :ctx ::contribute-context)
-  :ret ::contribution)
-(s/fdef reconcile
-  :args (s/cat :ctx ::core/reconcile-context)
-  :ret ::core/reconcile-result)
 
 (def spool {:contribute 'contribute
             :reconcile 'reconcile})

@@ -36,6 +36,13 @@ A good default rule:
 
 > Spec data contracts broadly; spec function contracts selectively where generated inputs or API documentation will catch real bugs.
 
+Place each `s/fdef` immediately after the public function it specifies. This
+keeps the callable contract attached to the implementation it documents instead
+of collecting function specs in a detached block at the bottom of the namespace.
+Define prerequisite data specs before the public functions, then order the
+namespace as public function plus `s/fdef` pairs, private helpers, and any
+conventional entrypoint data such as `spool`.
+
 ### Property-based testing with spec
 
 `clojure.spec.test.alpha/check` is most valuable when the `:fn` relation states a property between inputs and outputs, not merely when `:args` and `:ret` check shape.
@@ -102,7 +109,7 @@ Docstrings cannot use runtime helpers: wrap them by hand well short of the limit
 
 ### The story-file shape (api modules)
 
-A public namespace should read as a story: the promised fns lead, and each body shows the meat of its algorithm as named, composed steps. Placement of helpers — file-local privates below the publics, or a sibling `internal` namespace — is taste; what is not negotiable is that the public body surfaces the shape of the problem.
+A public namespace should read as a story in CleanCode style: the public fns lead, and each body shows the meat of its algorithm as named, composed steps. The public body surfaces the shape of the problem.
 
 ```clojure
 ;; GOOD: the public fn IS the pipeline; helpers are named steps below it.
