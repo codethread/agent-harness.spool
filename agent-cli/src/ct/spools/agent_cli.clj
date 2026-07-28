@@ -17,45 +17,89 @@
 (def ^:private state-version 1)
 (def ^:private event-types #{:strand/added :strand/updated :batch/applied})
 
-(s/def ::event
-  (s/and map?
-         #(keyword? (:event/type %))
-         #(contains? % :event/id)))
-(s/def ::op-context
-  (s/and map?
-         #(s/valid? ::core/runtime (:op/runtime %))
-         #(map? (:op/args %))))
-(s/def ::contribute-context
-  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
-(s/def ::contribution
-  (s/and map?
-         #(map? (get-in % [:ops :entries]))
-         #(set? (get-in % [:ops :overrides]))))
-(s/def ::alias string?)
-(s/def ::harness string?)
-(s/def ::mode #{"headless" "interactive"})
-(s/def ::phase #{"pending" "running" "done" "failed"})
-(s/def ::session-id string?)
-(s/def ::launcher string?)
-(s/def ::exit-code int?)
-(s/def ::result string?)
-(s/def ::error string?)
-(s/def ::resumes string?)
-(s/def ::run-summary
-  (s/keys :req-un [::core/id ::core/title ::core/state
-                   ::alias ::harness ::mode ::phase ::session-id]
-          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
-(s/def ::runs (s/coll-of ::run-summary :kind vector?))
-(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
-(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
-(s/def ::await-result
-  (s/keys :req-un [::runs ::timed-out]))
-(s/def ::op-result
-  (s/or :run ::run-summary
-        :await ::await-result
-        :registry ::core/registry-list))
+(declare ^:private scan!
+         state
+         pending-headless
+         claim!
+         launch-headless!
+         op-run
+         await!
+         op-retry
+         op-resume
+         summary
+         mark-interactive-running!
+         finish-interactive!
+         harness-arg-spec)
 
-(declare ^:private scan!)
+(defn on-event
+  "Schedule newly ready headless runs after a graph event.
+
+  Claims eligible runs, submits each to the daemon executor, and returns their
+  IDs without waiting for the launched processes to finish."
+  [event]
+  (require-valid! ::event event "Harness event handler received an invalid event")
+  (let [rt (current/runtime)
+        claimed (filterv #(claim! rt (:id %)) (pending-headless rt))
+        executor (:executor (state rt))]
+    (doseq [run claimed]
+      (.execute executor ^Runnable #(launch-headless! rt (:id run))))
+    (mapv :id claimed)))
+
+(defn harness-op
+  "Dispatch one parsed `strand harness` subcommand.
+
+  Run, retry, and resume may schedule asynchronous headless work. `await`
+  blocks the CLI thread until each requested run is terminal or its timeout
+  expires; every other subcommand returns after its immediate transition."
+  [{:op/keys [runtime args cwd] :as ctx}]
+  (require-valid! ::op-context ctx "harness op received an invalid operation context")
+  (require-valid!
+   ::op-result
+   (case (first (:subcommand args))
+     "run" (op-run runtime args cwd)
+     "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
+     "retry" (op-retry runtime args)
+     "resume" (op-resume runtime args)
+     "self-complete" (summary (core/self-complete! runtime (:run-id args) (:result args)))
+     "_started" (summary (mark-interactive-running! runtime (:run-id args)))
+     "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
+     "list" (core/harnesses runtime))
+   "harness op produced an invalid result"))
+
+(defn contribute
+  "Publish the `strand harness` CLI operation."
+  [ctx]
+  (require-valid! ::contribute-context ctx
+                  "agent-cli contribute received an invalid context")
+  (require-valid!
+   ::contribution
+   {:ops {:entries
+          {"harness" {:name "harness"
+                      :fn 'ct.spools.agent-cli/harness-op
+                      :stream? false
+                      :provenance 'ct.spools.agent-cli
+                      :doc (:doc harness-arg-spec)
+                      :arg-spec harness-arg-spec}}
+          :overrides #{}}}
+   "agent-cli contribute produced an invalid contribution"))
+
+(defn reconcile
+  [{:keys [runtime] :as ctx}]
+  (require-valid! ::core/reconcile-context ctx
+                  "agent-cli reconcile received an invalid context")
+  (require-valid!
+   ::core/reconcile-result
+   (case (get-in ctx [:module/contribution :status])
+     :removed (do
+                (events/unregister-handler! runtime :harness/engine)
+                {:reconciled :removed})
+     (do
+       (state runtime)
+       (events/register-handler! runtime :harness/engine event-types
+                                 'ct.spools.agent-cli/on-event
+                                 {:spool "agent-cli"})
+       {:reconciled :applied :claimed (scan! runtime)}))
+   "agent-cli reconcile produced an invalid result"))
 
 (defn- daemon-thread-factory []
   (reify ThreadFactory
@@ -158,15 +202,6 @@
     (doseq [run claimed]
       (.execute executor ^Runnable #(launch-headless! rt (:id run))))
     (mapv :id claimed)))
-
-(defn on-event
-  "Schedule newly ready headless runs after a graph event.
-
-  Claims and submits eligible runs to the daemon executor, then returns their
-  IDs without waiting for the launched processes to finish."
-  [event]
-  (require-valid! ::event event "Harness event handler received an invalid event")
-  (scan! (current/runtime)))
 
 (defn- sh-quote [s]
   (str "'" (str/replace (str s) "'" "'\\''") "'"))
@@ -300,27 +335,6 @@
                                          (when-let [data (ex-data e)]
                                            (str " " (pr-str data))))})))))
 
-(defn harness-op
-  "Dispatch one parsed `strand harness` subcommand.
-
-  Run, retry, and resume may schedule asynchronous headless work. `await`
-  blocks the CLI thread until each requested run is terminal or its timeout
-  expires; every other subcommand returns after its immediate transition."
-  [{:op/keys [runtime args cwd] :as ctx}]
-  (require-valid! ::op-context ctx "harness op received an invalid operation context")
-  (require-valid!
-   ::op-result
-   (case (first (:subcommand args))
-     "run" (op-run runtime args cwd)
-     "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
-     "retry" (op-retry runtime args)
-     "resume" (op-resume runtime args)
-     "self-complete" (summary (core/self-complete! runtime (:run-id args) (:result args)))
-     "_started" (summary (mark-interactive-running! runtime (:run-id args)))
-     "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
-     "list" (core/harnesses runtime))
-   "harness op produced an invalid result"))
-
 (def ^:private harness-arg-spec
   {:op "harness"
    :doc "Create, await, retry, and resume provider-neutral harness runs."
@@ -365,40 +379,43 @@
     "list" {:doc "List registered concrete harnesses and aliases."
             :hook-class :read :deadline-class :standard}}})
 
-(defn contribute
-  "Publish the `strand harness` CLI operation."
-  [ctx]
-  (require-valid! ::contribute-context ctx
-                  "agent-cli contribute received an invalid context")
-  (require-valid!
-   ::contribution
-   {:ops {:entries
-          {"harness" {:name "harness"
-                      :fn 'ct.spools.agent-cli/harness-op
-                      :stream? false
-                      :provenance 'ct.spools.agent-cli
-                      :doc (:doc harness-arg-spec)
-                      :arg-spec harness-arg-spec}}
-          :overrides #{}}}
-   "agent-cli contribute produced an invalid contribution"))
-
-(defn reconcile
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::core/reconcile-context ctx
-                  "agent-cli reconcile received an invalid context")
-  (require-valid!
-   ::core/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed (do
-                (events/unregister-handler! runtime :harness/engine)
-                {:reconciled :removed})
-     (do
-       (state runtime)
-       (events/register-handler! runtime :harness/engine event-types
-                                 'ct.spools.agent-cli/on-event
-                                 {:spool "agent-cli"})
-       {:reconciled :applied :claimed (scan! runtime)}))
-   "agent-cli reconcile produced an invalid result"))
+(s/def ::event
+  (s/and map?
+         #(keyword? (:event/type %))
+         #(contains? % :event/id)))
+(s/def ::op-context
+  (s/and map?
+         #(s/valid? ::core/runtime (:op/runtime %))
+         #(map? (:op/args %))))
+(s/def ::contribute-context
+  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
+(s/def ::contribution
+  (s/and map?
+         #(map? (get-in % [:ops :entries]))
+         #(set? (get-in % [:ops :overrides]))))
+(s/def ::alias string?)
+(s/def ::harness string?)
+(s/def ::mode #{"headless" "interactive"})
+(s/def ::phase #{"pending" "running" "done" "failed"})
+(s/def ::session-id string?)
+(s/def ::launcher string?)
+(s/def ::exit-code int?)
+(s/def ::result string?)
+(s/def ::error string?)
+(s/def ::resumes string?)
+(s/def ::run-summary
+  (s/keys :req-un [::core/id ::core/title ::core/state
+                   ::alias ::harness ::mode ::phase ::session-id]
+          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
+(s/def ::runs (s/coll-of ::run-summary :kind vector?))
+(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
+(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
+(s/def ::await-result
+  (s/keys :req-un [::runs ::timed-out]))
+(s/def ::op-result
+  (s/or :run ::run-summary
+        :await ::await-result
+        :registry ::core/registry-list))
 
 (s/fdef on-event
   :args (s/cat :event ::event)
