@@ -47,6 +47,7 @@
           :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
 (s/def ::runs (s/coll-of ::run-summary :kind vector?))
 (s/def ::timed-out (s/coll-of ::core/id :kind vector?))
+(s/def ::claimed-run-ids (s/coll-of ::core/id :kind vector?))
 (s/def ::await-result
   (s/keys :req-un [::runs ::timed-out]))
 (s/def ::op-result
@@ -159,7 +160,10 @@
     (mapv :id claimed)))
 
 (defn on-event
-  "Graph event handler that admits newly ready headless runs."
+  "Schedule newly ready headless runs after a graph event.
+
+  Claims and submits eligible runs to the daemon executor, then returns their
+  IDs without waiting for the launched processes to finish."
   [event]
   (require-valid! ::event event "Harness event handler received an invalid event")
   (scan! (current/runtime)))
@@ -297,7 +301,11 @@
                                            (str " " (pr-str data))))})))))
 
 (defn harness-op
-  "Dispatch parsed `strand harness` subcommands."
+  "Dispatch one parsed `strand harness` subcommand.
+
+  Run, retry, and resume may schedule asynchronous headless work. `await`
+  blocks the CLI thread until each requested run is terminal or its timeout
+  expires; every other subcommand returns after its immediate transition."
   [{:op/keys [runtime args cwd] :as ctx}]
   (require-valid! ::op-context ctx "harness op received an invalid operation context")
   (require-valid!
@@ -395,7 +403,7 @@
 
 (s/fdef on-event
   :args (s/cat :event ::event)
-  :ret vector?)
+  :ret ::claimed-run-ids)
 (s/fdef harness-op
   :args (s/cat :ctx ::op-context)
   :ret ::op-result)
@@ -406,5 +414,7 @@
   :args (s/cat :ctx ::core/reconcile-context)
   :ret ::core/reconcile-result)
 
-(def spool {:contribute 'contribute
-            :reconcile 'reconcile})
+(def ^{:doc "Skein spool entrypoint for provider-neutral harness CLI support."}
+  spool
+  {:contribute 'contribute
+   :reconcile 'reconcile})

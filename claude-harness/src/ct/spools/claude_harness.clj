@@ -177,4 +177,6 @@
   :args (s/cat :ctx ::core/reconcile-context)
   :ret ::core/reconcile-result)
 
-(def spool {:reconcile 'reconcile})
+(def ^{:doc "Skein spool entrypoint for the Claude Code harness provider."}
+  spool
+  {:reconcile 'reconcile})
