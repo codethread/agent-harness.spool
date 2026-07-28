@@ -13,8 +13,22 @@ created="$(strand_call harness run "$@" --interactive)" || exit $?
 run_id="$(printf '%s' "$created" | jq -r '.id')"
 launcher="$(printf '%s' "$created" | jq -r '.launcher')"
 
+record_finish() {
+  strand_call harness _finished "$run_id" --exit-code "$1" >/dev/null
+}
+
+interrupted() {
+  trap '' HUP INT TERM
+  record_finish "$1" || :
+  exit "$1"
+}
+
+trap 'interrupted 129' HUP
+trap 'interrupted 130' INT
+trap 'interrupted 143' TERM
+
 strand_call harness _started "$run_id" >/dev/null || exit $?
 "$launcher"
 exit_code=$?
-strand_call harness _finished "$run_id" --exit-code "$exit_code" >/dev/null || exit $?
+record_finish "$exit_code" || exit $?
 exit "$exit_code"
