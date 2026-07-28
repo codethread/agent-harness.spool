@@ -1,0 +1,20 @@
+#!/bin/sh
+set -u
+
+strand_call() {
+  if [ -n "${SKEIN_WORKSPACE:-}" ]; then
+    strand --workspace "$SKEIN_WORKSPACE" "$@"
+  else
+    strand "$@"
+  fi
+}
+
+created="$(strand_call harness run "$@" --interactive)" || exit $?
+run_id="$(printf '%s' "$created" | jq -r '.id')"
+launcher="$(printf '%s' "$created" | jq -r '.launcher')"
+
+strand_call harness _started "$run_id" >/dev/null || exit $?
+"$launcher"
+exit_code=$?
+strand_call harness _finished "$run_id" --exit-code "$exit_code" >/dev/null || exit $?
+exit "$exit_code"
