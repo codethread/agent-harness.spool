@@ -65,8 +65,6 @@
                #(every? #{:name :kind :alias-of :attributes} (keys %)))))
 (s/def ::registry-list (s/coll-of ::registry-entry :kind vector?))
 (s/def ::harness-registration (s/keys :req-un [::harness ::definition]))
-(s/def ::unregistered string?)
-(s/def ::unregister-result (s/keys :req-un [::unregistered]))
 (s/def ::prompt string?)
 (s/def ::cwd (s/and string? (complement str/blank?)))
 (s/def ::session-id (s/and string? (complement str/blank?)))
@@ -143,22 +141,6 @@
                     "register-alias! produced an invalid registration")))
 
 (s/fdef register-alias! :args (s/cat :runtime ::runtime :alias-name ::name-ref :parent ::name-ref :attributes ::overlay-attributes) :ret ::alias-result)
-
-(defn unregister-alias!
-  "Remove one alias definition.
-
-  Existing runs remain retryable from their frozen generated data."
-  [rt alias-name]
-  (require-valid! ::runtime rt "unregister-alias! requires a Weaver runtime")
-  (require-valid! ::name-ref alias-name "unregister-alias! requires an alias name")
-  (let [alias-name (name-string alias-name "Alias name")
-        [before _] (swap-vals! (:aliases (registry rt)) dissoc alias-name)]
-    (when-not (contains? before alias-name)
-      (fail! "Harness alias is not registered" {:alias alias-name}))
-    (require-valid! ::unregister-result {:unregistered alias-name}
-                    "unregister-alias! produced an invalid result")))
-
-(s/fdef unregister-alias! :args (s/cat :runtime ::runtime :alias-name ::name-ref) :ret ::unregister-result)
 
 (defn resolve-harness
   "Resolve a harness or alias into its implementation and merged attributes.
