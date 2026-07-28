@@ -1,22 +1,40 @@
 (ns ct.spools.claude-harness
   "Claude Code definition and provider-specific prepare/finish callbacks."
   (:require [clojure.data.json :as json]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as core]
-            [skein.api.spool.alpha :refer [attr-get fail!]]
+            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]))
 
 (def ^:private efforts #{"low" "medium" "high" "xhigh" "max"})
+
+(s/def ::argv
+  (s/coll-of (s/and string? (complement str/blank?))
+             :kind vector? :min-count 1))
+(s/def ::exit-code int?)
+(s/def ::stdout (s/nilable string?))
+(s/def ::stderr (s/nilable string?))
+(s/def ::process-result
+  (s/and
+   (s/keys :req-un [::exit-code ::stdout ::stderr])
+   #(every? #{:exit-code :stdout :stderr} (keys %))))
 
 (defn harness
   "Return the plain-data Claude Code harness definition."
   ([rt]
    (harness rt {}))
   ([_rt attributes]
-   {:modes #{:headless :interactive}
-    :prepare 'ct.spools.claude-harness/prepare
-    :finish 'ct.spools.claude-harness/finish
-    :attributes attributes}))
+   (require-valid! ::core/runtime _rt "harness requires a Weaver runtime")
+   (require-valid! ::core/overlay-attributes attributes
+                   "harness requires Claude overlay attributes")
+   (require-valid!
+    ::core/harness-definition
+    {:modes #{:headless :interactive}
+     :prepare 'ct.spools.claude-harness/prepare
+     :finish 'ct.spools.claude-harness/finish
+     :attributes attributes}
+    "harness produced an invalid Claude definition")))
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -29,7 +47,11 @@
 
 (defn prepare
   "Turn the resolved harness and full run strand into Claude argv."
-  [_rt _resolved-harness run]
+  [_rt resolved-harness run]
+  (require-valid! ::core/runtime _rt "Claude prepare requires a Weaver runtime")
+  (require-valid! ::core/harness-definition resolved-harness
+                  "Claude prepare requires a resolved harness definition")
+  (require-valid! ::core/strand run "Claude prepare requires a full run strand")
   (let [mode (attribute run :harness/mode)
         resumes (attribute run :harness/resumes)
         session-id (attribute run :harness/session-id)
@@ -44,15 +66,18 @@
     (when (and effort (not (efforts effort)))
       (fail! "Claude effort is unsupported" {:effort effort :allowed (sort efforts)}))
     (validate-extra-argv extra)
-    (vec
-     (concat
-      ["claude"]
-      (when (= "headless" mode) ["--print" "--output-format" "json"])
-      (if resumes ["--resume" session-id] ["--session-id" session-id])
-      (when model ["--model" model])
-      (when effort ["--effort" effort])
-      extra
-      (when (and (= "interactive" mode) (not (str/blank? prompt))) [prompt])))))
+    (require-valid!
+     ::argv
+     (vec
+      (concat
+       ["claude"]
+       (when (= "headless" mode) ["--print" "--output-format" "json"])
+       (if resumes ["--resume" session-id] ["--session-id" session-id])
+       (when model ["--model" model])
+       (when effort ["--effort" effort])
+       extra
+       (when (and (= "interactive" mode) (not (str/blank? prompt))) [prompt])))
+     "Claude prepare produced invalid argv")))
 
 (defn- clipped [s]
   (when-not (str/blank? s)
@@ -60,62 +85,96 @@
 
 (defn finish
   "Normalize Claude's process result into the core outcome."
-  [_rt _resolved-harness run {:keys [exit-code stdout stderr]}]
+  [_rt resolved-harness run {:keys [exit-code stdout stderr] :as process-result}]
+  (require-valid! ::core/runtime _rt "Claude finish requires a Weaver runtime")
+  (require-valid! ::core/harness-definition resolved-harness
+                  "Claude finish requires a resolved harness definition")
+  (require-valid! ::core/strand run "Claude finish requires a full run strand")
+  (require-valid! ::process-result process-result
+                  "Claude finish requires an observed process result")
   (let [mode (attribute run :harness/mode)
         known-session (attribute run :harness/session-id)]
-    (if (= "interactive" mode)
-      (if (zero? exit-code)
-        {:status :done
-         :exit-code exit-code
-         :result (attribute run :harness/result)
-         :session-id known-session}
-        {:status :failed
-         :exit-code exit-code
-         :session-id known-session
-         :error (or (clipped stderr) (str "Claude exited " exit-code))})
-      (if-not (zero? exit-code)
-        {:status :failed
-         :exit-code exit-code
-         :session-id known-session
-         :error (or (clipped stderr) (clipped stdout) (str "Claude exited " exit-code))}
-        (try
-          (let [parsed (json/read-str stdout :key-fn keyword)
-                result (:result parsed)
-                session-id (or (:session_id parsed) known-session)]
-            (if (str/blank? result)
-              {:status :failed
-               :exit-code exit-code
-               :session-id session-id
-               :error (str "Claude returned no result: " (or (clipped stdout) "<blank>"))}
-              {:status :done
-               :exit-code exit-code
-               :result result
-               :session-id session-id}))
-          (catch Exception e
-            {:status :failed
-             :exit-code exit-code
-             :session-id known-session
-             :error (str "Claude JSON parse failed: " (ex-message e)
-                         (when-let [output (clipped stdout)] (str "\n" output)))}))))))
+    (require-valid!
+     ::core/outcome
+     (if (= "interactive" mode)
+       (if (zero? exit-code)
+         {:status :done
+          :exit-code exit-code
+          :result (attribute run :harness/result)
+          :session-id known-session}
+         {:status :failed
+          :exit-code exit-code
+          :session-id known-session
+          :error (or (clipped stderr) (str "Claude exited " exit-code))})
+       (if-not (zero? exit-code)
+         {:status :failed
+          :exit-code exit-code
+          :session-id known-session
+          :error (or (clipped stderr) (clipped stdout) (str "Claude exited " exit-code))}
+         (try
+           (let [parsed (json/read-str stdout :key-fn keyword)
+                 result (:result parsed)
+                 session-id (or (:session_id parsed) known-session)]
+             (if (str/blank? result)
+               {:status :failed
+                :exit-code exit-code
+                :session-id session-id
+                :error (str "Claude returned no result: " (or (clipped stdout) "<blank>"))}
+               {:status :done
+                :exit-code exit-code
+                :result result
+                :session-id session-id}))
+           (catch Exception e
+             {:status :failed
+              :exit-code exit-code
+              :session-id known-session
+              :error (str "Claude JSON parse failed: " (ex-message e)
+                          (when-let [output (clipped stdout)] (str "\n" output)))}))))
+     "Claude finish produced an invalid outcome")))
 
 (defn reconcile
   "Declare Claude overlay vocabulary and register the concrete Claude harness."
   [{:keys [runtime] :as ctx}]
-  (case (get-in ctx [:module/contribution :status])
-    :removed {:reconciled :removed}
-    (do
-      (vocab/declare! runtime
-                      {:kind :attr-namespace
-                       :name "harness.claude"
-                       :owner :ct.spools/claude-harness
-                       :keys ["harness.claude/model"
-                              "harness.claude/effort"
-                              "harness.claude/extra-argv"]
-                       :doc "Claude Code command overlay attributes."})
-      (core/register-harness!
-       runtime :claude
-       (harness runtime
-                {:harness.claude/extra-argv ["--dangerously-skip-permissions"]}))
-      {:reconciled :applied :harness "claude"})))
+  (require-valid! ::core/reconcile-context ctx
+                  "claude-harness reconcile received invalid context")
+  (require-valid!
+   ::core/reconcile-result
+   (case (get-in ctx [:module/contribution :status])
+     :removed {:reconciled :removed}
+     (do
+       (vocab/declare! runtime
+                       {:kind :attr-namespace
+                        :name "harness.claude"
+                        :owner :ct.spools/claude-harness
+                        :keys ["harness.claude/model"
+                               "harness.claude/effort"
+                               "harness.claude/extra-argv"]
+                        :doc "Claude Code command overlay attributes."})
+       (core/register-harness!
+        runtime :claude
+        (harness runtime
+                 {:harness.claude/extra-argv ["--dangerously-skip-permissions"]}))
+       {:reconciled :applied :harness "claude"}))
+   "claude-harness reconcile produced an invalid result"))
+
+(s/fdef harness
+  :args (s/or :defaults (s/cat :runtime ::core/runtime)
+              :attributes (s/cat :runtime ::core/runtime
+                                 :attributes ::core/overlay-attributes))
+  :ret ::core/harness-definition)
+(s/fdef prepare
+  :args (s/cat :runtime ::core/runtime
+               :resolved-harness ::core/harness-definition
+               :run ::core/strand)
+  :ret ::argv)
+(s/fdef finish
+  :args (s/cat :runtime ::core/runtime
+               :resolved-harness ::core/harness-definition
+               :run ::core/strand
+               :process-result ::process-result)
+  :ret ::core/outcome)
+(s/fdef reconcile
+  :args (s/cat :ctx ::core/reconcile-context)
+  :ret ::core/reconcile-result)
 
 (def spool {:reconcile 'reconcile})

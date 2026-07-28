@@ -1,8 +1,9 @@
 (ns ct.spools.harness-core
   "Provider-neutral structure, registry, and lifecycle for harness runs."
-  (:require [clojure.string :as str]
+  (:require [clojure.spec.alpha :as s]
+            [clojure.string :as str]
             [skein.api.runtime.alpha :as runtime]
-            [skein.api.spool.alpha :refer [attr-get fail!]]
+            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.weaver.alpha :as weaver])
   (:import [java.util UUID]))
@@ -14,6 +15,122 @@
    "harness/phase" "harness/prompt" "harness/cwd" "harness/session-id"
    "harness/resumes" "harness/result" "harness/exit-code" "harness/error"
    "harness/generated" "harness/overrides"])
+
+(declare ^:private overlay-key?)
+
+;; Public boundary contracts. These intentionally describe the small MVP API,
+;; not every shape the implementation happens to tolerate internally.
+(s/def ::runtime map?)
+(s/def ::name-ref
+  #(or (keyword? %)
+       (symbol? %)
+       (and (string? %) (not (str/blank? %)))))
+(s/def ::id (s/and string? (complement str/blank?)))
+(s/def ::title (s/and string? (complement str/blank?)))
+(s/def ::state #{"active" "closed"})
+(s/def ::attributes map?)
+(s/def ::strand
+  (s/keys :req-un [::id ::title ::state ::attributes]))
+(s/def ::mode #{:headless :interactive "headless" "interactive"})
+(s/def ::modes (s/coll-of #{:headless :interactive} :kind set? :min-count 1))
+(s/def ::callback qualified-symbol?)
+(s/def ::prepare ::callback)
+(s/def ::finish ::callback)
+
+(defn- json-value? [value]
+  (cond
+    (or (nil? value) (string? value) (number? value) (boolean? value)) true
+    (map? value) (and (every? #(or (keyword? %) (string? %)) (keys value))
+                      (every? json-value? (vals value)))
+    (sequential? value) (every? json-value? value)
+    :else false))
+
+(s/def ::overlay-attributes
+  (s/and map?
+         #(every? overlay-key? (keys %))
+         #(every? json-value? (vals %))))
+(s/def ::harness-definition
+  (s/and
+   (s/keys :req-un [::modes ::prepare ::finish]
+           :opt-un [::attributes])
+   #(qualified-symbol? (:prepare %))
+   #(qualified-symbol? (:finish %))
+   #(every? #{:modes :prepare :finish :attributes} (keys %))
+   #(or (not (contains? % :attributes))
+        (s/valid? ::overlay-attributes (:attributes %)))))
+(s/def ::alias-result
+  (s/keys :req-un [:ct.spools.harness-core/alias
+                   :ct.spools.harness-core/parent
+                   ::attributes]))
+(s/def ::alias string?)
+(s/def ::parent string?)
+(s/def ::harness ::name-ref)
+(s/def ::definition ::harness-definition)
+(s/def ::generated ::overlay-attributes)
+(s/def ::resolved-harness
+  (s/keys :req-un [::alias ::harness ::definition ::generated]))
+(s/def ::name string?)
+(s/def ::kind #{"harness" "alias"})
+(s/def ::alias-of string?)
+(s/def ::mode-name #{"headless" "interactive"})
+(s/def :ct.spools.harness-core.registry/modes
+  (s/coll-of ::mode-name :kind vector? :min-count 1))
+(s/def ::registry-entry
+  (s/or :harness
+        (s/and (s/keys :req-un [::name ::kind
+                                :ct.spools.harness-core.registry/modes])
+               #(= "harness" (:kind %))
+               #(every? #{:name :kind :modes} (keys %)))
+        :alias
+        (s/and (s/keys :req-un [::name ::kind ::alias-of ::attributes])
+               #(= "alias" (:kind %))
+               #(every? #{:name :kind :alias-of :attributes} (keys %)))))
+(s/def ::registry-list (s/coll-of ::registry-entry :kind vector?))
+(s/def ::harness-registration
+  (s/keys :req-un [::harness ::definition]))
+(s/def ::unregistered string?)
+(s/def ::unregister-result
+  (s/keys :req-un [::unregistered]))
+(s/def ::prompt string?)
+(s/def ::cwd (s/and string? (complement str/blank?)))
+(s/def ::session-id (s/and string? (complement str/blank?)))
+(s/def ::resumes ::id)
+(s/def ::create-request
+  (s/and
+   (s/keys :req-un [::harness]
+           :opt-un [::mode ::prompt ::cwd ::attributes ::title ::resumes ::session-id])
+   #(every? #{:harness :mode :prompt :cwd :attributes :title :resumes :session-id}
+            (keys %))
+   #(or (not (contains? % :attributes))
+        (s/valid? ::overlay-attributes (:attributes %)))))
+(s/def ::status #{:done :failed "done" "failed"})
+(s/def ::exit-code (s/nilable int?))
+(s/def ::result (s/nilable string?))
+(s/def ::error (s/nilable string?))
+(s/def ::outcome
+  (s/and
+   (s/keys :req-un [::status]
+           :opt-un [::exit-code ::result ::session-id ::error])
+   #(every? #{:status :exit-code :result :session-id :error} (keys %))))
+(s/def ::retry-request
+  (s/and
+   (s/keys :opt-un [::harness ::cwd ::attributes])
+   #(every? #{:harness :cwd :attributes} (keys %))
+   #(or (not (contains? % :attributes))
+        (s/valid? ::overlay-attributes (:attributes %)))))
+(s/def ::resume-request
+  (s/and
+   (s/keys :opt-un [::prompt ::cwd ::attributes ::mode ::title])
+   #(every? #{:prompt :cwd :attributes :mode :title} (keys %))
+   #(or (not (contains? % :attributes))
+        (s/valid? ::overlay-attributes (:attributes %)))))
+(s/def ::module-status #{:applied :removed})
+(s/def ::reconcile-context
+  (s/and map?
+         #(s/valid? ::runtime (:runtime %))
+         #(s/valid? ::module-status (get-in % [:module/contribution :status]))))
+(s/def ::reconcile-result
+  (s/and map? #(contains? #{:applied :removed} (:reconciled %))))
 
 (defn- new-registry []
   {:harnesses (atom {})
@@ -51,6 +168,10 @@
 (defn register-harness!
   "Add or replace one concrete harness definition in `rt`."
   [rt harness-name definition]
+  (require-valid! ::runtime rt "register-harness! requires a Weaver runtime")
+  (require-valid! ::name-ref harness-name "register-harness! requires a harness name")
+  (require-valid! ::harness-definition definition
+                  "register-harness! requires a valid harness definition")
   (let [harness-name (name-string harness-name "Harness name")]
     (when-not (and (map? definition)
                    (set? (:modes definition))
@@ -60,29 +181,43 @@
       (fail! "Harness definition is invalid" {:name harness-name :definition definition}))
     (let [definition (update definition :attributes normalize-overlay)]
       (swap! (:harnesses (registry rt)) assoc harness-name definition)
-      {:harness harness-name :definition definition})))
+      (require-valid! ::harness-registration
+                      {:harness harness-name :definition definition}
+                      "register-harness! produced an invalid registration"))))
 
 (defn register-alias!
   "Add or replace one alias whose parent may be a concrete harness or alias."
   [rt alias-name parent attributes]
+  (require-valid! ::runtime rt "register-alias! requires a Weaver runtime")
+  (require-valid! ::name-ref alias-name "register-alias! requires an alias name")
+  (require-valid! ::name-ref parent "register-alias! requires a parent name")
+  (require-valid! ::overlay-attributes attributes
+                  "register-alias! requires provider overlay attributes")
   (let [alias-name (name-string alias-name "Alias name")
         parent (name-string parent "Alias parent")
         entry {:parent parent :attributes (normalize-overlay attributes)}]
     (swap! (:aliases (registry rt)) assoc alias-name entry)
-    {:alias alias-name :parent parent :attributes (:attributes entry)}))
+    (require-valid! ::alias-result
+                    {:alias alias-name :parent parent :attributes (:attributes entry)}
+                    "register-alias! produced an invalid registration")))
 
 (defn unregister-alias!
   "Remove one alias definition. Existing runs retain their frozen generated data."
   [rt alias-name]
+  (require-valid! ::runtime rt "unregister-alias! requires a Weaver runtime")
+  (require-valid! ::name-ref alias-name "unregister-alias! requires an alias name")
   (let [alias-name (name-string alias-name "Alias name")
         [before _] (swap-vals! (:aliases (registry rt)) dissoc alias-name)]
     (when-not (contains? before alias-name)
       (fail! "Harness alias is not registered" {:alias alias-name}))
-    {:unregistered alias-name}))
+    (require-valid! ::unregister-result {:unregistered alias-name}
+                    "unregister-alias! produced an invalid result")))
 
 (defn resolve-harness
   "Resolve a concrete harness or alias into implementation data and merged defaults."
   [rt requested]
+  (require-valid! ::runtime rt "resolve-harness requires a Weaver runtime")
+  (require-valid! ::name-ref requested "resolve-harness requires a harness or alias name")
   (let [requested (name-string requested "Harness")
         {:keys [harnesses aliases]} (registry rt)]
     (loop [cursor requested seen #{} layers []]
@@ -91,29 +226,41 @@
       (if-let [alias (get @aliases cursor)]
         (recur (:parent alias) (conj seen cursor) (conj layers (:attributes alias)))
         (if-let [definition (get @harnesses cursor)]
-          {:alias requested
-           :harness cursor
-           :definition definition
-           :generated (apply merge (:attributes definition) (reverse layers))}
+          (require-valid!
+           ::resolved-harness
+           {:alias requested
+            :harness cursor
+            :definition definition
+            :generated (apply merge (:attributes definition) (reverse layers))}
+           "resolve-harness produced an invalid resolution")
           (fail! "Harness or alias is not registered"
                  {:requested requested :missing cursor}))))))
 
 (defn concrete-harness
   "Return a registered concrete harness definition by name."
   [rt harness-name]
-  (or (get @(:harnesses (registry rt)) (name-string harness-name "Concrete harness"))
-      (fail! "Concrete harness is not registered" {:harness harness-name})))
+  (require-valid! ::runtime rt "concrete-harness requires a Weaver runtime")
+  (require-valid! ::name-ref harness-name "concrete-harness requires a harness name")
+  (require-valid!
+   ::harness-definition
+   (or (get @(:harnesses (registry rt)) (name-string harness-name "Concrete harness"))
+       (fail! "Concrete harness is not registered" {:harness harness-name}))
+   "concrete-harness found an invalid definition"))
 
 (defn harnesses
   "List registered concrete harnesses and aliases."
   [rt]
+  (require-valid! ::runtime rt "harnesses requires a Weaver runtime")
   (let [{:keys [harnesses aliases]} (registry rt)]
-    (vec
-     (concat
-      (for [[name definition] (sort-by key @harnesses)]
-        {:name name :kind "harness" :modes (mapv clojure.core/name (:modes definition))})
-      (for [[name {:keys [parent attributes]}] (sort-by key @aliases)]
-        {:name name :kind "alias" :alias-of parent :attributes attributes})))))
+    (require-valid!
+     ::registry-list
+     (vec
+      (concat
+       (for [[name definition] (sort-by key @harnesses)]
+         {:name name :kind "harness" :modes (mapv clojure.core/name (:modes definition))})
+       (for [[name {:keys [parent attributes]}] (sort-by key @aliases)]
+         {:name name :kind "alias" :alias-of parent :attributes attributes})))
+     "harnesses produced an invalid registry listing")))
 
 (defn- mode-keyword [mode]
   (let [mode (if (keyword? mode) mode (keyword (str mode)))]
@@ -128,7 +275,9 @@
 
 (defn create!
   "Create one pending harness run. `attributes` contains provider overlay overrides."
-  [rt {:keys [harness mode prompt cwd attributes title resumes session-id]}]
+  [rt {:keys [harness mode prompt cwd attributes title resumes session-id] :as request}]
+  (require-valid! ::runtime rt "create! requires a Weaver runtime")
+  (require-valid! ::create-request request "create! requires a valid run request")
   (let [mode (mode-keyword (or mode :headless))
         {:keys [alias harness definition generated]} (resolve-harness rt harness)
         overrides (normalize-overlay attributes)
@@ -139,24 +288,27 @@
              {:harness harness :mode mode :modes (:modes definition)}))
     (when (and (= :headless mode) (str/blank? prompt))
       (fail! "Headless harness run requires a prompt" {:harness alias}))
-    (weaver/add!
-     rt
-     (cond-> {:title (or title (run-title alias mode prompt))
-              :attributes
-              (merge
-               {:harness/run "true"
-                :harness/alias alias
-                :harness/harness harness
-                :harness/mode (name mode)
-                :harness/phase "pending"
-                :harness/cwd cwd
-                :harness/session-id (or session-id (str (UUID/randomUUID)))
-                :harness/generated generated
-                :harness/overrides overrides}
-               effective
-               (when-not (str/blank? prompt) {:harness/prompt prompt})
-               (when resumes {:harness/resumes resumes}))}
-       resumes (assoc :edges [{:type "resumes" :to resumes}])))))
+    (require-valid!
+     ::strand
+     (weaver/add!
+      rt
+      (cond-> {:title (or title (run-title alias mode prompt))
+               :attributes
+               (merge
+                {:harness/run "true"
+                 :harness/alias alias
+                 :harness/harness harness
+                 :harness/mode (name mode)
+                 :harness/phase "pending"
+                 :harness/cwd cwd
+                 :harness/session-id (or session-id (str (UUID/randomUUID)))
+                 :harness/generated generated
+                 :harness/overrides overrides}
+                effective
+                (when-not (str/blank? prompt) {:harness/prompt prompt})
+                (when resumes {:harness/resumes resumes}))}
+        resumes (assoc :edges [{:type "resumes" :to resumes}])))
+     "create! produced an invalid run strand")))
 
 (defn- require-run [rt id]
   (let [run (or (weaver/show rt id) (fail! "Harness run not found" {:id id}))]
@@ -173,12 +325,19 @@
 (defn mark-running!
   "Transition a pending run to running."
   [rt id]
+  (require-valid! ::runtime rt "mark-running! requires a Weaver runtime")
+  (require-valid! ::id id "mark-running! requires a run id")
   (require-phase (require-run rt id) "pending")
-  (weaver/update! rt id {:attributes {:harness/phase "running"}}))
+  (require-valid! ::strand
+                  (weaver/update! rt id {:attributes {:harness/phase "running"}})
+                  "mark-running! produced an invalid run strand"))
 
 (defn finish!
   "Record a terminal provider-neutral outcome. Failed runs remain active."
-  [rt id {:keys [status exit-code result session-id error]}]
+  [rt id {:keys [status exit-code result session-id error] :as outcome}]
+  (require-valid! ::runtime rt "finish! requires a Weaver runtime")
+  (require-valid! ::id id "finish! requires a run id")
+  (require-valid! ::outcome outcome "finish! requires a valid outcome")
   (let [run (require-run rt id)
         phase (attr-get run :harness/phase)
         status (if (keyword? status) status (keyword (str status)))]
@@ -190,28 +349,39 @@
                (= "headless" (attr-get run :harness/mode))
                (str/blank? result))
       (fail! "Successful headless harness outcome requires a result" {:id id}))
-    (weaver/update!
-     rt id
-     {:state (if (= :done status) "closed" "active")
-      :attributes
-      {:harness/phase (name status)
-       :harness/exit-code exit-code
-       :harness/result result
-       :harness/session-id (or session-id (attr-get run :harness/session-id))
-       :harness/error (when (= :failed status)
-                        (or error "Harness process failed"))}})))
+    (require-valid!
+     ::strand
+     (weaver/update!
+      rt id
+      {:state (if (= :done status) "closed" "active")
+       :attributes
+       {:harness/phase (name status)
+        :harness/exit-code exit-code
+        :harness/result result
+        :harness/session-id (or session-id (attr-get run :harness/session-id))
+        :harness/error (when (= :failed status)
+                         (or error "Harness process failed"))}})
+     "finish! produced an invalid run strand")))
 
 (defn self-complete!
   "Record best-effort interactive result text without changing lifecycle."
   [rt id result]
+  (require-valid! ::runtime rt "self-complete! requires a Weaver runtime")
+  (require-valid! ::id id "self-complete! requires a run id")
+  (require-valid! string? result "self-complete! requires result text")
   (let [run (require-run rt id)]
     (when-not (= "interactive" (attr-get run :harness/mode))
       (fail! "self-complete applies only to interactive runs" {:id id}))
-    (weaver/update! rt id {:attributes {:harness/result result}})))
+    (require-valid! ::strand
+                    (weaver/update! rt id {:attributes {:harness/result result}})
+                    "self-complete! produced an invalid run strand")))
 
 (defn retry!
   "Reconstruct and reset one failed run, applying replacement options."
-  [rt id {:keys [harness cwd attributes]}]
+  [rt id {:keys [harness cwd attributes] :as request}]
+  (require-valid! ::runtime rt "retry! requires a Weaver runtime")
+  (require-valid! ::id id "retry! requires a run id")
+  (require-valid! ::retry-request request "retry! requires valid replacements")
   (let [run (require-phase (require-run rt id) "failed")
         old-attrs (:attributes run)
         old-generated (normalize-overlay (attr-get run :harness/generated))
@@ -240,26 +410,32 @@
                               (map (fn [k] [k (get overrides k)]))
                               (into (set (keys old-overrides)) (keys overrides)))
         resumed? (some? (attr-get run :harness/resumes))]
-    (weaver/update!
-     rt id
-     {:attributes
-      (merge overlay-delta
-             {:harness/alias requested
-              :harness/harness concrete
-              :harness/cwd (or cwd (attr-get run :harness/cwd))
-              :harness/phase "pending"
-              :harness/generated generated-delta
-              :harness/overrides overrides-delta
-              :harness/session-id (if resumed?
-                                    (attr-get run :harness/session-id)
-                                    (str (UUID/randomUUID)))
-              :harness/error nil
-              :harness/result nil
-              :harness/exit-code nil})})))
+    (require-valid!
+     ::strand
+     (weaver/update!
+      rt id
+      {:attributes
+       (merge overlay-delta
+              {:harness/alias requested
+               :harness/harness concrete
+               :harness/cwd (or cwd (attr-get run :harness/cwd))
+               :harness/phase "pending"
+               :harness/generated generated-delta
+               :harness/overrides overrides-delta
+               :harness/session-id (if resumed?
+                                     (attr-get run :harness/session-id)
+                                     (str (UUID/randomUUID)))
+               :harness/error nil
+               :harness/result nil
+               :harness/exit-code nil})})
+     "retry! produced an invalid run strand")))
 
 (defn resume!
   "Create a new run continuing one successful provider session."
-  [rt id {:keys [prompt cwd attributes mode title]}]
+  [rt id {:keys [prompt cwd attributes mode title] :as request}]
+  (require-valid! ::runtime rt "resume! requires a Weaver runtime")
+  (require-valid! ::id id "resume! requires a predecessor run id")
+  (require-valid! ::resume-request request "resume! requires valid continuation options")
   (let [run (require-phase (require-run rt id) "done")
         session-id (attr-get run :harness/session-id)
         retained (normalize-overlay (attr-get run :harness/overrides))
@@ -268,28 +444,75 @@
                              retained replacements)]
     (when (str/blank? session-id)
       (fail! "Resume predecessor has no session id" {:id id}))
-    (create! rt {:harness (attr-get run :harness/alias)
-                 :mode (or mode (attr-get run :harness/mode))
-                 :prompt prompt
-                 :cwd (or cwd (attr-get run :harness/cwd))
-                 :attributes overrides
-                 :title title
-                 :resumes id
-                 :session-id session-id})))
+    (create! rt
+             (cond-> {:harness (attr-get run :harness/alias)
+                      :mode (or mode (attr-get run :harness/mode))
+                      :cwd (or cwd (attr-get run :harness/cwd))
+                      :attributes overrides
+                      :resumes id
+                      :session-id session-id}
+               (some? prompt) (assoc :prompt prompt)
+               (some? title) (assoc :title title)))))
 
 (defn reconcile
   "Initialize runtime-local registry and declare core vocabulary."
   [{:keys [runtime] :as ctx}]
-  (case (get-in ctx [:module/contribution :status])
-    :removed {:reconciled :removed}
-    (do
-      (registry runtime)
-      (vocab/declare! runtime
-                      {:kind :attr-namespace
-                       :name "harness"
-                       :owner :ct.spools/harness-core
-                       :keys core-keys
-                       :doc "Provider-neutral harness run lifecycle and reconstruction attributes."})
-      {:reconciled :applied})))
+  (require-valid! ::reconcile-context ctx "harness-core reconcile received invalid context")
+  (require-valid!
+   ::reconcile-result
+   (case (get-in ctx [:module/contribution :status])
+     :removed {:reconciled :removed}
+     (do
+       (registry runtime)
+       (vocab/declare! runtime
+                       {:kind :attr-namespace
+                        :name "harness"
+                        :owner :ct.spools/harness-core
+                        :keys core-keys
+                        :doc "Provider-neutral harness run lifecycle and reconstruction attributes."})
+       {:reconciled :applied}))
+   "harness-core reconcile produced an invalid result"))
+
+(s/fdef register-harness!
+  :args (s/cat :runtime ::runtime :harness-name ::name-ref
+               :definition ::harness-definition)
+  :ret ::harness-registration)
+(s/fdef register-alias!
+  :args (s/cat :runtime ::runtime :alias-name ::name-ref :parent ::name-ref
+               :attributes ::overlay-attributes)
+  :ret ::alias-result)
+(s/fdef unregister-alias!
+  :args (s/cat :runtime ::runtime :alias-name ::name-ref)
+  :ret ::unregister-result)
+(s/fdef resolve-harness
+  :args (s/cat :runtime ::runtime :requested ::name-ref)
+  :ret ::resolved-harness)
+(s/fdef concrete-harness
+  :args (s/cat :runtime ::runtime :harness-name ::name-ref)
+  :ret ::harness-definition)
+(s/fdef harnesses
+  :args (s/cat :runtime ::runtime)
+  :ret ::registry-list)
+(s/fdef create!
+  :args (s/cat :runtime ::runtime :request ::create-request)
+  :ret ::strand)
+(s/fdef mark-running!
+  :args (s/cat :runtime ::runtime :id ::id)
+  :ret ::strand)
+(s/fdef finish!
+  :args (s/cat :runtime ::runtime :id ::id :outcome ::outcome)
+  :ret ::strand)
+(s/fdef self-complete!
+  :args (s/cat :runtime ::runtime :id ::id :result string?)
+  :ret ::strand)
+(s/fdef retry!
+  :args (s/cat :runtime ::runtime :id ::id :request ::retry-request)
+  :ret ::strand)
+(s/fdef resume!
+  :args (s/cat :runtime ::runtime :id ::id :request ::resume-request)
+  :ret ::strand)
+(s/fdef reconcile
+  :args (s/cat :ctx ::reconcile-context)
+  :ret ::reconcile-result)
 
 (def spool {:reconcile 'reconcile})

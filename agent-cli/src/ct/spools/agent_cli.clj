@@ -1,12 +1,13 @@
 (ns ct.spools.agent-cli
   "CLI and execution layer for provider-neutral harness runs."
   (:require [clojure.java.io :as io]
+            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as core]
             [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
             [skein.api.runtime.alpha :as runtime]
-            [skein.api.spool.alpha :refer [attr-get fail!]]
+            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.weaver.alpha :as weaver])
   (:import [java.lang ProcessBuilder]
            [java.nio.file Files]
@@ -16,7 +17,44 @@
 (def ^:private state-version 1)
 (def ^:private event-types #{:strand/added :strand/updated :batch/applied})
 
-(declare scan!)
+(s/def ::event
+  (s/and map?
+         #(keyword? (:event/type %))
+         #(contains? % :event/id)))
+(s/def ::op-context
+  (s/and map?
+         #(s/valid? ::core/runtime (:op/runtime %))
+         #(map? (:op/args %))))
+(s/def ::contribute-context
+  (s/and map? #(s/valid? ::core/runtime (:runtime %))))
+(s/def ::contribution
+  (s/and map?
+         #(map? (get-in % [:ops :entries]))
+         #(set? (get-in % [:ops :overrides]))))
+(s/def ::alias string?)
+(s/def ::harness string?)
+(s/def ::mode #{"headless" "interactive"})
+(s/def ::phase #{"pending" "running" "done" "failed"})
+(s/def ::session-id string?)
+(s/def ::launcher string?)
+(s/def ::exit-code int?)
+(s/def ::result string?)
+(s/def ::error string?)
+(s/def ::resumes string?)
+(s/def ::run-summary
+  (s/keys :req-un [::core/id ::core/title ::core/state
+                   ::alias ::harness ::mode ::phase ::session-id]
+          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
+(s/def ::runs (s/coll-of ::run-summary :kind vector?))
+(s/def ::timed-out (s/coll-of ::core/id :kind vector?))
+(s/def ::await-result
+  (s/keys :req-un [::runs ::timed-out]))
+(s/def ::op-result
+  (s/or :run ::run-summary
+        :await ::await-result
+        :registry ::core/registry-list))
+
+(declare ^:private scan!)
 
 (defn- daemon-thread-factory []
   (reify ThreadFactory
@@ -84,7 +122,7 @@
      :stdout @stdout-f
      :stderr @stderr-f}))
 
-(defn launch-headless!
+(defn- launch-headless!
   "Launch one already-claimed pending headless run."
   [rt id]
   (try
@@ -111,7 +149,7 @@
       (release! rt id)
       (scan! rt))))
 
-(defn scan!
+(defn- scan!
   "Claim and asynchronously launch every ready pending headless run."
   [rt]
   (let [claimed (filterv #(claim! rt (:id %)) (pending-headless rt))
@@ -122,7 +160,8 @@
 
 (defn on-event
   "Graph event handler that admits newly ready headless runs."
-  [_event]
+  [event]
+  (require-valid! ::event event "Harness event handler received an invalid event")
   (scan! (current/runtime)))
 
 (defn- sh-quote [s]
@@ -184,12 +223,14 @@
       (throw e))))
 
 (defn- op-run [rt {:keys [harness interactive prompt cwd attributes title]} op-cwd]
-  (let [run (core/create! rt {:harness harness
-                              :mode (if interactive :interactive :headless)
-                              :prompt prompt
-                              :cwd (or cwd op-cwd)
-                              :attributes (overlay-map attributes)
-                              :title title})]
+  (let [run (core/create!
+             rt
+             (cond-> {:harness harness
+                      :mode (if interactive :interactive :headless)
+                      :cwd (or cwd op-cwd)
+                      :attributes (overlay-map attributes)}
+               (some? prompt) (assoc :prompt prompt)
+               (some? title) (assoc :title title)))]
     (if interactive
       (interactive-plan rt run)
       (do
@@ -199,7 +240,7 @@
 (defn- terminal? [run]
   (#{"done" "failed"} (attr-get run :harness/phase)))
 
-(defn await!
+(defn- await!
   "Wait for run IDs to reach done or failed, returning structured summaries."
   [rt ids timeout-secs]
   (let [deadline (+ (System/nanoTime) (* 1000000000 (long timeout-secs)))]
@@ -213,18 +254,21 @@
 
 (defn- op-retry [rt args]
   (summary
-   (core/retry! rt (:run-id args)
-                {:harness (:harness args)
-                 :cwd (:cwd args)
-                 :attributes (overlay-map (:attributes args))})))
+   (core/retry!
+    rt (:run-id args)
+    (cond-> {}
+      (contains? args :harness) (assoc :harness (:harness args))
+      (contains? args :cwd) (assoc :cwd (:cwd args))
+      (contains? args :attributes) (assoc :attributes (overlay-map (:attributes args)))))))
 
 (defn- op-resume [rt args]
-  (let [run (core/resume! rt (:run-id args)
-                          {:prompt (:prompt args)
-                           :cwd (:cwd args)
-                           :mode (if (:interactive args) :interactive :headless)
-                           :attributes (overlay-map (:attributes args))
-                           :title (:title args)})]
+  (let [run (core/resume!
+             rt (:run-id args)
+             (cond-> {:mode (if (:interactive args) :interactive :headless)}
+               (contains? args :prompt) (assoc :prompt (:prompt args))
+               (contains? args :cwd) (assoc :cwd (:cwd args))
+               (contains? args :attributes) (assoc :attributes (overlay-map (:attributes args)))
+               (contains? args :title) (assoc :title (:title args))))]
     (if (:interactive args)
       (interactive-plan rt run)
       (do (scan! rt) (summary run)))))
@@ -254,16 +298,20 @@
 
 (defn harness-op
   "Dispatch parsed `strand harness` subcommands."
-  [{:op/keys [runtime args cwd]}]
-  (case (first (:subcommand args))
-    "run" (op-run runtime args cwd)
-    "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
-    "retry" (op-retry runtime args)
-    "resume" (op-resume runtime args)
-    "self-complete" (summary (core/self-complete! runtime (:run-id args) (:result args)))
-    "_started" (summary (mark-interactive-running! runtime (:run-id args)))
-    "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
-    "list" (core/harnesses runtime)))
+  [{:op/keys [runtime args cwd] :as ctx}]
+  (require-valid! ::op-context ctx "harness op received an invalid operation context")
+  (require-valid!
+   ::op-result
+   (case (first (:subcommand args))
+     "run" (op-run runtime args cwd)
+     "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
+     "retry" (op-retry runtime args)
+     "resume" (op-resume runtime args)
+     "self-complete" (summary (core/self-complete! runtime (:run-id args) (:result args)))
+     "_started" (summary (mark-interactive-running! runtime (:run-id args)))
+     "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
+     "list" (core/harnesses runtime))
+   "harness op produced an invalid result"))
 
 (def ^:private harness-arg-spec
   {:op "harness"
@@ -311,29 +359,52 @@
 
 (defn contribute
   "Publish the `strand harness` CLI operation."
-  [_ctx]
-  {:ops {:entries
-         {"harness" {:name "harness"
-                     :fn 'ct.spools.agent-cli/harness-op
-                     :stream? false
-                     :provenance 'ct.spools.agent-cli
-                     :doc (:doc harness-arg-spec)
-                     :arg-spec harness-arg-spec}}
-         :overrides #{}}})
+  [ctx]
+  (require-valid! ::contribute-context ctx
+                  "agent-cli contribute received an invalid context")
+  (require-valid!
+   ::contribution
+   {:ops {:entries
+          {"harness" {:name "harness"
+                      :fn 'ct.spools.agent-cli/harness-op
+                      :stream? false
+                      :provenance 'ct.spools.agent-cli
+                      :doc (:doc harness-arg-spec)
+                      :arg-spec harness-arg-spec}}
+          :overrides #{}}}
+   "agent-cli contribute produced an invalid contribution"))
 
 (defn reconcile
   "Install the headless graph handler and perform an initial scan."
   [{:keys [runtime] :as ctx}]
-  (case (get-in ctx [:module/contribution :status])
-    :removed (do
-               (events/unregister-handler! runtime :harness/engine)
-               {:reconciled :removed})
-    (do
-      (state runtime)
-      (events/register-handler! runtime :harness/engine event-types
-                                'ct.spools.agent-cli/on-event
-                                {:spool "agent-cli"})
-      {:reconciled :applied :claimed (scan! runtime)})))
+  (require-valid! ::core/reconcile-context ctx
+                  "agent-cli reconcile received an invalid context")
+  (require-valid!
+   ::core/reconcile-result
+   (case (get-in ctx [:module/contribution :status])
+     :removed (do
+                (events/unregister-handler! runtime :harness/engine)
+                {:reconciled :removed})
+     (do
+       (state runtime)
+       (events/register-handler! runtime :harness/engine event-types
+                                 'ct.spools.agent-cli/on-event
+                                 {:spool "agent-cli"})
+       {:reconciled :applied :claimed (scan! runtime)}))
+   "agent-cli reconcile produced an invalid result"))
+
+(s/fdef on-event
+  :args (s/cat :event ::event)
+  :ret vector?)
+(s/fdef harness-op
+  :args (s/cat :ctx ::op-context)
+  :ret ::op-result)
+(s/fdef contribute
+  :args (s/cat :ctx ::contribute-context)
+  :ret ::contribution)
+(s/fdef reconcile
+  :args (s/cat :ctx ::core/reconcile-context)
+  :ret ::core/reconcile-result)
 
 (def spool {:contribute 'contribute
             :reconcile 'reconcile})
