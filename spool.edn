@@ -2,6 +2,7 @@
  :roots {ct.spools/agent-run "agent-run"
          ct.spools/harness-core "harness-core"
          ct.spools/claude-harness "claude-harness"
+         ct.spools/codex-harness "codex-harness"
          ct.spools/agent-cli "agent-cli"
          ct.spools/delegation "delegation"
          ct.spools/bench "bench"}}
