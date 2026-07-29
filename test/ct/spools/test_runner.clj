@@ -4,6 +4,7 @@
             [ct.spools.agent-run-test]
             [ct.spools.bench-metrics-test]
             [ct.spools.bench-test]
+            [ct.spools.codex-harness-test]
             [ct.spools.delegation-test]
             [ct.spools.quality-conventions-test]
             [ct.spools.subagent-test]))
@@ -12,6 +13,7 @@
   '[ct.spools.agent-run-test
     ct.spools.bench-metrics-test
     ct.spools.bench-test
+    ct.spools.codex-harness-test
     ct.spools.delegation-test
     ct.spools.quality-conventions-test
     ct.spools.subagent-test])

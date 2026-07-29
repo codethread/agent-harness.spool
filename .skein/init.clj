@@ -49,17 +49,24 @@
                   :spools ['ct.spools/claude-harness 'ct.spools/harness-core]
                   :after [:skein/spools-harness-core]
                   :required? true})
+(runtime/module! runtime :skein/spools-codex-harness
+                 {:ns 'ct.spools.codex-harness
+                  :spools ['ct.spools/codex-harness 'ct.spools/harness-core]
+                  :after [:skein/spools-harness-core]
+                  :required? true})
 (runtime/module! runtime :skein/spools-agent-cli
                  {:ns 'ct.spools.agent-cli
                   :spools ['ct.spools/agent-cli 'ct.spools/harness-core]
                   :after [:skein/spools-harness-core
-                          :skein/spools-claude-harness]
+                          :skein/spools-claude-harness
+                          :skein/spools-codex-harness]
                   :required? true})
 (runtime/module! runtime :harness-next
                  {:file "config/harness-next.clj"
                   :spools ['ct.spools/harness-core]
                   :after [:skein/spools-harness-core
                           :skein/spools-claude-harness
+                          :skein/spools-codex-harness
                           :skein/spools-agent-cli]
                   :required? true})
 
