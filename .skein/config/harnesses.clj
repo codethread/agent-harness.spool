@@ -21,6 +21,7 @@
   the live registry."
   (:require [skein.api.current.alpha :as current]
             [skein.api.format.alpha :as format-alpha]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]))
 
@@ -216,15 +217,25 @@
            |provider-quota fallback for reviews of primarily Claude-authored
            |code, not frontier design or broad implementation.")}})
 
-(defn reconcile
+(defn open-harnesses!
   "Bind the delegation spool's default review and worker contracts."
   [{:keys [runtime]}]
   (current/with-runtime
     runtime
     (shuttle/set-default-review-contract! agents/review-contract)
     (shuttle/set-default-task-contract! agents/worker-contract))
-  {:reconciled :harnesses})
+  {:opened :harnesses})
 
-(def spool
-  "Entry-point declaration for the harnesses workspace-file module."
-  {:reconcile 'reconcile})
+(defn close-harnesses!
+  "Clear the delegation spool's default review and worker contracts."
+  [{:keys [runtime]}]
+  (current/with-runtime
+    runtime
+    (shuttle/set-default-review-contract! nil)
+    (shuttle/set-default-task-contract! nil))
+  {:closed :harnesses})
+
+(lifecycle/defresource harnesses-runtime
+  "Own the workspace's default delegation contracts for the module lifetime."
+  {:open 'harnesses/open-harnesses!
+   :close 'harnesses/close-harnesses!})

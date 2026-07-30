@@ -21,7 +21,7 @@
                "(def json \"{\\\"name\\\":\\\"agent\\\"}\")\n"
                "(def wide \"" (str/join (repeat 181 "x")) "\")\n"))
     (let [findings (vec (conventions/source-findings [(.getPath dir)]))]
-      (is (some #(re-find #"public `spool`" %) findings))
+      (is (some #(re-find #"legacy public `spool`" %) findings))
       (is (some #(re-find #"exceeds 180 columns" %) findings)))
     (is (conventions/reproducible-json? "{\"name\":\"agent\"}"))
     (is (not (conventions/reproducible-json? "{\"name\": \"agent\"}")))))

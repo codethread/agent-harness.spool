@@ -2,6 +2,7 @@
   "Provider-neutral structure, registry, and lifecycle for harness runs."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]
@@ -98,10 +99,6 @@
    #(every? #{:prompt :cwd :attributes :mode :title} (keys %))
    #(or (not (contains? % :attributes))
         (s/valid? ::overlay-attributes (:attributes %)))))
-(s/def ::module-status #{:applied :removed})
-(s/def ::reconcile-context
-  (s/and map? #(s/valid? ::runtime (:runtime %)) #(s/valid? ::module-status (get-in % [:module/contribution :status]))))
-(s/def ::reconcile-result (s/and map? #(contains? #{:applied :removed} (:reconciled %))))
 (defn register-harness!
   "Register or replace a concrete harness definition.
 
@@ -394,25 +391,23 @@
 
 (s/fdef resume! :args (s/cat :runtime ::runtime :id ::id :request ::resume-request) :ret ::strand)
 
-(defn reconcile
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::reconcile-context ctx "harness-core reconcile received invalid context")
-  (require-valid!
-   ::reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed {:reconciled :removed}
-     (do
-       (registry runtime)
-       (vocab/declare! runtime
-                       {:kind :attr-namespace
-                        :name "harness"
-                        :owner :ct.spools/harness-core
-                        :keys core-keys
-                        :doc "Provider-neutral harness run lifecycle and reconstruction attributes."})
-       {:reconciled :applied}))
-   "harness-core reconcile produced an invalid result"))
+(defn open-harness-core!
+  "Open the provider-neutral harness registry for a module lifetime."
+  [{:keys [runtime]}]
+  (require-valid! ::runtime runtime "harness-core open received an invalid runtime")
+  (registry runtime)
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "harness"
+                   :owner :ct.spools/harness-core
+                   :keys core-keys
+                   :doc "Provider-neutral harness run lifecycle and reconstruction attributes."})
+  {:opened :harness-core})
 
-(s/fdef reconcile :args (s/cat :ctx ::reconcile-context) :ret ::reconcile-result)
+(defn close-harness-core!
+  "Close the harness-core module resource while retaining runtime state."
+  [_context]
+  {:closed :harness-core})
 
 (defn- json-value? [value]
   (cond
@@ -478,4 +473,7 @@
            {:id (:id run) :expected phase :actual (attr-get run :harness/phase)}))
   run)
 
-(def spool {:reconcile 'reconcile})
+(lifecycle/defresource harness-core-runtime
+  "Own the provider-neutral harness registry for the module lifetime."
+  {:open 'ct.spools.harness-core/open-harness-core!
+   :close 'ct.spools.harness-core/close-harness-core!})

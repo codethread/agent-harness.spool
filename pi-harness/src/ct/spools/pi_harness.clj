@@ -4,6 +4,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]))
 
@@ -90,34 +91,25 @@
                :process-result ::process-result)
   :ret ::harness/outcome)
 
-(defn reconcile
+(defn open-pi-harness!
   "Declare Pi attributes and register the concrete harness."
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::harness/reconcile-context ctx
-                  "pi-harness reconcile received invalid context")
-  (require-valid!
-   ::harness/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed {:reconciled :removed}
-     (do
-       (vocab/declare! runtime
-                       {:kind :attr-namespace
-                        :name "harness.pi"
-                        :owner :ct.spools/pi-harness
-                        :keys ["harness.pi/model"
-                               "harness.pi/thinking"
-                               "harness.pi/extra-argv"]
-                        :doc "Pi CLI command overlay attributes."})
-       (harness/register-harness!
-        runtime :pi
-        (harness runtime
-                 {:harness.pi/extra-argv ["--no-tools"]}))
-       {:reconciled :applied :harness "pi"}))
-   "pi-harness reconcile produced an invalid result"))
+  [{:keys [runtime]}]
+  (require-valid! ::harness/runtime runtime "pi-harness open received an invalid runtime")
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "harness.pi"
+                   :owner :ct.spools/pi-harness
+                   :keys ["harness.pi/model" "harness.pi/thinking"
+                          "harness.pi/extra-argv"]
+                   :doc "Pi CLI command overlay attributes."})
+  (harness/register-harness! runtime :pi
+                             (harness runtime {:harness.pi/extra-argv ["--no-tools"]}))
+  {:opened :pi})
 
-(s/fdef reconcile
-  :args (s/cat :ctx ::harness/reconcile-context)
-  :ret ::harness/reconcile-result)
+(defn close-pi-harness!
+  "Close the Pi harness module resource."
+  [_context]
+  {:closed :pi})
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -229,6 +221,7 @@
          :error (str "Pi JSONL parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(def spool
-  "Declare the Pi harness module entry point."
-  {:reconcile 'reconcile})
+(lifecycle/defresource pi-harness-runtime
+  "Own the Pi harness registration for the module lifetime."
+  {:open 'ct.spools.pi-harness/open-pi-harness!
+   :close 'ct.spools.pi-harness/close-pi-harness!})

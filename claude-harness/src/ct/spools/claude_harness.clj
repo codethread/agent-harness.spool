@@ -4,6 +4,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]))
 
@@ -90,33 +91,29 @@
                :process-result ::process-result)
   :ret ::harness/outcome)
 
-(defn reconcile
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::harness/reconcile-context ctx
-                  "claude-harness reconcile received invalid context")
-  (require-valid!
-   ::harness/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed {:reconciled :removed}
-     (do
-       (vocab/declare! runtime
-                       {:kind :attr-namespace
-                        :name "harness.claude"
-                        :owner :ct.spools/claude-harness
-                        :keys ["harness.claude/model"
-                               "harness.claude/effort"
-                               "harness.claude/extra-argv"]
-                        :doc "Claude Code command overlay attributes."})
-       (harness/register-harness!
-        runtime :claude
-        (harness runtime
-                 {:harness.claude/extra-argv ["--dangerously-skip-permissions"]}))
-       {:reconciled :applied :harness "claude"}))
-   "claude-harness reconcile produced an invalid result"))
+(defn open-claude-harness!
+  "Declare Claude attributes and register the concrete harness."
+  [{:keys [runtime]}]
+  (require-valid! ::harness/runtime runtime
+                  "claude-harness open received an invalid runtime")
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "harness.claude"
+                   :owner :ct.spools/claude-harness
+                   :keys ["harness.claude/model"
+                          "harness.claude/effort"
+                          "harness.claude/extra-argv"]
+                   :doc "Claude Code command overlay attributes."})
+  (harness/register-harness!
+   runtime :claude
+   (harness runtime
+            {:harness.claude/extra-argv ["--dangerously-skip-permissions"]}))
+  {:opened :claude})
 
-(s/fdef reconcile
-  :args (s/cat :ctx ::harness/reconcile-context)
-  :ret ::harness/reconcile-result)
+(defn close-claude-harness!
+  "Close the Claude harness module resource."
+  [_context]
+  {:closed :claude})
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -193,4 +190,7 @@
          :error (str "Claude JSON parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(def spool {:reconcile 'reconcile})
+(lifecycle/defresource claude-harness-runtime
+  "Own the Claude harness registration for the module lifetime."
+  {:open 'ct.spools.claude-harness/open-claude-harness!
+   :close 'ct.spools.claude-harness/close-claude-harness!})
