@@ -1,0 +1,6 @@
+{:lint-as
+ {skein.api.lifecycle.alpha/defresource clojure.core/def
+  skein.api.skein.alpha/defop clojure.core/defn
+  skein.api.skein.alpha/defpattern clojure.core/defn
+  skein.api.skein.alpha/defquery clojure.core/def
+  skein.spools.workflow/defexecutor clojure.core/defn}}

@@ -31,13 +31,9 @@ Approved local-root spool. Agent-run must be installed first (the default `:harn
    :after [:agent-run]})
 ```
 
-The declaration names a source target and world policy only; `contribute` and
-`reconcile` come from the public `ct.spools.bench/spool` var (the `def spool`
-convention, ADR-004), which the refresh coordinator resolves from the loaded
-namespace at every module evaluation. The Skein checkout must contain or descend
-from `343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible commit.
+The declaration names a source target and world policy only. Bench collects its operation, query, and three domain kinds from source. Its `bench-runtime` lifecycle resource creates runtime-owned state, detects the container engine, and reconciles orphaned entries.
 
-`contribute` publishes the `bench` CLI op and `bench-runs` named query; `reconcile` creates the runtime-owned spool state (executor, registries, in-flight tracking — versioned per `docs/spools/writing-shared-spools.md` with a `:close-fn`), detects the container engine (see §4), and reconciles orphaned entries from a previous weaver lifetime (see §9). It registers **no suites and no harness definitions** — those are trusted config, exactly like harness aliases.
+The module registers **no suites and no harness definitions**. Those are trusted config, like harness aliases.
 
 All public functions take `runtime` as the first argument (shared-spool rules). State lives in `skein.api.runtime.alpha/spool-state`; no module-level atoms.
 

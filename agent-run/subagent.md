@@ -41,16 +41,12 @@ source coordinate as well as the agent-run root:
    :required? true})
 ```
 
-Agent-run's and the subagent executor's entry points come from each namespace's
-public `spool` var (the `def spool` convention, ADR-004), so both declarations
-name only a source target and world policy. The Skein checkout must contain or
-descend from `343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible
-commit.
+Both modules collect their declarations from source, so these declarations name only a source target and world policy. The subagent executor publishes its executor and queries as contributions. Its `subagent-engine` lifecycle resource owns the event handler and initial scan.
 
-`reconcile` fails loudly unless `:agent-run/engine` is already installed.
+Resource acquisition fails loudly unless `:agent-run/engine` is already installed.
 
 Activate the subagent executor **after** any startup config that registers harness aliases.
-`reconcile` runs an initial gate scan, so an alias a durable ready gate names (e.g. `worker`) must
+Resource acquisition runs an initial gate scan, so an alias a durable ready gate names (e.g. `worker`) must
 already be registered or that gate is stamped `gate/error` on every cold start.
 
 Gate scans serialize on a runtime-owned monitor: independent weaver runtimes in one JVM scan

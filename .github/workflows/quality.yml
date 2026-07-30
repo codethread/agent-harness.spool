@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: codethread/skein
-          ref: acbb14d18a5b7ccee79d7f1fb229782d3bcfe262
+          ref: e2ef777cf32a8fe1d92390c0645b16548b7ee249
           path: skein-src
       - uses: actions/setup-java@v4
         with:

@@ -22,8 +22,10 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.registry.alpha :as registry]
             [skein.api.runtime.alpha :as runtime]
+            [skein.api.skein.alpha :as skein]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.graph.alpha :as graph]
             [skein.api.weaver.alpha :as weaver]
@@ -1443,13 +1445,18 @@
   [s]
   (into [] (comp (map str/trim) (remove str/blank?)) (str/split s #",")))
 
-(defn bench-op
+(declare bench-op)
+
+(skein/defop bench
   "Dispatch parsed `strand bench ...` subcommands to the engine functions.
 
   Each verb is a thin JSON wrapper: the parser routes on `:subcommand` and
   supplies flags and positionals; rich data stays in trusted Clojure. A bare
   `strand bench` or an unknown verb fails during parser routing (the declared
   `:subcommands` machinery), never here."
+  {:arg-spec bench-arg-spec
+   :returns bench-returns
+   :stream? false}
   [{:op/keys [args runtime]}]
   (case (first (:subcommand args))
     "run" (run! runtime (:suite args)
@@ -1528,26 +1535,29 @@
           "bench/judge" "bench/run-id" "bench/judge-prompt" "bench/verdict"]
    :doc "Bench run-root, entry, and judge attributes written by ct.spools.bench/run!."})
 
-(defn contribute
-  "Materialize bench's registry handle for owner-complete publication.
+(runtime/collect-kind! ::registry
+                       {:id harness-kind
+                        :entry-spec ::registered-harness
+                        :binding-moment :run})
 
-  The registry is a direct spool-state slot, not nested in the resource map,
-  so the publication kernel discovers harness, suite, and extractor kinds."
-  [{:keys [runtime]}]
-  (registry-handle runtime)
-  {:ops {:entries {"bench" {:name "bench"
-                            :fn 'ct.spools.bench/bench-op
-                            :stream? false
-                            :provenance 'ct.spools.bench
-                            :doc (:doc bench-arg-spec)
-                            :arg-spec bench-arg-spec
-                            :returns bench-returns}}
-         :overrides #{}}
-   :queries {:entries {"bench-runs" [:and [:= :state "active"] [:= [:attr "bench/run"] "true"]]}
-             :overrides #{}}})
+(runtime/collect-kind! ::registry
+                       {:id suite-kind
+                        :entry-spec ::registered-suite
+                        :binding-moment :run})
 
-(defn reconcile
-  "Reconcile bench's live resources after declarative publication.
+(runtime/collect-kind! ::registry
+                       {:id extractor-kind
+                        :entry-spec ::registered-extractor
+                        :binding-moment :run})
+
+(skein/defquery bench-runs-query
+  "Select active benchmark run roots."
+  {}
+  [:and [:= :state "active"]
+   [:= [:attr "bench/run"] "true"]])
+
+(defn open-bench!
+  "Open bench's live resources after declarative publication.
 
   Creates the runtime-owned state (bounded executor + registries + in-flight
   tracking), detects the container engine (docker then podman on PATH unless
@@ -1557,30 +1567,23 @@
   the `bench` CLI op and the `bench-runs` named query. Registers no suites or
   harness definitions — those are trusted config. Called as a no-arg module
   `:call` at startup/reload."
-  [{:keys [runtime] :as ctx}]
-  (case (get-in ctx [:module/contribution :status])
-    :removed {:reconciled :removed}
-    (do
-      (state runtime)
-      (vocab/declare! runtime bench-namespace-declaration)
-      (register-extractor! runtime :generic generic-extractor)
-      (register-default-extractors! runtime)
-      (detect-engine! runtime)
-      (let [reconciled (reconcile! runtime)]
-        {:reconciled :applied
-         :engine (engine runtime)
-         :harnesses (mapv :name (harnesses runtime))
-         :suites (mapv :name (suites runtime))
-         :reconciled-entries reconciled}))))
+  [{:keys [runtime]}]
+  (state runtime)
+  (vocab/declare! runtime bench-namespace-declaration)
+  (register-extractor! runtime :generic generic-extractor)
+  (register-default-extractors! runtime)
+  (detect-engine! runtime)
+  {:engine (engine runtime)
+   :harnesses (mapv :name (harnesses runtime))
+   :suites (mapv :name (suites runtime))
+   :reconciled-entries (reconcile! runtime)})
 
-(def spool
-  "Entry-point declaration for the bench spool (ADR-004 `def spool`
-  convention).
+(defn close-bench!
+  "Close bench's module resource while runtime-owned state handles teardown."
+  [_context]
+  {:closed :bench})
 
-  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
-  var at every module evaluation, so a consumer declares only a source target
-  and world policy (`{:ns 'ct.spools.bench :spools [...] :after [:agent-run]}`)
-  and never mirrors the pair. Unqualified symbols resolve against this
-  namespace; fn values are rejected (ADR-002.O1)."
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+(lifecycle/defresource bench-runtime
+  "Own bench's module-lifetime initialization and reconciliation."
+  {:open 'ct.spools.bench/open-bench!
+   :close 'ct.spools.bench/close-bench!})

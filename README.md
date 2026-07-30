@@ -97,13 +97,7 @@ published-name change and ships as a new release (**v8**), not an accretion:
 ## Activation
 
 After approving the coordinates needed by the workspace, activate them from
-trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and
-`ct.spools.bench`, plus `ct.spools.executors.subagent`, each declare their
-`contribute`/`reconcile` entry points in a public `spool` var (the `def spool`
-convention, ADR-004), which the refresh coordinator resolves from the loaded
-namespace at every module evaluation. A consumer therefore names only a source
-target and world policy. The Skein checkout must contain or descend from
-`343f886880092bc38ed3e0522eca2d95a7cf04bc`, the first compatible commit:
+trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spools.bench`, plus `ct.spools.executors.subagent`, collect their core and domain contributions while their source is evaluated. Named lifecycle resource declarations own setup and removal. A consumer names only a source target and world policy. The Skein checkout must contain the contribution and lifecycle authoring APIs:
 
 ```clojure
 (require '[skein.api.current.alpha :as current]

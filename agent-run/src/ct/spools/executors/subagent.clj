@@ -13,10 +13,12 @@
             [skein.api.graph.alpha :as graph]
             [skein.api.weaver.alpha :as weaver]
             [skein.api.events.alpha :as events]
+            [skein.api.lifecycle.alpha :as lifecycle]
+            [skein.api.runtime.alpha :as runtime]
+            [skein.api.skein.alpha :as skein]
             [skein.api.format.alpha :as fmt]
             [skein.api.current.alpha :as current]
             [skein.api.return-shape.alpha :as return-shape]
-            [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]))
 
 (def ^:private event-types
@@ -299,59 +301,64 @@
       {:gate (:id gate) :run (:id run) :phase (attr run :agent-run/phase)
        :error (attr run :agent-run/error)})))
 
-(defn contribute
-  "Return subagent's owner-complete executor and coordinator queries."
-  [_ctx]
-  {workflow/executor-kind {"subagent" 'ct.spools.executors.subagent/gate-stalled?}
-   :queries {"stalled-subagent-gates" stalled-gates-query
-             "blocked-deliveries" [:and [:= :state "closed"]
-                                   [:exists [:attr "gate/delivery-blocked"]]
-                                   [:missing [:attr "gate/delivered"]]]}})
+(workflow/defexecutor subagent
+  "Return a stall diagnostic for a workflow gate whose current run failed."
+  {}
+  [gate]
+  (gate-stalled? gate))
 
-(defn reconcile
-  "Reconcile the subagent executor's event handler and initial scan.
+(skein/defquery stalled-subagent-gates-query
+  "Select ready subagent gates with no serving run."
+  {}
+  stalled-gates-query)
+
+(skein/defquery blocked-deliveries-query
+  "Select closed gates whose delivery remains blocked."
+  {}
+  [:and [:= :state "closed"]
+   [:exists [:attr "gate/delivery-blocked"]]
+   [:missing [:attr "gate/delivered"]]])
+
+(defn open-subagent!
+  "Open the subagent executor's event handler and perform its initial scan.
 
   Fails loudly unless agent-run's module has already registered
   the agent-run engine in this weaver runtime."
-  [{:keys [runtime] :as ctx}]
+  [{:keys [runtime]}]
   (binding [*runtime* runtime
             agent-run/*runtime* runtime]
-    (case (get-in ctx [:module/contribution :status])
-      :removed (do (events/unregister-handler! runtime :subagent/engine)
-                   {:reconciled :removed})
-      (let [handlers (set (map :key (events/handlers runtime)))]
-        (when-not (contains? handlers :agent-run/engine)
-          (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
+    (let [handlers (set (map :key (events/handlers runtime)))]
+      (when-not (contains? handlers :agent-run/engine)
+        (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
     ;; The activation module owns the namespace, not the file location: the
     ;; source sits in the agent-run package but `:skein/spools-treadle` is the
     ;; use-key. `:keys` is advisory (the keys `deliver-run!`/`spawn-for-gate!`
     ;; stamp), not enforced. `gate/error` is the one key both gate executors
     ;; write, so the namespace spans them rather than belonging to this one.
-        (vocab/declare! runtime
-                        {:kind :attr-namespace
-                         :name "gate"
-                         :owner :skein/spools-treadle
-                         :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
-                         :doc (fmt/reflow "
+      (vocab/declare! runtime
+                      {:kind :attr-namespace
+                       :name "gate"
+                       :owner :skein/spools-treadle
+                       :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
+                       :doc (fmt/reflow "
                            |Workflow-gate completion, delivery, and spawn control attributes.
                            |gate/completion-policy selects run-done or status-implemented delivery.
                            |gate/delivered and gate/delivery-blocked record handing a delegated run's
                            |result to its gate. gate/error is wider: any gate executor's durable
                            |failure stamp, written by both the subagent and shell executors.")})
-        (events/register-handler! runtime :subagent/engine event-types
-                                  'ct.spools.executors.subagent/on-event
-                                  {:spool "subagent"})
-        (scan!)
-        {:reconciled :applied}))))
+      (events/register-handler! runtime :subagent/engine event-types
+                                'ct.spools.executors.subagent/on-event
+                                {:spool "subagent"})
+      (scan!)
+      {:opened :subagent})))
 
-(def spool
-  "Entry-point declaration for the subagent executor spool (ADR-004 `def spool`
-  convention).
+(defn close-subagent!
+  "Stop the subagent executor's event dispatch."
+  [{:keys [runtime]}]
+  (events/unregister-handler! runtime :subagent/engine)
+  {:closed :subagent})
 
-  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
-  var at every module evaluation, so a consumer declares only a source target
-  and world policy (`{:ns 'ct.spools.executors.subagent :spools [...]
-  :after [:workflow :agent-run]}`) and never mirrors the pair. Unqualified
-  symbols resolve against this namespace; fn values are rejected (ADR-002.O1)."
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+(lifecycle/defresource subagent-engine
+  "Own the subagent executor event engine for the module lifetime."
+  {:open 'ct.spools.executors.subagent/open-subagent!
+   :close 'ct.spools.executors.subagent/close-subagent!})

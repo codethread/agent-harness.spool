@@ -6,7 +6,6 @@
   full readiness-driven spawn engine, result capture, notes, and reconciliation."
   (:require [clojure.java.io :as io]
             [clojure.java.shell]
-            [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [next.jdbc :as jdbc]
@@ -14,7 +13,6 @@
             [ct.spools.delegation :as delegation]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as subagent]
-            [skein.api.spool.alpha :as spool]
             [skein.test.alpha :as test-alpha]
             [skein.api.graph.alpha :as graph]
             [skein.api.notes.alpha :as notes]
@@ -23,19 +21,16 @@
             [skein.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
 
-(deftest exported-spool-vars-have-the-exact-convention-shape
-  (doseq [[label actual expected]
-          [["agent-run" shuttle/spool
-            {:contribute 'contribute :reconcile 'reconcile}]
-           ["subagent" subagent/spool
-            {:contribute 'contribute :reconcile 'reconcile}]
-           ["delegation" delegation/spool
-            {:contribute 'contribute :reconcile 'reconcile}]
-           ["bench" bench/spool
-            {:contribute 'contribute :reconcile 'reconcile}]]]
+(deftest modules-export-resource-lifecycle-declarations
+  (doseq [[label actual]
+          [["agent-run" shuttle/agent-run-engine]
+           ["subagent" subagent/subagent-engine]
+           ["delegation" delegation/delegation-runtime]
+           ["bench" bench/bench-runtime]]]
     (testing label
-      (is (= expected actual))
-      (is (s/valid? ::spool/spool actual)))))
+      (is (= :resource (:kind actual)))
+      (is (qualified-symbol? (:open actual)))
+      (is (qualified-symbol? (:close actual))))))
 
 (defn- with-shuttle
   "Run f with a fresh weaver runtime that has the agent-run engine installed.
@@ -535,10 +530,10 @@
 
 (deftest recovered-run-with-permanently-missing-alias-eventually-fails
   (let [original @#'shuttle/*recovery-harness-deferral-ms*]
-    (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly 0))
     (try
       (with-shuttle
         (fn [rt]
+          (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly 0))
           (let [orphan (weaver/add! rt {:title "missing-alias-orphan"
                                         :attributes {"agent-run/run" "true"
                                                      "agent-run/harness" "never-registered"

@@ -15,9 +15,9 @@
 (defn activate-spool!
   "Declare and publish one spool module for a test runtime.
 
-  `ns-sym` is the spool's namespace symbol. Legacy modules carrying a public
-  `spool` var activate from the JVM image; forms-only modules activate from
-  source so the coordinator collects their declaration records. An optional
+  `ns-sym` is the spool's namespace symbol. Test modules activate from source
+  so forms-only declarations are recollected even when a prior source reload
+  left a removed legacy Var interned in the shared test JVM. An optional
   `:after` edge is added before the module is refreshed on its own. A failed
   refresh throws with the module result; applied, unchanged, and partial
   results are returned unchanged."
@@ -25,7 +25,6 @@
   (require ns-sym)
   (runtime/module! rt key
                    (cond-> {:ns ns-sym}
-                     (ns-resolve ns-sym 'spool) (assoc :load :image)
                      after (assoc :after after)))
   (let [result (runtime/refresh! rt {:only #{key}})]
     (when (= :failed (:status result))
