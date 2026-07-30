@@ -120,7 +120,8 @@
   (binding [*out* *err*]
     (println (str "[agent-run] WARN " message " " (pr-str data)))))
 
-(declare new-registry-handle prepare-legacy-launch-bindings!)
+(declare new-registry-handle prepare-legacy-launch-bindings!
+         default-harness-defs default-backend-defs)
 
 (def harness-kind
   "Owner-partitioned kind id for harness tool declarations."
@@ -137,17 +138,23 @@
 (def ^:private repl-owner :skein.owner/repl)
 (def ^:private system-owner :skein.owner/system)
 
-(def ^:private registry-state-version 1)
-
 (defn registry-handle
   "Return the runtime-owned owner registry for harness, alias, and backend
   declarations. The handle lives directly in spool-state so Skein's module
   publication coordinator discovers all three kinds."
   ([] (registry-handle (rt)))
   ([runtime]
-   (runtime/spool-state runtime ::registry
-                        {:version registry-state-version}
-                        #(new-registry-handle runtime))))
+   (let [handle (runtime/spool-state runtime ::registry
+                                     #(new-registry-handle runtime))]
+     (registry/replace-owner! handle harness-kind system-owner
+                              {:layer :defaults
+                               :entries default-harness-defs
+                               :overrides #{}})
+     (registry/replace-owner! handle backend-kind system-owner
+                              {:layer :defaults
+                               :entries default-backend-defs
+                               :overrides #{}})
+     handle)))
 
 (def ^:private state-version
   "Shape version for the engine's runtime spool-state map.

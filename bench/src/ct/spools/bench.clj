@@ -57,7 +57,7 @@
 (defn registry-handle
   "Return the runtime-owned registry for harnesses, suites, and extractors."
   [runtime]
-  (runtime/spool-state runtime ::registry {:version 1}
+  (runtime/spool-state runtime ::registry
                        #(let [handle (registry/registry)]
                           (registry/declare-kind! handle {:id harness-kind :entry-spec ::registered-harness :binding-moment :run})
                           (registry/declare-kind! handle {:id suite-kind :entry-spec ::registered-suite :binding-moment :run})
