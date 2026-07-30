@@ -4,6 +4,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]))
 
@@ -88,34 +89,26 @@
                :process-result ::process-result)
   :ret ::harness/outcome)
 
-(defn reconcile
+(defn open-cursor-harness!
   "Declare Cursor attributes and register the concrete harness."
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::harness/reconcile-context ctx
-                  "cursor-harness reconcile received invalid context")
-  (require-valid!
-   ::harness/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed {:reconciled :removed}
-     (do
-       (vocab/declare! runtime
-                       {:kind :attr-namespace
-                        :name "harness.cursor"
-                        :owner :ct.spools/cursor-harness
-                        :keys ["harness.cursor/model"
-                               "harness.cursor/extra-argv"]
-                        :doc "Cursor Agent CLI command overlay attributes."})
-       (harness/register-harness!
-        runtime :cursor
-        (harness runtime
-                 {:harness.cursor/model "composer-2.5[fast=false]"
-                  :harness.cursor/extra-argv ["--yolo" "--trust"]}))
-       {:reconciled :applied :harness "cursor"}))
-   "cursor-harness reconcile produced an invalid result"))
+  [{:keys [runtime]}]
+  (require-valid! ::harness/runtime runtime "cursor-harness open received an invalid runtime")
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "harness.cursor"
+                   :owner :ct.spools/cursor-harness
+                   :keys ["harness.cursor/model" "harness.cursor/extra-argv"]
+                   :doc "Cursor Agent CLI command overlay attributes."})
+  (harness/register-harness!
+   runtime :cursor
+   (harness runtime {:harness.cursor/model "composer-2.5[fast=false]"
+                     :harness.cursor/extra-argv ["--yolo" "--trust"]}))
+  {:opened :cursor})
 
-(s/fdef reconcile
-  :args (s/cat :ctx ::harness/reconcile-context)
-  :ret ::harness/reconcile-result)
+(defn close-cursor-harness!
+  "Close the Cursor harness module resource."
+  [_context]
+  {:closed :cursor})
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -211,6 +204,7 @@
          :error (str "Cursor JSON parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(def spool
-  "Declare the Cursor harness module entry point."
-  {:reconcile 'reconcile})
+(lifecycle/defresource cursor-harness-runtime
+  "Own the Cursor harness registration for the module lifetime."
+  {:open 'ct.spools.cursor-harness/open-cursor-harness!
+   :close 'ct.spools.cursor-harness/close-cursor-harness!})

@@ -4,6 +4,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.vocab.alpha :as vocab]))
 
@@ -90,35 +91,27 @@
                :process-result ::process-result)
   :ret ::harness/outcome)
 
-(defn reconcile
+(defn open-codex-harness!
   "Declare Codex attributes and register the concrete harness."
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::harness/reconcile-context ctx
-                  "codex-harness reconcile received invalid context")
-  (require-valid!
-   ::harness/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed {:reconciled :removed}
-     (do
-       (vocab/declare! runtime
-                       {:kind :attr-namespace
-                        :name "harness.codex"
-                        :owner :ct.spools/codex-harness
-                        :keys ["harness.codex/model"
-                               "harness.codex/reasoning-effort"
-                               "harness.codex/extra-argv"]
-                        :doc "Codex CLI command overlay attributes."})
-       (harness/register-harness!
-        runtime :codex
-        (harness runtime
-                 {:harness.codex/extra-argv
-                  ["--dangerously-bypass-approvals-and-sandbox"]}))
-       {:reconciled :applied :harness "codex"}))
-   "codex-harness reconcile produced an invalid result"))
+  [{:keys [runtime]}]
+  (require-valid! ::harness/runtime runtime "codex-harness open received an invalid runtime")
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "harness.codex"
+                   :owner :ct.spools/codex-harness
+                   :keys ["harness.codex/model" "harness.codex/reasoning-effort"
+                          "harness.codex/extra-argv"]
+                   :doc "Codex CLI command overlay attributes."})
+  (harness/register-harness!
+   runtime :codex
+   (harness runtime {:harness.codex/extra-argv
+                     ["--dangerously-bypass-approvals-and-sandbox"]}))
+  {:opened :codex})
 
-(s/fdef reconcile
-  :args (s/cat :ctx ::harness/reconcile-context)
-  :ret ::harness/reconcile-result)
+(defn close-codex-harness!
+  "Close the Codex harness module resource."
+  [_context]
+  {:closed :codex})
 
 (defn- attribute [run k]
   (attr-get run k))
@@ -238,6 +231,7 @@
          :error (str "Codex JSONL parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(def spool
-  "Declare the Codex harness module entry point."
-  {:reconcile 'reconcile})
+(lifecycle/defresource codex-harness-runtime
+  "Own the Codex harness registration for the module lifetime."
+  {:open 'ct.spools.codex-harness/open-codex-harness!
+   :close 'ct.spools.codex-harness/close-codex-harness!})

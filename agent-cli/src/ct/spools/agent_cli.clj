@@ -6,6 +6,7 @@
             [ct.spools.harness-core :as harness]
             [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.skein.alpha :as skein]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
@@ -82,27 +83,21 @@
   :args (s/cat :event ::event)
   :ret ::claimed-run-ids)
 
-(defn reconcile
-  [{:keys [runtime] :as ctx}]
-  (require-valid! ::harness/reconcile-context ctx
-                  "agent-cli reconcile received an invalid context")
-  (require-valid!
-   ::harness/reconcile-result
-   (case (get-in ctx [:module/contribution :status])
-     :removed (do
-                (events/unregister-handler! runtime :harness/engine)
-                {:reconciled :removed})
-     (do
-       (state runtime)
-       (events/register-handler! runtime :harness/engine event-types
-                                 'ct.spools.agent-cli/on-event
-                                 {:spool "agent-cli"})
-       {:reconciled :applied :claimed (scan! runtime)}))
-   "agent-cli reconcile produced an invalid result"))
+(defn open-agent-cli!
+  "Open the harness CLI event handler for a module lifetime."
+  [{:keys [runtime]}]
+  (require-valid! ::harness/runtime runtime "agent-cli open received an invalid runtime")
+  (state runtime)
+  (events/register-handler! runtime :harness/engine event-types
+                            'ct.spools.agent-cli/on-event
+                            {:spool "agent-cli"})
+  {:opened :agent-cli :claimed (scan! runtime)})
 
-(s/fdef reconcile
-  :args (s/cat :ctx ::harness/reconcile-context)
-  :ret ::harness/reconcile-result)
+(defn close-agent-cli!
+  "Stop the harness CLI event handler."
+  [{:keys [runtime]}]
+  (events/unregister-handler! runtime :harness/engine)
+  {:closed :agent-cli})
 
 (defn- daemon-thread-factory []
   (reify ThreadFactory
@@ -408,6 +403,7 @@
   :args (s/cat :ctx ::op-context)
   :ret ::op-result)
 
-(def spool
-  "Declare the agent CLI lifecycle entry point."
-  {:reconcile 'reconcile})
+(lifecycle/defresource agent-cli-runtime
+  "Own the harness CLI event handler for the module lifetime."
+  {:open 'ct.spools.agent-cli/open-agent-cli!
+   :close 'ct.spools.agent-cli/close-agent-cli!})

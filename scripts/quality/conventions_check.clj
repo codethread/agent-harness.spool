@@ -22,7 +22,6 @@
        set))
 
 (def ^:private public-var-forms '#{def defonce defn defmacro})
-(def ^:private spool-entry-point-keys #{:contribute :reconcile})
 
 (defn- under-root?
   [filename roots]
@@ -106,20 +105,9 @@
   (for [form forms
         :when (and (seq? form)
                    (contains? public-var-forms (first form))
-                   (= 'spool (second form)))
-        :let [value (last form)
-              keys* (when (map? value) (set (keys value)))
-              valid-keys? (and (seq keys*)
-                               (every? spool-entry-point-keys keys*))
-              valid-values? (and (map? value)
-                                 (every? (fn [[_ entry]]
-                                           (and (seq? entry)
-                                                (= 'quote (first entry))
-                                                (symbol? (second entry))))
-                                         value))]
-        :when (or (not= 'def (first form)) (not valid-keys?) (not valid-values?))]
+                   (= 'spool (second form)))]
     (str file ":" (:line (meta form))
-         ": public `spool` must be a def map with quoted :contribute/:reconcile symbols")))
+         ": legacy public `spool` declaration; use skein.api.lifecycle.alpha authoring forms")))
 
 (defn source-findings
   "Return authored-source findings for `roots`."
