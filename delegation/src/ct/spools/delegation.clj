@@ -548,7 +548,7 @@
   "Return the runtime-owned registry containing reviewer roster declarations."
   ([] (registry-handle (rt)))
   ([runtime]
-   (runtime/spool-state runtime ::registry {:version 1}
+   (runtime/spool-state runtime ::registry
                         #(let [handle (registry/registry)]
                            (registry/declare-kind! handle {:id roster-kind :entry-spec :ct.spools.delegation/roster :binding-moment :fanout})
                            handle))))
