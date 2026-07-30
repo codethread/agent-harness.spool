@@ -9,6 +9,7 @@
                        "claude-harness/src"
                        "codex-harness/src"
                        "pi-harness/src"
+                       "cursor-harness/src"
                        "agent-cli/src"
                        "delegation/src"
                        "bench/src"
@@ -21,22 +22,23 @@
          :main-opts ["-m" "ct.spools.test-runner"]}
   :format {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
            :main-opts ["-m" "cljfmt.main" "check" "agent-run/src" "harness-core/src" "claude-harness/src" "codex-harness/src"
-                       "pi-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
+                       "pi-harness/src" "cursor-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
   :format/fix {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.1"}}
                :main-opts ["-m" "cljfmt.main" "fix" "agent-run/src" "harness-core/src" "claude-harness/src" "codex-harness/src"
-                       "pi-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
+                       "pi-harness/src" "cursor-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
   :lint/clj-kondo {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                    :main-opts ["-m" "clj-kondo.main" "--lint" "agent-run/src" "harness-core/src" "claude-harness/src" "codex-harness/src"
-                       "pi-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
+                       "pi-harness/src" "cursor-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
   :lint/splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
                 :main-opts ["-m" "noahtheduke.splint" "--output" "clj-kondo" "agent-run/src" "harness-core/src" "claude-harness/src" "codex-harness/src"
-                       "pi-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
+                       "pi-harness/src" "cursor-harness/src" "agent-cli/src" "delegation/src" "bench/src" "test"]}
   :lint/conventions {:extra-paths ["scripts"
                                    "agent-run/src"
                                    "harness-core/src"
                                    "claude-harness/src"
                                    "codex-harness/src"
                        "pi-harness/src"
+                       "cursor-harness/src"
                                    "agent-cli/src"
                                    "delegation/src"
                                    "bench/src"]
@@ -49,6 +51,7 @@
                                 "claude-harness/src"
                                 "codex-harness/src"
                        "pi-harness/src"
+                       "cursor-harness/src"
                                 "agent-cli/src"
                                 "delegation/src"
                                 "bench/src"

@@ -4,6 +4,7 @@
          ct.spools/claude-harness "claude-harness"
          ct.spools/codex-harness "codex-harness"
          ct.spools/pi-harness "pi-harness"
+         ct.spools/cursor-harness "cursor-harness"
          ct.spools/agent-cli "agent-cli"
          ct.spools/delegation "delegation"
          ct.spools/bench "bench"}}

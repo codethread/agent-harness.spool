@@ -1,0 +1,69 @@
+(ns ct.spools.cursor-harness-test
+  "Provider-boundary tests for Cursor Agent argv and JSON normalization."
+  (:require [clojure.test :refer [deftest is testing]]
+            [ct.spools.cursor-harness :as cursor]))
+
+(def ^:private runtime {})
+(def ^:private definition (cursor/harness runtime))
+
+(defn- run
+  ([mode]
+   (run mode {}))
+  ([mode attributes]
+   {:id "run"
+    :title "Cursor run"
+    :state "active"
+    :attributes
+    (merge {:harness/mode mode
+            :harness/session-id "provisional"
+            :harness/prompt "Do the work"
+            :harness.cursor/model "composer-2.5[fast=false]"
+            :harness.cursor/extra-argv ["--yolo" "--trust"]}
+           attributes)}))
+
+(deftest prepare-builds-new-and-resumed-commands
+  (testing "new headless runs request one JSON result"
+    (is (= ["agent" "--print" "--output-format" "json"
+            "--model" "composer-2.5[fast=false]" "--yolo" "--trust"]
+           (cursor/prepare runtime definition (run "headless")))))
+  (testing "resumed headless runs select the recorded Cursor chat"
+    (is (= ["agent" "--print" "--output-format" "json" "--resume" "provisional"
+            "--model" "composer-2.5[fast=false]" "--yolo" "--trust"]
+           (cursor/prepare runtime definition
+                           (run "headless" {:harness/resumes "prior"})))))
+  (testing "interactive runs retain a host-TTY prompt"
+    (is (= ["agent" "--model" "composer-2.5[fast=false]" "--yolo" "--trust"
+            "Do the work"]
+           (cursor/prepare runtime definition (run "interactive"))))))
+
+(deftest finish-normalizes-result-and-provider-session
+  (let [stdout (str "{\"type\":\"result\",\"subtype\":\"success\","
+                    "\"is_error\":false,\"result\":\"final\","
+                    "\"session_id\":\"session-1\"}")]
+    (is (= {:status :done
+            :exit-code 0
+            :result "final"
+            :session-id "session-1"}
+           (cursor/finish runtime definition (run "headless")
+                          {:exit-code 0 :stdout stdout :stderr ""})))))
+
+(deftest finish-fails-loudly-on-incomplete-success-output
+  (testing "a successful process without a provider session cannot be resumed safely"
+    (let [outcome (cursor/finish runtime definition (run "headless")
+                                 {:exit-code 0
+                                  :stdout "{\"result\":\"final\"}"
+                                  :stderr ""})]
+      (is (= :failed (:status outcome)))
+      (is (re-find #"no session id" (:error outcome)))))
+  (testing "an error result becomes a normalized failure"
+    (let [outcome (cursor/finish runtime definition (run "headless")
+                                 {:exit-code 0
+                                  :stdout "{\"is_error\":true,\"result\":\"nope\",\"session_id\":\"session-1\"}"
+                                  :stderr ""})]
+      (is (= :failed (:status outcome)))
+      (is (= "nope" (:error outcome)))))
+  (testing "malformed JSON becomes a normalized failure"
+    (let [outcome (cursor/finish runtime definition (run "headless")
+                                 {:exit-code 0 :stdout "{nope}" :stderr ""})]
+      (is (= :failed (:status outcome)))
+      (is (re-find #"JSON parse failed" (:error outcome))))))
