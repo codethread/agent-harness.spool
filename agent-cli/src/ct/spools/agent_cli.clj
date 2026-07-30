@@ -7,6 +7,7 @@
             [skein.api.current.alpha :as current]
             [skein.api.events.alpha :as events]
             [skein.api.runtime.alpha :as runtime]
+            [skein.api.skein.alpha :as skein]
             [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [skein.api.weaver.alpha :as weaver])
   (:import [java.lang ProcessBuilder]
@@ -39,12 +40,6 @@
   (s/and map?
          #(s/valid? ::harness/runtime (:op/runtime %))
          #(map? (:op/args %))))
-(s/def ::contribute-context
-  (s/and map? #(s/valid? ::harness/runtime (:runtime %))))
-(s/def ::contribution
-  (s/and map?
-         #(map? (get-in % [:ops :entries]))
-         #(set? (get-in % [:ops :overrides]))))
 (s/def ::alias string?)
 (s/def ::harness string?)
 (s/def ::mode #{"headless" "interactive"})
@@ -86,52 +81,6 @@
 (s/fdef on-event
   :args (s/cat :event ::event)
   :ret ::claimed-run-ids)
-
-(defn harness-op
-  "Dispatch one parsed `strand harness` subcommand.
-
-  Run, retry, and resume may schedule asynchronous headless work. `await`
-  blocks the CLI thread until each requested run is terminal or its timeout
-  expires; every other subcommand returns after its immediate transition."
-  [{:op/keys [runtime args cwd] :as ctx}]
-  (require-valid! ::op-context ctx "harness op received an invalid operation context")
-  (require-valid!
-   ::op-result
-   (case (first (:subcommand args))
-     "run" (op-run runtime args cwd)
-     "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
-     "retry" (op-retry runtime args)
-     "resume" (op-resume runtime args)
-     "self-complete" (summary (harness/self-complete! runtime (:run-id args) (:result args)))
-     "_started" (summary (mark-interactive-running! runtime (:run-id args)))
-     "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
-     "list" (harness/harnesses runtime))
-   "harness op produced an invalid result"))
-
-(s/fdef harness-op
-  :args (s/cat :ctx ::op-context)
-  :ret ::op-result)
-
-(defn contribute
-  "Publish the `strand harness` CLI operation."
-  [ctx]
-  (require-valid! ::contribute-context ctx
-                  "agent-cli contribute received an invalid context")
-  (require-valid!
-   ::contribution
-   {:ops {:entries
-          {"harness" {:name "harness"
-                      :fn 'ct.spools.agent-cli/harness-op
-                      :stream? false
-                      :provenance 'ct.spools.agent-cli
-                      :doc (:doc harness-arg-spec)
-                      :arg-spec harness-arg-spec}}
-          :overrides #{}}}
-   "agent-cli contribute produced an invalid contribution"))
-
-(s/fdef contribute
-  :args (s/cat :ctx ::contribute-context)
-  :ret ::contribution)
 
 (defn reconcile
   [{:keys [runtime] :as ctx}]
@@ -433,5 +382,32 @@
     "list" {:doc "List registered concrete harnesses and aliases."
             :hook-class :read :deadline-class :standard}}})
 
-(def spool {:contribute 'contribute
-            :reconcile 'reconcile})
+(skein/defop harness
+  "Dispatch parsed `strand harness` subcommands.
+
+  Run, retry, and resume may schedule asynchronous headless work. `await`
+  blocks the CLI thread until each requested run is terminal or its timeout
+  expires; every other subcommand returns after its immediate transition."
+  {:arg-spec harness-arg-spec}
+  [{:op/keys [runtime args cwd] :as ctx}]
+  (require-valid! ::op-context ctx "harness op received an invalid operation context")
+  (require-valid!
+   ::op-result
+   (case (first (:subcommand args))
+     "run" (op-run runtime args cwd)
+     "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
+     "retry" (op-retry runtime args)
+     "resume" (op-resume runtime args)
+     "self-complete" (summary (harness/self-complete! runtime (:run-id args) (:result args)))
+     "_started" (summary (mark-interactive-running! runtime (:run-id args)))
+     "_finished" (summary (finish-interactive! runtime (:run-id args) (:exit-code args)))
+     "list" (harness/harnesses runtime))
+   "harness op produced an invalid result"))
+
+(s/fdef harness-op
+  :args (s/cat :ctx ::op-context)
+  :ret ::op-result)
+
+(def spool
+  "Declare the agent CLI lifecycle entry point."
+  {:reconcile 'reconcile})

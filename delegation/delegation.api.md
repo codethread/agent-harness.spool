@@ -75,28 +75,6 @@ Register or replace a named reviewer roster (weaver-lifetime state, so
   explain data.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L717-L733">Source</a></sub></p>
 
-## <a name="ct.spools.delegation/contribute">`contribute`</a>
-``` clojure
-(contribute ctx)
-```
-Function.
-
-Return delegation's owner-complete CLI, pattern, query, and roster kinds.
-
-The roster registry handle is materialized directly in runtime spool state so
-the publication kernel can discover it. Core surface entries are declarative;
-vocabulary and glossary setup belong to `reconcile` after publication.
-
-## <a name="ct.spools.delegation/reconcile">`reconcile`</a>
-``` clojure
-(reconcile ctx)
-```
-Function.
-
-Reconcile delegation's non-declarative vocabulary and glossary resources.
-
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/delegation/src/ct/spools/delegation.clj#L2213-L2255">Source</a></sub></p>
-
 ## <a name="ct.spools.delegation/panel!">`panel!`</a>
 ``` clojure
 (panel! panel opts)

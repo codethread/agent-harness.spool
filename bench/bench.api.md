@@ -121,26 +121,6 @@ Function.
 Return registered bench harness definitions for `runtime`, sorted by key.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L345-L348">Source</a></sub></p>
 
-## <a name="ct.spools.bench/contribute">`contribute`</a>
-``` clojure
-(contribute ctx)
-```
-Function.
-
-Materialize bench's registry handle for owner-complete publication.
-
-The registry is a direct spool-state slot, not nested in the resource map,
-so the publication kernel discovers harness, suite, and extractor kinds.
-
-## <a name="ct.spools.bench/reconcile">`reconcile`</a>
-``` clojure
-(reconcile ctx)
-```
-Function.
-
-Reconcile bench's live resources after declarative publication.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1463-L1497">Source</a></sub></p>
-
 ## <a name="ct.spools.bench/judge-spec">`judge-spec`</a>
 ``` clojure
 (judge-spec runtime suite-name-or-inline {:keys [run-id entries sha]})

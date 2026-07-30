@@ -133,20 +133,6 @@ Capture an interactive run's transcript right now, persist it as the run's
   loudly when the run is not interactive or no capture op is configured.
 <p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L2763-L2776">Source</a></sub></p>
 
-## <a name="ct.spools.agent-run/contribute">`contribute`</a>
-``` clojure
-(contribute {:keys [runtime]})
-```
-Function.
-
-Materialize agent-run's registered declaration kinds for module publication.
-
-  Shipped harness/backend defaults are the stable system/default partitions;
-  workspace modules contribute their complete owner partitions under
-  `harness-kind`, `alias-kind`, and `backend-kind`. The module itself therefore
-  contributes no workspace-owned duplicates.
-<p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L2844-L2854">Source</a></sub></p>
-
 ## <a name="ct.spools.agent-run/declaration-status">`declaration-status`</a>
 ``` clojure
 (declaration-status)
@@ -300,19 +286,6 @@ Return the durable record of genuine set-preamble-extension! conflicts.
   `migrate-state`) so a conflict stays visible to operators and attention
   detectors after the stderr warning has scrolled off.
 <p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L1070-L1080">Source</a></sub></p>
-
-## <a name="ct.spools.agent-run/reconcile">`reconcile`</a>
-``` clojure
-(reconcile {:keys [runtime], :as ctx})
-```
-Function.
-
-Reconcile agent-run resources around owner-complete declaration publication.
-
-  Applied publication installs the event listener, vocabulary, existing live
-  resource state, crash recovery, and the first scan. Removal stops future
-  event dispatch without replacing or clearing in-flight/resource state.
-<p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L2856-L2872">Source</a></sub></p>
 
 ## <a name="ct.spools.agent-run/reconcile!">`reconcile!`</a>
 ``` clojure

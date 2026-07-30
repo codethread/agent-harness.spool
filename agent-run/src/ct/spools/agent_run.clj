@@ -530,6 +530,32 @@
 (s/def ::registered-harness-def valid-harness-def?)
 (s/def ::registered-alias-def valid-alias-def?)
 
+(defmacro defharnesses
+  "Define and collect a complete harness-tool declaration map.
+
+  Each map entry is contributed to agent-run's harness kind while its enclosing
+  module source is collected. Removing an entry or the form removes that
+  module owner's partition entry on the next refresh."
+  [form-name doc definitions]
+  `(do
+     (def ~form-name ~doc ~definitions)
+     (doseq [[key# definition#] ~form-name]
+       (runtime/collect-entry! harness-kind key# definition#))
+     (var ~form-name)))
+
+(defmacro defaliases
+  "Define and collect a complete harness-seat declaration map.
+
+  Each map entry is contributed to agent-run's alias kind while its enclosing
+  module source is collected. Removing an entry or the form removes that
+  module owner's partition entry on the next refresh."
+  [form-name doc definitions]
+  `(do
+     (def ~form-name ~doc ~definitions)
+     (doseq [[key# definition#] ~form-name]
+       (runtime/collect-entry! alias-kind key# definition#))
+     (var ~form-name)))
+
 (defn- effective-definitions [kind-id]
   (registry/effective (registry-handle) kind-id))
 
