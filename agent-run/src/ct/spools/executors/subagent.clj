@@ -325,32 +325,33 @@
   Fails loudly unless agent-run's module has already registered
   the agent-run engine in this weaver runtime."
   [{:keys [runtime]}]
-  (binding [*runtime* runtime
-            agent-run/*runtime* runtime]
-    (let [handlers (set (map :key (events/handlers runtime)))]
-      (when-not (contains? handlers :agent-run/engine)
-        (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
+  (current/with-runtime runtime
+    (binding [*runtime* runtime
+              agent-run/*runtime* runtime]
+      (let [handlers (set (map :key (events/handlers runtime)))]
+        (when-not (contains? handlers :agent-run/engine)
+          (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
     ;; The activation module owns the namespace, not the file location: the
     ;; source sits in the agent-run package but `:skein/spools-treadle` is the
     ;; use-key. `:keys` is advisory (the keys `deliver-run!`/`spawn-for-gate!`
     ;; stamp), not enforced. `gate/error` is the one key both gate executors
     ;; write, so the namespace spans them rather than belonging to this one.
-      (vocab/declare! runtime
-                      {:kind :attr-namespace
-                       :name "gate"
-                       :owner :skein/spools-treadle
-                       :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
-                       :doc (fmt/reflow "
+        (vocab/declare! runtime
+                        {:kind :attr-namespace
+                         :name "gate"
+                         :owner :skein/spools-treadle
+                         :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
+                         :doc (fmt/reflow "
                            |Workflow-gate completion, delivery, and spawn control attributes.
                            |gate/completion-policy selects run-done or status-implemented delivery.
                            |gate/delivered and gate/delivery-blocked record handing a delegated run's
                            |result to its gate. gate/error is wider: any gate executor's durable
                            |failure stamp, written by both the subagent and shell executors.")})
-      (events/register-handler! runtime :subagent/engine event-types
-                                'ct.spools.executors.subagent/on-event
-                                {:spool "subagent"})
-      (scan!)
-      {:opened :subagent})))
+        (events/register-handler! runtime :subagent/engine event-types
+                                  'ct.spools.executors.subagent/on-event
+                                  {:spool "subagent"})
+        (scan!)
+        {:opened :subagent}))))
 
 (defn close-subagent!
   "Stop the subagent executor's event dispatch."
