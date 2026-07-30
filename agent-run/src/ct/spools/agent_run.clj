@@ -78,6 +78,7 @@
             [skein.api.events.alpha :as events]
             [skein.api.current.alpha :as current]
             [skein.api.registry.alpha :as registry]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.runtime.alpha :as runtime]
             [skein.api.vocab.alpha :as vocab]
             [skein.api.format.alpha :as fmt]
@@ -2846,44 +2847,41 @@
                             'ct.spools.agent-run/on-event
                             {:spool "agent-run"}))
 
-(defn contribute
-  "Materialize agent-run's registered declaration kinds for module publication.
+(runtime/collect-kind! ::registry
+                       {:id harness-kind
+                        :entry-spec ::registered-harness-def
+                        :binding-moment :process-launch})
 
-  Shipped harness/backend defaults are the stable system/default partitions;
-  workspace modules contribute their complete owner partitions under
-  `harness-kind`, `alias-kind`, and `backend-kind`. The module itself therefore
-  contributes no workspace-owned duplicates."
-  [{:keys [runtime]}]
-  (binding [*runtime* runtime]
-    (registry-handle runtime))
-  {})
+(runtime/collect-kind! ::registry
+                       {:id alias-kind
+                        :entry-spec ::registered-alias-def
+                        :binding-moment :process-launch})
 
-(defn reconcile
-  "Reconcile agent-run resources around owner-complete declaration publication.
+(runtime/collect-kind! ::registry
+                       {:id backend-kind
+                        :entry-spec ::backend-def
+                        :binding-moment :interactive-session-launch})
+
+(defn open-agent-run!
+  "Open agent-run resources after owner-complete declaration publication.
 
   Applied publication installs the event listener, vocabulary, existing live
-  resource state, crash recovery, and the first scan. Removal stops future
-  event dispatch without replacing or clearing in-flight/resource state."
-  [{:keys [runtime] :as ctx}]
+  resource state, crash recovery, and the first scan."
+  [{:keys [runtime]}]
   (binding [*runtime* runtime]
-    (case (get-in ctx [:module/contribution :status])
-      :removed (do (events/unregister-handler! runtime :agent-run/engine)
-                   {:reconciled :removed
-                    :retained-in-flight (vec (sort (in-flight-run-ids)))})
-      (do (declare-agent-run-vocab! runtime)
-          (register-engine-handler! runtime)
-          (state)
-          {:reconciled :applied
-           :recovered (reconcile!)}))))
+    (declare-agent-run-vocab! runtime)
+    (register-engine-handler! runtime)
+    (state)
+    {:recovered (reconcile!)}))
 
-(def spool
-  "Entry-point declaration for the agent-run spool (ADR-004 `def spool`
-  convention).
+(defn close-agent-run!
+  "Stop agent-run dispatch while retaining in-flight and resource state."
+  [{:keys [runtime]}]
+  (binding [*runtime* runtime]
+    (events/unregister-handler! runtime :agent-run/engine)
+    {:retained-in-flight (vec (sort (in-flight-run-ids)))}))
 
-  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
-  var at every module evaluation, so a consumer declares only a source target
-  and world policy (`{:ns 'ct.spools.agent-run :spools [...]}`) and never
-  mirrors the pair. Unqualified symbols resolve against this namespace; fn
-  values are rejected (ADR-002.O1)."
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+(lifecycle/defresource agent-run-engine
+  "Own the agent-run event engine for the module lifetime."
+  {:open 'ct.spools.agent-run/open-agent-run!
+   :close 'ct.spools.agent-run/close-agent-run!})

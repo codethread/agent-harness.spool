@@ -1,12 +1,15 @@
 (ns ct.spools.delegation
   "Agent coordination spool layered over the agent-run engine."
+  (:refer-clojure :exclude [agent])
   (:require [clojure.java.shell :as sh]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [skein.api.cli.alpha :as cli]
             [skein.api.current.alpha :as current]
             [skein.api.registry.alpha :as registry]
+            [skein.api.lifecycle.alpha :as lifecycle]
             [skein.api.runtime.alpha :as runtime]
+            [skein.api.skein.alpha :as skein]
             [skein.api.runtime.glossary.alpha :as glossary]
             [skein.api.graph.alpha :as graph]
             [skein.api.notes.alpha :as notes]
@@ -2168,8 +2171,15 @@
                              :else [v])))
                        positional-keys))))
 
-(defn agent-op
+(declare agent-op)
+
+(skein/defop agent
   "Dispatch parsed `strand agent` subcommands using the first path segment."
+  {:arg-spec agent-arg-spec
+   :returns agent-returns
+   :stream? false
+   :about agent-about
+   :prime agent-prime}
   [{:op/keys [args argv]}]
   (let [args (or args (cli/parse agent-arg-spec argv))]
     (case (first (:subcommand args))
@@ -2240,13 +2250,14 @@
 (defn- ref-symbol
   [k]
   (symbol k))
-(defn agent-plan
+(skein/defpattern agent-plan
   "Create a feature strand plus task/review children for agent work.
 
   The plan root is marked `kind \"agent-plan\"`; each child carries `kind`
   `\"task\"` or `\"review\"`. The terse task input fields `harness`, `cwd`, and
   `max-attempts` weave to the `agent-run/harness`, `agent-run/cwd`, and
   `agent-run/max-attempts` attributes `delegate` and `retry` read."
+  {:spec ::agent-plan-input}
   [{:keys [input]}]
   (closed-map-keys? "agent-plan input" agent-plan-input-keys input)
   (doseq [task (:tasks input)]
@@ -2280,35 +2291,20 @@
                                        depends_on)))))
           tasks)))
 
-(defn contribute
-  "Return delegation's owner-complete CLI, pattern, query, and roster kinds.
+(runtime/collect-kind! ::registry
+                       {:id roster-kind
+                        :entry-spec ::roster
+                        :binding-moment :fanout})
 
-  The roster registry handle is materialized directly in runtime spool state so
-  the publication kernel can discover it. Core surface entries are declarative;
-  vocabulary and glossary setup belong to `reconcile` after publication."
-  [{:keys [runtime]}]
-  (registry-handle runtime)
-  {:ops {:entries {"agent" {:name "agent"
-                            :fn 'ct.spools.delegation/agent-op
-                            :stream? false
-                            :provenance 'ct.spools.delegation
-                            :doc (:doc agent-arg-spec)
-                            :arg-spec agent-arg-spec
-                            :returns agent-returns
-                            :about agent-about
-                            :prime agent-prime}}
-         :overrides #{}}
-   :patterns {:entries {"agent-plan" {:name "agent-plan"
-                                      :fn 'ct.spools.delegation/agent-plan
-                                      :input-spec ::agent-plan-input
-                                      :doc "Create a feature strand plus task/review children for agent work."}}
-              :overrides #{}}
-   :queries {:entries {"agent-failures" [:and [:= :state "active"] [:= [:attr "agent-run/run"] "true"]
-                                         [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]]}
-             :overrides #{}}})
+(skein/defquery agent-failures-query
+  "Select active agent runs that failed or exhausted their retry budget."
+  {}
+  [:and [:= :state "active"]
+   [:= [:attr "agent-run/run"] "true"]
+   [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]])
 
-(defn reconcile
-  "Reconcile delegation's non-declarative vocabulary and glossary resources.
+(defn open-delegation!
+  "Open delegation's vocabulary and glossary runtime resource.
 
   Claims neither agent-run preamble slot: the injected worker text is the
   workspace's call, so a workspace wanting this spool's task workflow registers
@@ -2317,34 +2313,30 @@
   Registers the delegation-owned glossary outcomes before the `agent` op (the
   load-order contract, DELTA-Dtf-002.CC7): the op's per-verb `failure-modes`
   references are checked against the runtime glossary at registration."
-  [{:keys [runtime] :as ctx}]
-  (case (get-in ctx [:module/contribution :status])
-    :removed {:reconciled :removed}
-    (do
-      (doseq [outcome delegation-glossary]
-        (glossary/register-glossary-outcome! runtime (assoc outcome :owner 'ct.spools.delegation)))
-      (vocab/declare! runtime
-                      {:kind :attr-namespace
-                       :name "review"
-                       :owner :skein/spools-delegation
-                       :keys ["review/roster" "review/focus"]
-                       :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
-      (vocab/declare! runtime
-                      {:kind :attr-namespace
-                       :name "panel"
-                       :owner :skein/spools-delegation
-                       :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
-                       :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
-      {:reconciled :applied})))
+  [{:keys [runtime]}]
+  (doseq [outcome delegation-glossary]
+    (glossary/register-glossary-outcome!
+     runtime (assoc outcome :owner 'ct.spools.delegation)))
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "review"
+                   :owner :skein/spools-delegation
+                   :keys ["review/roster" "review/focus"]
+                   :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
+  (vocab/declare! runtime
+                  {:kind :attr-namespace
+                   :name "panel"
+                   :owner :skein/spools-delegation
+                   :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
+                   :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
+  {:opened :delegation})
 
-(def spool
-  "Entry-point declaration for the delegation spool (ADR-004 `def spool`
-  convention).
+(defn close-delegation!
+  "Close delegation's module resource without retracting process registries."
+  [_context]
+  {:closed :delegation})
 
-  The refresh coordinator resolves `:contribute`/`:reconcile` from this public
-  var at every module evaluation, so a consumer declares only a source target
-  and world policy (`{:ns 'ct.spools.delegation :spools [...] :after
-  [:agent-run]}`) and never mirrors the pair. Unqualified symbols resolve
-  against this namespace; fn values are rejected (ADR-002.O1)."
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+(lifecycle/defresource delegation-runtime
+  "Own delegation's module-lifetime vocabulary setup."
+  {:open 'ct.spools.delegation/open-delegation!
+   :close 'ct.spools.delegation/close-delegation!})
