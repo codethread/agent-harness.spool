@@ -3,4 +3,8 @@
   skein.api.skein.alpha/defop clojure.core/defn
   skein.api.skein.alpha/defpattern clojure.core/defn
   skein.api.skein.alpha/defquery clojure.core/def
-  skein.spools.workflow/defexecutor clojure.core/defn}}
+  skein.spools.workflow/defexecutor clojure.core/defn}
+ :linters
+ {:unresolved-var
+  {:exclude [skein.api.runtime.alpha/collect-kind!
+             skein.spools.workflow/defexecutor]}}}

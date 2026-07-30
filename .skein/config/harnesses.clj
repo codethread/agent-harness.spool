@@ -30,7 +30,7 @@
 (def ^:private terra-rates {:input 2.5 :cache-read 0.25 :output 15.0})
 (def ^:private luna-rates {:input 1.0 :cache-read 0.1 :output 6.0})
 
-(def ^:private harness-defs
+(shuttle/defharnesses ^:private harness-defs
   "Repo-local harness tools. Seats layered over them live in `alias-defs`."
   {:codex
    {:argv ["codex" "exec" "--json" "--skip-git-repo-check" "--color" "never"
@@ -68,7 +68,7 @@
     :parse :raw
     :doc "Claude Opus interactive TUI for HITL sessions when Fable-level depth is not warranted."}})
 
-(def ^:private alias-defs
+(shuttle/defaliases ^:private alias-defs
   "Repo-local seats layered over `harness-defs` and agent-run's :pi tool."
   {:luna-low
    {:alias-of :codex
@@ -216,12 +216,6 @@
            |provider-quota fallback for reviews of primarily Claude-authored
            |code, not frontier design or broad implementation.")}})
 
-(defn contribute
-  "Contribute this workspace's complete harness-tool and alias partitions."
-  [_]
-  {shuttle/harness-kind harness-defs
-   shuttle/alias-kind alias-defs})
-
 (defn reconcile
   "Bind the delegation spool's default review and worker contracts."
   [{:keys [runtime]}]
@@ -233,5 +227,4 @@
 
 (def spool
   "Entry-point declaration for the harnesses workspace-file module."
-  {:contribute 'contribute
-   :reconcile 'reconcile})
+  {:reconcile 'reconcile})

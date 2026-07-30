@@ -38,26 +38,6 @@ Return durable stall detail for a ready subagent gate view, or nil.
   policy is applied.
 <p><sub><a href="https://github.com/codethread/skein/blob/main/spools/agent-run/src/ct/spools/executors/subagent.clj#L240-L257">Source</a></sub></p>
 
-## <a name="ct.spools.executors.subagent/contribute">`contribute`</a>
-``` clojure
-(contribute ctx)
-```
-Function.
-
-Return subagent's owner-complete executor and coordinator queries.
-
-## <a name="ct.spools.executors.subagent/reconcile">`reconcile`</a>
-``` clojure
-(reconcile ctx)
-```
-Function.
-
-Reconcile the subagent executor's event handler and initial scan.
-
-  Fails loudly unless agent-run's module has already registered
-  the agent-run engine in this weaver runtime.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/agent-run/src/ct/spools/executors/subagent.clj#L259-L298">Source</a></sub></p>
-
 ## <a name="ct.spools.executors.subagent/on-event">`on-event`</a>
 ``` clojure
 (on-event _event)
