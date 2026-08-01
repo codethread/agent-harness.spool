@@ -17,11 +17,19 @@
         source (io/file dir "sample.clj")]
     (spit source
           (str "(ns sample \"sample\")\n"
-               "(def spool {:contribute identity})\n"
+               "(do (def spool {}))\n"
+               "(def ^:private spool {})\n"
+               "'(def spool {})\n"
+               "(defn factory [] (def spool {}))\n"
+               "(delay (def spool {}))\n"
                "(def json \"{\\\"name\\\":\\\"agent\\\"}\")\n"
                "(def wide \"" (str/join (repeat 181 "x")) "\")\n"))
-    (let [findings (vec (conventions/source-findings [(.getPath dir)]))]
-      (is (some #(re-find #"legacy public `spool`" %) findings))
+    (let [findings (vec (conventions/source-findings [(.getPath dir)]))
+          spool-findings (filter #(re-find #"legacy public `spool`" %) findings)]
+      (is (= 1 (count spool-findings)))
+      (is (some #(str/includes? % (str source ":2:")) spool-findings))
+      (doseq [line [3 4 5 6]]
+        (is (not-any? #(str/includes? % (str source ":" line ":")) spool-findings)))
       (is (some #(re-find #"exceeds 180 columns" %) findings)))
     (is (conventions/reproducible-json? "{\"name\":\"agent\"}"))
     (is (not (conventions/reproducible-json? "{\"name\": \"agent\"}")))))

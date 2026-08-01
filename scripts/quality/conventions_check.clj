@@ -100,13 +100,37 @@
               :else []))]
     (mapcat #(walk % 1 false) forms)))
 
+(def ^:private deferred-body-forms
+  '#{comment defn defmacro fn fn* quote var delay lazy-seq})
+
+(defn- spool-declaration-site
+  [form]
+  (when (and (seq? form)
+             (contains? public-var-forms (first form))
+             (= 'spool (second form))
+             (not (:private (meta (second form)))))
+    form))
+
+(defn- spool-declaration-sites
+  [form]
+  (if-let [site (spool-declaration-site form)]
+    [site]
+    (cond
+      (seq? form)
+      (if (contains? deferred-body-forms (first form))
+        []
+        (mapcat spool-declaration-sites (rest form)))
+
+      (coll? form)
+      (mapcat spool-declaration-sites form)
+
+      :else [])))
+
 (defn- spool-declaration-findings
   [file forms]
   (for [form forms
-        :when (and (seq? form)
-                   (contains? public-var-forms (first form))
-                   (= 'spool (second form)))]
-    (str file ":" (:line (meta form))
+        site (spool-declaration-sites form)]
+    (str file ":" (:line (meta site))
          ": legacy public `spool` declaration; use skein.api.lifecycle.alpha authoring forms")))
 
 (defn source-findings
