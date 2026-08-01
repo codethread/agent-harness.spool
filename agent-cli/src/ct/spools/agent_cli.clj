@@ -403,6 +403,10 @@
   :args (s/cat :ctx ::op-context)
   :ret ::op-result)
 
+(skein/defbin agent
+  "Open a coding agent in the caller's terminal as a tracked interactive run."
+  {:executable [:root "bin/agent"]})
+
 (lifecycle/defresource agent-cli-runtime
   "Own the harness CLI event handler for the module lifetime."
   {:open 'ct.spools.agent-cli/open-agent-cli!
