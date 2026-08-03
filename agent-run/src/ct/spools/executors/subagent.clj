@@ -307,12 +307,12 @@
   [gate]
   (gate-stalled? gate))
 
-(skein/defquery stalled-subagent-gates-query
+(skein/defquery stalled-subagent-gates
   "Select ready subagent gates with no serving run."
   {}
   stalled-gates-query)
 
-(skein/defquery blocked-deliveries-query
+(skein/defquery blocked-deliveries
   "Select closed gates whose delivery remains blocked."
   {}
   [:and [:= :state "closed"]

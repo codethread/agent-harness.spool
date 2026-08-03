@@ -2296,7 +2296,7 @@
                         :entry-spec ::roster
                         :binding-moment :fanout})
 
-(skein/defquery agent-failures-query
+(skein/defquery agent-failures
   "Select active agent runs that failed or exhausted their retry budget."
   {}
   [:and [:= :state "active"]
