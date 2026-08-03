@@ -1550,7 +1550,7 @@
                         :entry-spec ::registered-extractor
                         :binding-moment :run})
 
-(skein/defquery bench-runs-query
+(skein/defquery bench-runs
   "Select active benchmark run roots."
   {}
   [:and [:= :state "active"]
