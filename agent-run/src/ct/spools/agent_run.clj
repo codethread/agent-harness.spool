@@ -65,24 +65,24 @@
   still terminate at the tool. Every actual launch snapshots the resolved
   harness/backend operations; later registry refresh affects only later launches.
 
-  The whole spool composes public surfaces (`skein.api.weaver.alpha` inside the
+  The whole spool composes public surfaces (`millstrand.api.weaver.alpha` inside the
   weaver JVM) and owns no privileged runtime state. Higher-level spools, such as
   `ct.spools.delegation`, register CLI operations over this engine."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.notes.alpha :as notes]
-            [skein.api.weaver.alpha :as weaver]
-            [skein.api.events.alpha :as events]
-            [skein.api.current.alpha :as current]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.format.alpha :as fmt]
-            [skein.api.spool.alpha :refer [fail! attr-get]])
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.api.events.alpha :as events]
+            [millstrand.api.current.alpha :as current]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.format.alpha :as fmt]
+            [millstrand.api.spool.alpha :refer [fail! attr-get]])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
@@ -135,12 +135,12 @@
   "Owner-partitioned kind id for interactive backend declarations."
   :ct.spools.agent-run/backend)
 
-(def ^:private repl-owner :skein.owner/repl)
-(def ^:private system-owner :skein.owner/system)
+(def ^:private repl-owner :millstrand.owner/repl)
+(def ^:private system-owner :millstrand.owner/system)
 
 (defn registry-handle
   "Return the runtime-owned owner registry for harness, alias, and backend
-  declarations. The handle lives directly in spool-state so Skein's module
+  declarations. The handle lives directly in spool-state so Millstrand's module
   publication coordinator discovers all three kinds."
   ([] (registry-handle (rt)))
   ([runtime]
@@ -588,7 +588,7 @@
   transcript text to stdout, overriding the backend's scrollback capture.
   Harness capture is the seam for harness-aware transcripts (session logs,
   user hook-written dialogue logs) without the engine knowing any harness's
-  log format; correlate via the SKEIN_RUN_ID env var every session exports.
+  log format; correlate via the MILLSTRAND_RUN_ID env var every session exports.
 
   Writes only the harness (tool) registry; a same-named seat may coexist in the
   alias registry and shadows this tool at resolution time. The def shape is the
@@ -1121,7 +1121,7 @@
   [run-id served-target prompt-prefix]
   (let [cmd (pinned-strand-command)]
     (str "[agent-run context]\n"
-         "You are a headless subagent run managed by the Skein agent-run spool.\n"
+         "You are a headless subagent run managed by the Millstrand agent-run spool.\n"
          "run-id: " run-id "\n"
          "- Every strand command MUST be invoked exactly as: " cmd " <command...>\n"
          "  (the env prefix and --workspace flag are both required; ambient env is unreliable)\n"
@@ -1155,7 +1155,7 @@
         id (:id run)
         for-id (sattr run "completes-on")]
     (str "[agent-run interactive session context]\n"
-         "You are an interactive agent session managed by the Skein agent-run spool.\n"
+         "You are an interactive agent session managed by the Millstrand agent-run spool.\n"
          "run-id: " id "\n"
          "- Every strand command MUST be invoked exactly as: " cmd " <command...>\n"
          "  (the env prefix and --workspace flag are both required; ambient env is unreliable)\n"
@@ -1480,7 +1480,7 @@
   multiplexer session names live in a server-global namespace, so two
   workspaces sharing one server must not collide or cross-adopt."
   [id]
-  (format "skein-%08x-%s" (bit-and (hash (workspace-dir)) 0xffffffff) id))
+  (format "millstrand-%08x-%s" (bit-and (hash (workspace-dir)) 0xffffffff) id))
 
 (defn- run-handle
   "Return the run's stored backend handle. The suggested session name is the
@@ -1513,7 +1513,7 @@
     (spit file (str "#!/bin/sh\n"
                     (str/join (for [[k v] env]
                                 (str "export " k "=" (sh-quote v) "\n")))
-                    "export SKEIN_RUN_ID=" (sh-quote id) "\n"
+                    "export MILLSTRAND_RUN_ID=" (sh-quote id) "\n"
                     "export XDG_STATE_HOME=" (sh-quote (state-root)) "\n"
                     "cd " (sh-quote cwd) " || exit 1\n"
                     "exec " (str/join " " (map sh-quote argv)) "\n"))
@@ -2462,7 +2462,7 @@
   phase mirrors because this call writes edge and phase together. Returns the
   successor run strand.
 
-  Diverges from `skein.api.weaver.alpha/supersede` under the inherited name, in
+  Diverges from `millstrand.api.weaver.alpha/supersede` under the inherited name, in
   two ways worth knowing before reading either as the other. The primitive
   rewires the predecessor's dependents onto the replacement; this does not — it
   copies the predecessor's own outgoing `depends-on` edges to the successor and
@@ -2752,15 +2752,15 @@
                                  {:timed-out false :runs (mapv run-summary strands)}))
                :on-timeout (fn [strands]
                              {:timed-out true :runs (mapv run-summary strands)})}]
-     ;; Skein's frozen owner-refresh baseline still exposes the deadline helper;
+     ;; Millstrand's frozen owner-refresh baseline still exposes the deadline helper;
      ;; later runtimes expose the Clock-aware replacement. Resolve this one
      ;; compatibility seam dynamically so the v8 business API behaves on both.
-     (if-let [poll-until (ns-resolve 'skein.api.spool.alpha 'poll-until!)]
-       (let [clock-fn (requiring-resolve 'skein.api.runtime.alpha/clock)]
+     (if-let [poll-until (ns-resolve 'millstrand.api.spool.alpha 'poll-until!)]
+       (let [clock-fn (requiring-resolve 'millstrand.api.runtime.alpha/clock)]
          (poll-until (clock-fn runtime)
                      (assoc opts :timeout-ms (* 1000 (long timeout-secs)))))
        (let [poll-until-deadline (requiring-resolve
-                                  'skein.api.spool.alpha/poll-until-deadline!)]
+                                  'millstrand.api.spool.alpha/poll-until-deadline!)]
          (poll-until-deadline
           (assoc opts :deadline (+ (System/currentTimeMillis)
                                    (* 1000 (long timeout-secs))))))))))
@@ -2813,7 +2813,7 @@
 
 (defn note!
   "Append a note strand to `target-id`'s memory via the blessed
-  `skein.api.notes.alpha/note!`, threading this spool's runtime.
+  `millstrand.api.notes.alpha/note!`, threading this spool's runtime.
 
   The note is born closed (memory, not work), linked to the target by a `notes`
   edge alone — no `note/for` attribute — and carries optional `note/by`/`note/round`.
@@ -2824,7 +2824,7 @@
 
 (defn notes
   "Return `target-id`'s notes in `note/at` order, optionally one `:round`, via
-  the blessed `skein.api.notes.alpha/notes` threading this spool's runtime.
+  the blessed `millstrand.api.notes.alpha/notes` threading this spool's runtime.
 
   Walks the incoming `notes` edges to the target, so it reads every writer's
   notes regardless of decorating attrs."
@@ -2868,7 +2868,7 @@
   (vocab/declare! runtime
                   {:kind :attr-namespace
                    :name "agent-run"
-                   :owner :skein/spools-shuttle
+                   :owner :millstrand/spools-shuttle
                    :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
                    :doc (fmt/reflow
                          "|Agent-run engine control attributes reserved by spawn-run! and the

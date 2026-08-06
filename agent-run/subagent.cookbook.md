@@ -1,4 +1,4 @@
-# Skein Subagent Executor Spool — Cookbook
+# Millstrand Subagent Executor Spool — Cookbook
 
 Composition recipes for `ct.spools.executors.subagent`: how to let a workflow hand a step to a
 spawned agent and get the result back, and *why* the bridge is shaped the way it is.
@@ -29,7 +29,7 @@ Every recipe has the same four parts:
 1. **Situation** — the shape of problem you're staring at.
 2. **Composition** — which primitives combine, and how.
 3. **Snippet** — a complete, runnable form (assume
-   `(require '[skein.spools.workflow :as workflow])`).
+   `(require '[millstrand.spools.workflow :as workflow])`).
 4. **Why this shape** — the reasoning: why these primitives, what the attribute conventions buy you,
    and what the alternative would cost.
 
@@ -53,7 +53,7 @@ succeeds — completes the gate through `workflow/complete!`. The step after the
 normally.
 
 ```clojure
-(require '[skein.spools.workflow :as workflow])
+(require '[millstrand.spools.workflow :as workflow])
 
 (def build-widget
   (workflow/workflow
@@ -91,7 +91,7 @@ normally.
   step reads it like any other completed step.
 
 Honest source: `happy-path-spawns-delivers-and-unblocks-next-step` in
-``test/skein/executors/subagent_test.clj``, and the worked example in
+``test/ct/spools/subagent_test.clj``, and the worked example in
 [`subagent.md`](./subagent.md#worked-example).
 
 ---
@@ -108,7 +108,7 @@ the subagent executor derives one from `workflow/instruction`, then `description
 the gate rather than spawning a broken run.
 
 ```clojure
-(require '[skein.spools.workflow :as workflow])
+(require '[millstrand.spools.workflow :as workflow])
 
 ;; explicit prompt, pinned harness and worktree, bounded recovery
 (workflow/gate :implement "Implement widget" :subagent
@@ -141,7 +141,7 @@ the gate rather than spawning a broken run.
   visible, never a silently dropped spawn (contract [`subagent.md`, "Gate request attributes"](./subagent.md#gate-request-attributes)).
 
 Honest source: the gate request table in [`subagent.md`](./subagent.md#gate-request-attributes), and
-`missing-harness-stamps-error-and-does-not-retry` in ``test/skein/executors/subagent_test.clj``.
+`missing-harness-stamps-error-and-does-not-retry` in ``test/ct/spools/subagent_test.clj``.
 
 ---
 
@@ -159,8 +159,8 @@ cleared state; a blank `gate/error` stays tolerated as cleared for back-compat, 
 is data, not a delete.
 
 ```clojure
-(require '[skein.api.weaver.alpha :as weaver]
-         '[skein.api.current.alpha :as current]
+(require '[millstrand.api.weaver.alpha :as weaver]
+         '[millstrand.api.current.alpha :as current]
          '[ct.spools.agent-run :as agent-run])
 
 (def rt (current/runtime))              ; the active weaver runtime
@@ -201,7 +201,7 @@ is data, not a delete.
 Honest source: `failed-run-stays-ready-and-agent-retry-recovers-the-gate`,
 `recovery-respawn-keeps-stalled-subagent-gates-in-lockstep-with-predicate`, and
 `stalled-subagent-gates-query-reports-spawn-errors-and-dead-runs` in
-``test/skein/executors/subagent_test.clj``.
+``test/ct/spools/subagent_test.clj``.
 
 ---
 
@@ -216,7 +216,7 @@ with the run result, and only for a genuinely successful run. The subagent execu
 itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a healthy gate.
 
 ```clojure
-(require '[skein.spools.workflow :as workflow])
+(require '[millstrand.spools.workflow :as workflow])
 
 ;; await! stays :waiting on a healthy subagent gate (the subagent executor is its executor),
 ;; and surfaces :stalled — with the spawn error — only when the gate is genuinely stuck.
@@ -242,7 +242,7 @@ itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a
   invented. Stall is a graph fact, not a timeout (contract [`subagent.md`, "Coordination attention"](./subagent.md#coordination-attention)).
 
 Honest source: `blank-result-gate-fails-loudly-stays-discoverable-and-recovers` and
-`subagent-registers-executor-for-flow-await` in `test/skein/executors/subagent_test.clj`.
+`subagent-registers-executor-for-flow-await` in `test/ct/spools/subagent_test.clj`.
 
 ---
 

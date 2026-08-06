@@ -7,27 +7,27 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.patterns.alpha :as patterns]
-            [skein.api.runtime.glossary.alpha :as glossary]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.weaver.alpha :as weaver]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.patterns.alpha :as patterns]
+            [millstrand.api.runtime.glossary.alpha :as glossary]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.test-support :as test-support :refer [await-phase]]
-            [skein.test.alpha :as t]))
+            [millstrand.test.alpha :as t]))
 
 (defn- with-agents
   "Run f with a fresh weaver runtime that has the agent-run and delegation spools installed.
 
-  Nests config-dir under a `.skein` child of the temp root
-  (`test-support`'s `:nest-skein? true` opt): delegation/agent-run derive the
-  worktree root from config-dir's parent, matching the real repo-root/.skein
+  Nests config-dir under a `.millstrand` child of the temp root
+  (`test-support`'s `:nest-millstrand? true` opt): delegation/agent-run derive the
+  worktree root from config-dir's parent, matching the real repo-root/.millstrand
   layout, so an unnested config-dir would report the wrong workspace root."
   [f]
   (test-support/with-runtime
-    {:nest-skein? true :prefix "skein-agents-config"}
+    {:nest-millstrand? true :prefix "millstrand-agents-config"}
     (fn [rt _config-dir]
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (test-support/activate-spool! rt :delegation 'ct.spools.delegation
@@ -244,9 +244,9 @@
     (fn [rt]
       (let [review (attr-namespace-declaration rt "review")
             panel (attr-namespace-declaration rt "panel")]
-        (is (= :skein/spools-delegation (:owner review))
+        (is (= :millstrand/spools-delegation (:owner review))
             "review/* is owned by the delegation spool's use-key")
-        (is (= :skein/spools-delegation (:owner panel))
+        (is (= :millstrand/spools-delegation (:owner panel))
             "panel/* is owned by the delegation spool's use-key")
         (is (contains? (set (:keys review)) "review/focus"))
         (is (contains? (set (:keys panel)) "panel/seat"))
@@ -258,7 +258,7 @@
     (fn [rt]
       (let [decl (attr-namespace-declaration rt "agent-run")]
         (is (= :attr-namespace (:kind decl)))
-        (is (= :skein/spools-shuttle (:owner decl))
+        (is (= :millstrand/spools-shuttle (:owner decl))
             "agent-run/* is owned by the agent-run spool's use-key")
         (is (contains? (set (:keys decl)) "agent-run/run"))))))
 
@@ -830,7 +830,7 @@
 
 (deftest base-flag-pins-the-merge-base-review-surface
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
-                      (.toPath (io/file "/tmp")) "skein-agents-base"
+                      (.toPath (io/file "/tmp")) "millstrand-agents-base"
                       (make-array java.nio.file.attribute.FileAttribute 0)))
         path (.getCanonicalPath dir)
         git (fn [& args] (apply sh/sh "git" "-C" path args))]
@@ -877,7 +877,7 @@
 
 (deftest git-changed-files-expands-a-commit-range
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
-                      (.toPath (io/file "/tmp")) "skein-agents-git"
+                      (.toPath (io/file "/tmp")) "millstrand-agents-git"
                       (make-array java.nio.file.attribute.FileAttribute 0)))
         path (.getCanonicalPath dir)
         git (fn [& args] (apply sh/sh "git" "-C" path args))]

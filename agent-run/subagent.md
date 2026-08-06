@@ -1,4 +1,4 @@
-# Skein Subagent Executor Spool
+# Millstrand Subagent Executor Spool
 
 > This is the **contract** doc: gate request attributes, the `gate/*` vocabulary, delivery
 > semantics, and recovery. Its two companions are [`subagent.cookbook.md`](./subagent.cookbook.md),
@@ -22,13 +22,13 @@ Load workflow and agent-run before the subagent executor, approving workflow's
 source coordinate as well as the agent-run root:
 
 ```clojure
-(require '[skein.api.current.alpha :as current]
-         '[skein.api.runtime.alpha :as runtime])
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
 (runtime/module! runtime :workflow
-  {:ns 'skein.spools.workflow
-   :spools ['skein.spools/workflow]
+  {:ns 'millstrand.spools.workflow
+   :spools ['millstrand.spools/workflow]
    :required? true})
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
@@ -36,7 +36,7 @@ source coordinate as well as the agent-run root:
    :required? true})
 (runtime/module! runtime :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools ['ct.spools/agent-run skein.spools/workflow]
+   :spools ['ct.spools/agent-run millstrand.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 ```
@@ -87,7 +87,7 @@ uses `supersedes` edges; retry successors inherit the same `serves` target.
 ## Worked example
 
 ```clojure
-(require '[skein.spools.workflow :as workflow])
+(require '[millstrand.spools.workflow :as workflow])
 
 (def build-widget
   (workflow/workflow
@@ -162,6 +162,6 @@ runs parked on `gate/delivery-blocked`.
 
 ## See also
 
-- [`skein.spools.workflow`](../workflow.md) — workflow gates and runtime API.
+- [`millstrand.spools.workflow`](../workflow.md) — workflow gates and runtime API.
 - [`ct.spools.agent-run`](../agent-run/README.md) — agent-run run lifecycle and harness registry.
-- ``test/skein/executors/subagent_test.clj`` — executable contract tests.
+- ``test/ct/spools/subagent_test.clj`` — executable contract tests.

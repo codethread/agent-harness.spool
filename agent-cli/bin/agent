@@ -2,8 +2,8 @@
 set -u
 
 strand_call() {
-  if [ -n "${SKEIN_WORKSPACE:-}" ]; then
-    strand --workspace "$SKEIN_WORKSPACE" "$@"
+  if [ -n "${MILLSTRAND_WORKSPACE:-}" ]; then
+    strand --workspace "$MILLSTRAND_WORKSPACE" "$@"
   else
     strand "$@"
   fi

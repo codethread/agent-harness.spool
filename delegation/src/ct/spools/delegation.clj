@@ -4,20 +4,20 @@
   (:require [clojure.java.shell :as sh]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.cli.alpha :as cli]
-            [skein.api.current.alpha :as current]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.skein.alpha :as skein]
-            [skein.api.runtime.glossary.alpha :as glossary]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.notes.alpha :as notes]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.weaver.alpha :as weaver]
-            [skein.api.format.alpha :as fmt]
+            [millstrand.api.cli.alpha :as cli]
+            [millstrand.api.current.alpha :as current]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.millstrand.alpha :as millstrand]
+            [millstrand.api.runtime.glossary.alpha :as glossary]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.api.format.alpha :as fmt]
             [ct.spools.agent-run :as agent-run]
-            [skein.api.spool.alpha :refer [fail! attr-get require-valid!]]))
+            [millstrand.api.spool.alpha :refer [fail! attr-get require-valid!]]))
 
 (defn- rt
   []
@@ -51,7 +51,7 @@
   (let [config-dir (or (get-in (rt) [:metadata :config-dir])
                        (fail! "agents requires an active workspace" {}))
         config-file (java.io.File. ^String config-dir)]
-    (if (= ".skein" (.getName config-file))
+    (if (= ".millstrand" (.getName config-file))
       (-> config-file .getParentFile .getCanonicalPath)
       (.getCanonicalPath config-file))))
 
@@ -133,7 +133,7 @@
                     |
                     |Set --attr status=implemented only when your validation gate is green.")
                   ;; the note-writing instruction renders through the single
-                  ;; `writer-ref->prompt` renderer (skein.api.notes.alpha)
+                  ;; `writer-ref->prompt` renderer (millstrand.api.notes.alpha)
                   [(str "Leave durable findings for the coordinator and successors: "
                         (notes/writer-ref->prompt {:target "<task-id>"
                                                    :by "<your-run-id>"
@@ -542,7 +542,7 @@
 (def roster-kind
   "Owner-partitioned kind id for reviewer roster declarations."
   :ct.spools.delegation/roster)
-(def ^:private direct-owner :skein.owner/repl)
+(def ^:private direct-owner :millstrand.owner/repl)
 
 (defn registry-handle
   "Return the runtime-owned registry containing reviewer roster declarations."
@@ -804,7 +804,7 @@
 (defn- post-with-tag-fragment
   "Instruction for appending a contribution to the board strand, whose write
   command renders through the single `writer-ref->prompt` renderer
-  (skein.api.notes.alpha). A non-nil `tag` threads a `panel/pass` decoration
+  (millstrand.api.notes.alpha). A non-nil `tag` threads a `panel/pass` decoration
   attr so one pass stays separable on a strand that accumulates notes across
   passes; a nil tag omits it. A non-nil `kind` threads the open `note/kind`
   view hint the same way (reviews stamp `review-dump` so board views can fold
@@ -852,7 +852,7 @@
 ;; `review-prompt` reproduces the read-the-board and post-with-tag fragments
 ;; byte-for-byte (the frozen roster tests are the compatibility proof); the
 ;; post-with-tag write instruction now flows through the single
-;; `writer-ref->prompt` renderer (skein.api.notes.alpha), so its wording and the
+;; `writer-ref->prompt` renderer (millstrand.api.notes.alpha), so its wording and the
 ;; `panel/pass` decoration attr have exactly one source of truth. The
 ;; review-specific framing (target subtree, focus, scope, notes-only discipline)
 ;; stays inline because it is not part of the shared blackboard vocabulary.
@@ -2173,7 +2173,7 @@
 
 (declare agent-op)
 
-(skein/defop agent
+(millstrand/defop agent
   "Dispatch parsed `strand agent` subcommands using the first path segment."
   {:arg-spec agent-arg-spec
    :returns agent-returns
@@ -2250,7 +2250,7 @@
 (defn- ref-symbol
   [k]
   (symbol k))
-(skein/defpattern agent-plan
+(millstrand/defpattern agent-plan
   "Create a feature strand plus task/review children for agent work.
 
   The plan root is marked `kind \"agent-plan\"`; each child carries `kind`
@@ -2296,7 +2296,7 @@
                         :entry-spec ::roster
                         :binding-moment :fanout})
 
-(skein/defquery agent-failures
+(millstrand/defquery agent-failures
   "Select active agent runs that failed or exhausted their retry budget."
   {}
   [:and [:= :state "active"]
@@ -2320,13 +2320,13 @@
   (vocab/declare! runtime
                   {:kind :attr-namespace
                    :name "review"
-                   :owner :skein/spools-delegation
+                   :owner :millstrand/spools-delegation
                    :keys ["review/roster" "review/focus"]
                    :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
   (vocab/declare! runtime
                   {:kind :attr-namespace
                    :name "panel"
-                   :owner :skein/spools-delegation
+                   :owner :millstrand/spools-delegation
                    :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
                    :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
   {:opened :delegation})

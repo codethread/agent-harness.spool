@@ -1,7 +1,7 @@
 (ns harness-next
   "Repo-local aliases for exercising the next harness vertical slice."
   (:require [ct.spools.harness-core :as harness]
-            [skein.api.lifecycle.alpha :as lifecycle]))
+            [millstrand.api.lifecycle.alpha :as lifecycle]))
 
 (defn open-harness-next!
   "Register the workspace's aliases for the next harness implementation."

@@ -4,13 +4,13 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
-            [skein.api.current.alpha :as current]
-            [skein.api.events.alpha :as events]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.skein.alpha :as skein]
-            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [skein.api.weaver.alpha :as weaver])
+            [millstrand.api.current.alpha :as current]
+            [millstrand.api.events.alpha :as events]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.millstrand.alpha :as millstrand]
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
+            [millstrand.api.weaver.alpha :as weaver])
   (:import [java.lang ProcessBuilder]
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
@@ -217,8 +217,8 @@
         workspace (get-in rt [:metadata :config-dir])]
     (spit file
           (str "#!/bin/sh\n"
-               "export SKEIN_RUN_ID=" (sh-quote (:id run)) "\n"
-               "export SKEIN_WORKSPACE=" (sh-quote workspace) "\n"
+               "export MILLSTRAND_RUN_ID=" (sh-quote (:id run)) "\n"
+               "export MILLSTRAND_WORKSPACE=" (sh-quote workspace) "\n"
                "export XDG_STATE_HOME=" (sh-quote (state-root rt)) "\n"
                "cd " (sh-quote (attr-get run :harness/cwd)) " || exit 1\n"
                "exec " (str/join " " (map sh-quote argv)) "\n"))
@@ -377,7 +377,7 @@
     "list" {:doc "List registered concrete harnesses and aliases."
             :hook-class :read :deadline-class :standard}}})
 
-(skein/defop harness
+(millstrand/defop harness
   "Dispatch parsed `strand harness` subcommands.
 
   Run, retry, and resume may schedule asynchronous headless work. `await`
@@ -403,7 +403,7 @@
   :args (s/cat :ctx ::op-context)
   :ret ::op-result)
 
-(skein/defbin agent
+(millstrand/defbin agent
   "Open a coding agent in the caller's terminal as a tracked interactive run."
   {:executable [:root "bin/agent"]})
 

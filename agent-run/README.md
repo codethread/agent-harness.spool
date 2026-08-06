@@ -1,4 +1,4 @@
-# Skein Agent-run Spool
+# Millstrand Agent-run Spool
 
 > This is the **contract** doc: run lifecycle, the harness/backend registries,
 > the claims model, crash reconciliation, and the `agent-run/*` attribute
@@ -12,9 +12,9 @@
 
 ## 1. Overview
 
-`ct.spools.agent-run` is a trusted userland spool for spawning coding-agent runs from ordinary Skein strands. It is a pure run **engine**: it registers no CLI operations of its own. The agent-facing verb surface (`strand agent ...`), delegation, and coordinator/worker guidance live in the [delegation spool](../delegation/README.md), which composes this engine.
+`ct.spools.agent-run` is a trusted userland spool for spawning coding-agent runs from ordinary Millstrand strands. It is a pure run **engine**: it registers no CLI operations of its own. The agent-facing verb surface (`strand agent ...`), delegation, and coordinator/worker guidance live in the [delegation spool](../delegation/README.md), which composes this engine.
 
-A run is a strand carrying `agent-run/*` attributes. Creating the run strand is the API: the installed agent-run event handler watches graph mutations, asks Skein readiness which pending run strands are unblocked, launches the selected harness, records output back onto the run strand, and closes successful runs so downstream `depends-on` work can proceed.
+A run is a strand carrying `agent-run/*` attributes. Creating the run strand is the API: the installed agent-run event handler watches graph mutations, asks Millstrand readiness which pending run strands are unblocked, launches the selected harness, records output back onto the run strand, and closes successful runs so downstream `depends-on` work can proceed.
 
 Runs come in two execution modes. **Headless** runs (the default) exec the harness and capture its exit/stdout. **Interactive** runs launch the harness into a user-registered terminal multiplexer [backend](#4-backend-registry-interactive-sessions) (tmux by default) and are supervised through the graph: the run completes when the strand it serves closes (the claims model — the agent in the session marks the work done, the engine reaps the session), not when a process exits.
 
@@ -30,8 +30,8 @@ Agent-run is shipped as an approved-local-root spool example under `spools/agent
 ```
 
 ```clojure
-(require '[skein.api.current.alpha :as current]
-         '[skein.api.runtime.alpha :as runtime])
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
 (runtime/module! runtime :agent-run
@@ -42,7 +42,7 @@ Agent-run is shipped as an approved-local-root spool example under `spools/agent
 
 The declaration names a source target and world policy only. Agent-run collects its harness, alias, and backend kinds from source. The `agent-run-engine` lifecycle resource owns event dispatch, vocabulary, and crash recovery.
 
-Applied reconciliation registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, deferred-recovery scheduling, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. The deferred-recovery scheduler is owned by runtime spool state and is shut down during runtime stop before storage closes. This state is registered with a declared shape **version** (`skein.api.runtime.alpha/spool-state`, SPEC-004.C95): spool state survives `reload!`, so after a deploy that adds a new state key a reload deliberately reinits through a migrate hook that carries the durable registries and in-flight tracking over onto fresh executors, rather than silently reusing a preserved map missing the new executor keys (which previously turned scan!'s launch into `(.execute nil ..)` and parked every new run forever). The executor and scheduler accessors fail loudly when their spool-state entry is missing rather than parking runs on a nil executor (TEN-003). The shape is currently **v4**, which added the `:fanout-ceiling` cap the `claim!` window consults: a preserved v3 map lacks the key, so a post-upgrade reload reinits through the migrate hook and lets the default seed it rather than reusing a ceiling-less map. It does **not** register any CLI operations. Load the [delegation spool](../delegation/README.md) after agent-run for the `strand agent` surface, and the companion [subagent executor](../executors/subagent.md) to fulfill workflow `:subagent` gates with agent-run runs.
+Applied reconciliation registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, deferred-recovery scheduling, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. The deferred-recovery scheduler is owned by runtime spool state and is shut down during runtime stop before storage closes. This state is registered with a declared shape **version** (`millstrand.api.runtime.alpha/spool-state`, SPEC-004.C95): spool state survives `reload!`, so after a deploy that adds a new state key a reload deliberately reinits through a migrate hook that carries the durable registries and in-flight tracking over onto fresh executors, rather than silently reusing a preserved map missing the new executor keys (which previously turned scan!'s launch into `(.execute nil ..)` and parked every new run forever). The executor and scheduler accessors fail loudly when their spool-state entry is missing rather than parking runs on a nil executor (TEN-003). The shape is currently **v4**, which added the `:fanout-ceiling` cap the `claim!` window consults: a preserved v3 map lacks the key, so a post-upgrade reload reinits through the migrate hook and lets the default seed it rather than reusing a ceiling-less map. It does **not** register any CLI operations. Load the [delegation spool](../delegation/README.md) after agent-run for the `strand agent` surface, and the companion [subagent executor](../executors/subagent.md) to fulfill workflow `:subagent` gates with agent-run runs.
 
 ## 3. Harness and alias registries
 
@@ -90,7 +90,7 @@ Resume fails loudly (TEN-003), never silently, and every resume-classed failure 
 
 These invariants are enforced both at `spawn-run!` time and again at the launch seam, because a run strand can be hand-built directly via `weaver/add` — a handmade `agent-run/resumes` run never bypasses them.
 
-**Persistence is host-local and never required.** Harness session stores are host-local, non-skein-owned state: Skein records only the `agent-run/session-id` it parsed and never manages the store. Nothing consumes a session unless a caller passes `:resume` — a run without it behaves byte-identically to a no-resume engine. A lost or unresumable session fails loudly rather than auto-falling back to a cold start; the recovery path is the named `--fresh` escape (see [agents `retry`](../delegation/README.md#3-op-surface)), which severs the linkage and respawns on the full-brief prompt.
+**Persistence is host-local and never required.** Harness session stores are host-local, non-millstrand-owned state: Millstrand records only the `agent-run/session-id` it parsed and never manages the store. Nothing consumes a session unless a caller passes `:resume` — a run without it behaves byte-identically to a no-resume engine. A lost or unresumable session fails loudly rather than auto-falling back to a cold start; the recovery path is the named `--fresh` escape (see [agents `retry`](../delegation/README.md#3-op-surface)), which severs the linkage and respawns on the full-brief prompt.
 
 ### 3.2 Cost rate cards (`:cost-rates`)
 
@@ -126,18 +126,18 @@ Argv tokens are keyword **splice points**, not string templates — zero parsing
 
 Backends **should** honor the suggested `:session` name whenever the multiplexer allows it: the suggestion is written durably *before* `:start` runs and is the only recovery identity for a weaver crash in the gap between `:start` succeeding and the handle attrs landing. A backend whose ops need only `:handle/session` recovers cleanly from that gap; one that depends on other handle keys accepts that a crash there orphans its session — the engine then fails the run loudly and the human cleans the session up by its name.
 
-**Launcher script.** The engine writes a `0700` script under the weaver state dir (deleted on teardown) containing harness env, pinned engine env (`SKEIN_RUN_ID`, `XDG_STATE_HOME`), the cwd, and the exec of the harness argv with the prompt — so prompts stay out of multiplexer argv and process listings. `:command` is that script's path. Suggested session names are workspace-namespaced (`skein-<workspace-hash>-<run-id>`): multiplexer sessions live in a server-global namespace and two workspaces must not collide or cross-adopt.
+**Launcher script.** The engine writes a `0700` script under the weaver state dir (deleted on teardown) containing harness env, pinned engine env (`MILLSTRAND_RUN_ID`, `XDG_STATE_HOME`), the cwd, and the exec of the harness argv with the prompt — so prompts stay out of multiplexer argv and process listings. `:command` is that script's path. Suggested session names are workspace-namespaced (`millstrand-<workspace-hash>-<run-id>`): multiplexer sessions live in a server-global namespace and two workspaces must not collide or cross-adopt.
 
 ### 4.1 Transcript capture
 
 Capture is a resolvable seam, not a fixed behavior: **a harness `:capture` op wins over the backend's `:capture`** (tmux scrollback, the shipped default). Both are the same spliced argv contract with inputs `:run-id`, `:cwd`, `:session`, and `:handle/*`; the op prints the best available transcript text to stdout, which the engine persists as `<run-id>.capture` and records in `agent-run/log`. The engine never parses any harness's log format — that knowledge stays in userland argv, which is deliberate: harness transcript schemas are internal and drift across releases, so an adapter layer that parses them (the pandoras-box Spawner approach) rots; a user-owned capture command does not.
 
-Harness capture is how harness-aware transcript sources plug in. Correlation is the engine's job and already done: every session's launcher exports `SKEIN_RUN_ID`, so session-start hooks can key their logs by run id. Example for a hook-written dialogue log:
+Harness capture is how harness-aware transcript sources plug in. Correlation is the engine's job and already done: every session's launcher exports `MILLSTRAND_RUN_ID`, so session-start hooks can key their logs by run id. Example for a hook-written dialogue log:
 
 ```clojure
 (register-harness! :claude-hitl
   {:argv ["claude" "--dangerously-skip-permissions"]
-   ;; a SessionStart hook symlinks its dialogue log to <state>/claude-dialogue/by-run/$SKEIN_RUN_ID.jsonl
+   ;; a SessionStart hook symlinks its dialogue log to <state>/claude-dialogue/by-run/$MILLSTRAND_RUN_ID.jsonl
    :capture ["sh" "-c" "cat \"${XDG_STATE_HOME:-$HOME/.local/state}/claude-dialogue/by-run/$1.jsonl\"" "capture" :run-id]})
 ```
 
@@ -291,6 +291,6 @@ Notes use the declared `notes` relation.
 
 - [delegation/README.md](../delegation/README.md) — the `strand agent` verb surface, delegation, and coordinator/worker guidance layered over this engine.
 - [executors/subagent.md](../executors/subagent.md) — shipped adapter that bridges workflow `:subagent` gates to agent-run runs.
-- `test/skein/agent_run_test.clj` — executable coverage for harnesses, readiness, failures, notes, and reconciliation.
+- `test/ct/spools/agent_run_test.clj` — executable coverage for harnesses, readiness, failures, notes, and reconciliation.
 - [Runtime spool workspace helpers](../../devflow/specs/repl-api.md#spec-003p5-runtime-spool-workspace-helpers) — approved local-root loading contract.
 - [Weaver Runtime](../../devflow/specs/daemon-runtime.md) — event handlers, CLI operation registry, JSON socket transport, and runtime reload behavior.

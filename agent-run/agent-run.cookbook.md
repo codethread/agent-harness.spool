@@ -1,4 +1,4 @@
-# Skein Agent-run Spool — Cookbook
+# Millstrand Agent-run Spool — Cookbook
 
 Composition recipes for `ct.spools.agent-run`: how to wire the engine seams a workspace owner actually touches, and *why* each shape is the right one.
 
@@ -82,7 +82,7 @@ The recipes lean on the shipped `sh` harness, whose "argv" is a plain shell and 
   `:fast-reviewer` over `:explore` over `:claude` composes without repetition.
   Cycles and missing bases fail loudly at `resolve-harness` time.
 
-Honest source: the registry tests `harness-registry-validates-and-resolves-aliases` and `stdin-prompt-stays-off-argv` in ``test/skein/agent_run_test.clj``. This repo applies the same shape in its own harness roster ([`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj), `register-harness-aliases!`) — one concrete harness plus named tiers over it.
+Honest source: the registry tests `harness-registry-validates-and-resolves-aliases` and `stdin-prompt-stays-off-argv` in ``test/ct/spools/agent_run_test.clj``. This repo applies the same shape in its own harness roster ([`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj), `register-harness-aliases!`) — one concrete harness plus named tiers over it.
 
 ---
 
@@ -130,7 +130,7 @@ Honest source: the registry tests `harness-registry-validates-and-resolves-alias
   even declares a splice that stays inert until a session-capturing parse lands
   — declared but harmless.
 
-Honest source: `register-harness-validates-resume-splice` and `resume-continues-a-captured-session` (with the `session-echo` fake harness) in ``test/skein/agent_run_test.clj``, and the `:codex` resume note in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
+Honest source: `register-harness-validates-resume-splice` and `resume-continues-a-captured-session` (with the `session-echo` fake harness) in ``test/ct/spools/agent_run_test.clj``, and the `:codex` resume note in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
 
 ---
 
@@ -184,7 +184,7 @@ replacement prompt and harness.
 
 Honest source: `spawn-run!`, `runs-serving`, and `supersede-and-respawn!` in [`agent-
 run.clj`](./agent-run/src/ct/spools/agent_run.clj), with coverage in
-``test/skein/agent_run_test.clj``.
+``test/ct/spools/agent_run_test.clj``.
 
 ---## Recipe: Fan out then collect, driven only by readiness
 
@@ -194,8 +194,8 @@ run.clj`](./agent-run/src/ct/spools/agent_run.clj), with coverage in
 
 ```clojure
 (require '[ct.spools.agent-run :as agent-run]
-         '[skein.api.weaver.alpha :as weaver]
-         '[skein.api.current.alpha :as current])
+         '[millstrand.api.weaver.alpha :as weaver]
+         '[millstrand.api.current.alpha :as current])
 
 (def rt (current/runtime))              ; the active weaver runtime
 
@@ -220,7 +220,7 @@ run.clj`](./agent-run/src/ct/spools/agent_run.clj), with coverage in
 **Why this shape.**
 
 - **Readiness is the only scheduler.** The engine has no timers and no run
-  queue. Any graph mutation fires the event handler, which asks Skein readiness
+  queue. Any graph mutation fires the event handler, which asks Millstrand readiness
   which pending runs are now unblocked and spawns them. So "wait for these three
   things" is just three `depends-on` edges — no polling loop, no orchestration
   code (contract [§5, "Run lifecycle"](./agent-run/README.md#5-run-lifecycle)).
@@ -233,7 +233,7 @@ run.clj`](./agent-run/src/ct/spools/agent_run.clj), with coverage in
   interchangeably — the collector above waits on a plain `weaver/add` strand
   alongside its two worker runs.
 
-Honest source: `dependent-run-waits-for-blocker-and-fans-in` in ``test/skein/agent_run_test.clj`` (two `sh` workers plus an external gate strand, collector stays pending until the last closes).
+Honest source: `dependent-run-waits-for-blocker-and-fans-in` in ``test/ct/spools/agent_run_test.clj`` (two `sh` workers plus an external gate strand, collector stays pending until the last closes).
 
 ---
 
@@ -282,7 +282,7 @@ Honest source: `dependent-run-waits-for-blocker-and-fans-in` in ``test/skein/age
   interactive session's contract, where closing the served strand is how the
   session ends. The interactive preamble variant deliberately excludes them.
 
-Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-default-task-contract-validates-and-clears`, and `set-preamble-extension-tolerates-reload` / `set-preamble-extension-records-conflicts-durably` in ``test/skein/agent_run_test.clj``; this repo's own opt-in in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
+Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-default-task-contract-validates-and-clears`, and `set-preamble-extension-tolerates-reload` / `set-preamble-extension-records-conflicts-durably` in ``test/ct/spools/agent_run_test.clj``; this repo's own opt-in in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj).
 
 ---
 
@@ -328,7 +328,7 @@ Honest source: `preamble-composes-engine-contract-then-workspace-text`, `set-def
   loudly. Auto-respawning would silently discard a human conversation, so the
   engine refuses to (contract [§5.1, "Interactive completion"](./agent-run/README.md#51-interactive-completion-the-claims-model)).
 
-Honest source: `reconcile-respawns-orphans-and-exhausts-bounded-attempts` and `interactive-run-reaps-when-served-strand-closes` / `reconcile-adopts-live-sessions-and-fails-dead-ones` in ``test/skein/agent_run_test.clj``.
+Honest source: `reconcile-respawns-orphans-and-exhausts-bounded-attempts` and `interactive-run-reaps-when-served-strand-closes` / `reconcile-adopts-live-sessions-and-fails-dead-ones` in ``test/ct/spools/agent_run_test.clj``.
 
 ---
 
@@ -375,7 +375,7 @@ Honest source: `reconcile-respawns-orphans-and-exhausts-bounded-attempts` and `i
   routing) wraps that behind a shell script and names it in the vectors —
   the engine stays a dumb, testable splicer.
 
-Honest source: the shipped `:tmux` backend in [`agent-run/README.md`](./agent-run/README.md#4-backend-registry-interactive-sessions), and the `fake-mux` backend plus `backend-registry-validates-defs` / `interactive-run-reaps-when-served-strand-closes` in ``test/skein/agent_run_test.clj``.
+Honest source: the shipped `:tmux` backend in [`agent-run/README.md`](./agent-run/README.md#4-backend-registry-interactive-sessions), and the `fake-mux` backend plus `backend-registry-validates-defs` / `interactive-run-reaps-when-served-strand-closes` in ``test/ct/spools/agent_run_test.clj``.
 
 ---
 

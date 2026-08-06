@@ -14,15 +14,15 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.weaver.alpha :as weaver]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.bench :as bench]
             [ct.spools.bench.exec :as exec]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.test-support :as test-support]
-            [skein.test.alpha :as t])
+            [millstrand.test.alpha :as t])
   (:import [java.io StringWriter]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
@@ -111,7 +111,7 @@ esac
   "Write the fake engine script into a fresh record dir and return
   `{:engine [script] :record record-dir}`."
   []
-  (let [rec (temp-dir "skein-bench-rec")
+  (let [rec (temp-dir "millstrand-bench-rec")
         script (io/file rec "fake-engine")]
     (spit script (str/replace fake-engine-template "@@REC@@" (.getCanonicalPath rec)))
     (.setExecutable script true)
@@ -127,7 +127,7 @@ esac
   "Create a throwaway git repo with README.md and app.txt; return
   `{:path repo-path :sha head-sha}`."
   []
-  (let [repo (temp-dir "skein-bench-repo")]
+  (let [repo (temp-dir "millstrand-bench-repo")]
     (git! repo "init" "-q" "-b" "main")
     (spit (io/file repo "README.md") "readme\n")
     (spit (io/file repo "app.txt") "hello\n")
@@ -140,14 +140,14 @@ esac
   ([f] (with-bench {} f))
   ([opts f]
    (test-support/with-runtime
-     (merge {:prefix "skein-bench"} opts)
+     (merge {:prefix "millstrand-bench"} opts)
      (fn [rt config-dir]
        (test-support/activate-spool! rt :bench 'ct.spools.bench)
        (f rt config-dir)))))
 
 (defn- with-bench-shuttle [f]
   (test-support/with-runtime
-    {:publish? true :prefix "skein-bench-judge"}
+    {:publish? true :prefix "millstrand-bench-judge"}
     (fn [rt config-dir]
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (test-support/activate-spool! rt :bench 'ct.spools.bench
@@ -304,7 +304,7 @@ esac
       (let [decl (attr-namespace-declaration rt "bench")
             keys (set (:keys decl))]
         (is (some? decl))
-        (is (= :skein/spools-bench (:owner decl)))
+        (is (= :millstrand/spools-bench (:owner decl)))
         (testing "the renamed keys are declared under their new names"
           (doseq [k ["bench/harness" "bench/run-id"]]
             (is (contains? keys k) (str k " is listed in the bench vocab")))
@@ -391,7 +391,7 @@ esac
                                    :mounts [{:host "~/creds" :container "/bench/home/creds"}]}
                             :entry-dir "/tmp/bench/entry" :prompt-arg "P"})]
     (is (= "docker" (first argv)))
-    (is (some #{"skein-bench-r1-cell"} argv))
+    (is (some #{"millstrand-bench-r1-cell"} argv))
     (is (some #{"FOO=bar"} argv))
     (is (some #{(str "HOME=" (System/getenv "HOME"))} argv) "real auth value in launch argv")
     (is (some #{"HOME=<redacted>"} redacted) "auth value masked in manifest argv")
@@ -482,7 +482,7 @@ esac
 
 (deftest concurrent-mirror-prep-serializes-clone
   (let [{:keys [path]} (fixture-repo!)
-        data-dir (temp-dir "skein-bench-data")
+        data-dir (temp-dir "millstrand-bench-data")
         barrier (CyclicBarrier. 2)
         prep! (fn [] (.await barrier) (exec/ensure-mirror! data-dir path))
         f1 (future (prep!))
@@ -1016,7 +1016,7 @@ esac
     (fn [rt _]
       (let [{:keys [engine]} (fake-engine!)
             {:keys [path sha]} (fixture-repo!)
-            prompt-file (io/file (temp-dir "skein-bench-prompt") "prompt.txt")]
+            prompt-file (io/file (temp-dir "millstrand-bench-prompt") "prompt.txt")]
         (spit prompt-file "do the file-backed thing\nacross multiple lines")
         (bench/set-engine! rt engine)
         (fake-harness! rt)

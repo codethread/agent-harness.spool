@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+allowlist="$repo_root/identity-allowlist.tsv"
+findings=$(mktemp)
+trap 'rm -f "$findings"' EXIT
+
+cd "$repo_root"
+
+python3 - "$repo_root/release/msr04-release.json" "$repo_root/.github/workflows/quality.yml" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+release_path, workflow_path = map(Path, sys.argv[1:])
+with release_path.open(encoding="utf-8") as handle:
+    release = json.load(handle)
+
+expected_repository = release.get("repository")
+expected_sha = release.get("sha")
+if expected_repository != "codethread/millstrand":
+    raise SystemExit(
+        "millstrand identity audit: MSR-04 release repository is not codethread/millstrand"
+    )
+if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+    raise SystemExit(
+        "millstrand identity audit: MSR-04 release SHA is not a lowercase 40-hex SHA"
+    )
+
+workflow = workflow_path.read_text(encoding="utf-8")
+repositories = re.findall(r"(?m)^\s+repository:\s*(\S+)\s*$", workflow)
+refs = re.findall(r"(?m)^\s+ref:\s*([0-9a-f]{40})\s*$", workflow)
+if repositories != [expected_repository]:
+    raise SystemExit(
+        "millstrand identity audit: Quality Gates must have exactly one "
+        f"checkout of {expected_repository}"
+    )
+if refs != [expected_sha]:
+    actual = refs[0] if len(refs) == 1 else ", ".join(refs) or "missing"
+    raise SystemExit(
+        "millstrand identity audit: Quality Gates core pin "
+        f"{actual} does not match MSR-04 release SHA {expected_sha}"
+    )
+PY
+
+scan_paths=(
+  .github .skein agent-cli agent-run bench claude-harness codex-harness
+  cursor-harness delegation harness-core pi-harness test bin scripts
+  Makefile deps.edn README.md AGENTS.md spool.edn
+)
+
+set +e
+rg -n -i --max-columns 100000 --hidden \
+  --glob '!.git/**' --glob '!target/**' \
+  --glob '!bin/identity-check' --glob '!identity-allowlist.tsv' \
+  'skein|io\.skein|codethread/skein|\.skein|:skein|SKEIN_|skein-src' \
+  "${scan_paths[@]}" >"$findings"
+scan_status=$?
+set -e
+if ((scan_status > 1)); then
+  echo "millstrand identity audit: scan failed" >&2
+  exit "$scan_status"
+fi
+
+declare -a scopes patterns reasons used
+while IFS=$'\t' read -r scope pattern reason extra; do
+  [[ -z "${scope:-}" || "$scope" == \#* ]] && continue
+  if [[ -z "${pattern:-}" || -z "${reason:-}" || -n "${extra:-}" ]]; then
+    echo "millstrand identity audit: malformed allowlist row: $scope" >&2
+    exit 1
+  fi
+  scopes+=("$scope")
+  patterns+=("$pattern")
+  reasons+=("$reason")
+  used+=(0)
+done <"$allowlist"
+
+unclassified=0
+while IFS= read -r finding; do
+  [[ -z "$finding" ]] && continue
+  path=${finding%%:*}
+  matched=0
+  for i in "${!scopes[@]}"; do
+    scope=${scopes[$i]}
+    if [[ "$scope" != "*" && "$path" != "$scope" && "$path" != "$scope"/* ]]; then
+      continue
+    fi
+    if printf '%s\n' "$finding" | grep -Eiq -- "${patterns[$i]}"; then
+      used[$i]=1
+      matched=1
+      break
+    fi
+  done
+  if ((matched == 0)); then
+    echo "millstrand identity audit: unclassified active identity: $finding" >&2
+    unclassified=1
+  fi
+done <"$findings"
+
+for i in "${!scopes[@]}"; do
+  if ((used[$i] == 0)); then
+    echo "millstrand identity audit: stale allowlist row: ${scopes[$i]}" >&2
+    exit 1
+  fi
+done
+
+if ((unclassified != 0)); then
+  exit 1
+fi
+echo "millstrand identity audit: clean"

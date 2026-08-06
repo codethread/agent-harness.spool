@@ -4,12 +4,12 @@
             [clojure.test :refer [deftest is]]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as treadle]
-            [skein.spools.workflow :as workflow]
+            [millstrand.spools.workflow :as workflow]
             [ct.spools.test-support :as test-support :refer [with-runtime]]
-            [skein.core.db :as db]
-            [skein.api.weaver.alpha :as weaver]
-            [skein.test.alpha :as test-alpha]
-            [skein.api.vocab.alpha :as vocab]))
+            [millstrand.core.db :as db]
+            [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.test.alpha :as test-alpha]
+            [millstrand.api.vocab.alpha :as vocab]))
 
 (defn- with-treadle [f]
   (with-runtime
@@ -20,14 +20,14 @@
                                            :parse :raw
                                            :preamble? false
                                            :doc "Test harness that executes only the final prompt line."})
-      (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+      (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
                                     :after [:agent-run])
       (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent)
       (f rt))))
 
 (defn- activate-treadle! [rt]
   (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
-  (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+  (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
                                 :after [:agent-run])
   (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
                                 :after [:agent-run :workflow]))
@@ -45,9 +45,9 @@
             (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
                                           :after [:agent-run])]
         (is (= :partial (:status without-workflow)))
-        (is (= [:skein.spools.workflow/executor]
+        (is (= [:millstrand.spools.workflow/executor]
                (get-in without-workflow [:modules :subagent :error :data :kinds]))))
-      (test-support/activate-spool! rt :workflow 'skein.spools.workflow
+      (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
                                     :after [:agent-run])
       (let [with-workflow
             (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
@@ -594,13 +594,13 @@
 
 (deftest activation-declares-gate-vocabulary
   ;; The treadle module owns the `gate/*` namespace — the sole treadle-era
-  ;; durable survivor — under the single use-key :skein/spools-treadle.
+  ;; durable survivor — under the single use-key :millstrand/spools-treadle.
   (with-treadle
     (fn [rt]
       (let [decl (attr-namespace-declaration rt "gate")]
         (is (= :attr-namespace (:kind decl)))
         (is (= "gate" (:name decl)))
-        (is (= :skein/spools-treadle (:owner decl)))
+        (is (= :millstrand/spools-treadle (:owner decl)))
         (is (contains? (set (:keys decl)) "gate/completion-policy"))
         (is (contains? (set (:keys decl)) "gate/delivered"))))))
 

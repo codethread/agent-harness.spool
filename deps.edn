@@ -1,7 +1,7 @@
 {:paths []
  :aliases
- {:test {;; Keep every Skein root on the same sibling checkout. The workflow
-         ;; spool is outside Skein's base classpath and joins the test JVM
+ {:test {;; Keep every Millstrand root on the same sibling checkout. The workflow
+         ;; spool is outside Millstrand's base classpath and joins the test JVM
          ;; explicitly because the subagent executor requires it.
          :extra-paths ["test"
                        "agent-run/src"
@@ -13,10 +13,10 @@
                        "agent-cli/src"
                        "delegation/src"
                        "bench/src"
-                       "../skein-src/test"
-                       "../skein-src/spools/workflow/src"
+                       "../millstrand/test"
+                       "../millstrand/spools/workflow/src"
                        "scripts"]
-         :extra-deps {io.skein/skein {:local/root "../skein-src"}
+         :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}
                       clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "ct.spools.test-runner"]}
@@ -42,7 +42,7 @@
                                    "agent-cli/src"
                                    "delegation/src"
                                    "bench/src"]
-                     :extra-deps {io.skein/skein {:local/root "../skein-src"}
+                     :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}
                                   clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                      :main-opts ["-m" "quality.conventions-check"]}
   :reflect-check {:extra-paths ["scripts"
@@ -55,6 +55,6 @@
                                 "agent-cli/src"
                                 "delegation/src"
                                 "bench/src"
-                                "../skein-src/spools/workflow/src"]
-                  :extra-deps {io.skein/skein {:local/root "../skein-src"}}
+                                "../millstrand/spools/workflow/src"]
+                  :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}}
                   :main-opts ["-m" "quality.reflect-check"]}}}

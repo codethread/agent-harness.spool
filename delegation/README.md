@@ -1,4 +1,4 @@
-# Skein Delegation Spool
+# Millstrand Delegation Spool
 
 `ct.spools.delegation` is the cross-harness subagent surface. It composes the [agent-run run engine](../agent-run/README.md) and owns the whole agent-facing vocabulary: the `strand agent ...` verbs, the `agent-plan` weave pattern, delegation and recovery, and both the worker contract and the coordinator guidance.
 
@@ -76,8 +76,8 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 ```
 
 ```clojure
-(require '[skein.api.current.alpha :as current]
-         '[skein.api.runtime.alpha :as runtime])
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
 
 (def runtime (current/runtime))
 (runtime/module! runtime :agent-run
@@ -291,7 +291,7 @@ Route reviewers by **waste-type, not call count**: `grunt` (sonnet) is the defau
 
 Data shape, validated loudly at registration against the **`:ct.spools.delegation/roster`** clojure.spec (inspect it with `s/form`; the seam output below is likewise specced as `:ct.spools.delegation/review-specs`): a roster is the panel primitive's seat vector, so it speaks panel's seat vocabulary: each seat requires a unique `:name` (doubles as the run's review focus), a `:harness` (resolved against the agent-run registry at **review time**, not registration time, so roster files may load before config registers aliases), and a `:brief` — the reviewer's precise single-concern mandate, layered onto the workspace base review contract in the prompt. `:scope` is optional prompt-level confinement text. `:synthesis` optionally overrides the synthesis run's harness (default: first seat's). Unknown keys fail loudly to catch typos (closed key sets and name uniqueness are checked beyond the spec, which is structurally open).
 
-`agent review --roster <name>` spawns one read-only run per seat (stamped `review/roster` for attribution) plus the synthesizer, which receives the base review contract — synthesis weighs findings roster-independently. In this repository the roster lives in `.skein/reviewers.clj`; keep yours near the root of your workspace config so the review policy is one obvious document.
+`agent review --roster <name>` spawns one read-only run per seat (stamped `review/roster` for attribution) plus the synthesizer, which receives the base review contract; synthesis weighs findings roster-independently. This repository ships no named reviewer roster: `.skein/config/harnesses.clj` declares harnesses and aliases only. A consuming workspace must register its own roster near the root of its trusted config so the review policy is one obvious document.
 
 **Composing rosters into workflows.** The verb is agent-run-native, but the prompt building is not verb-private: `ct.spools.delegation/roster-review-specs` returns the whole fan-out as plain, fully-built run specs, and `review!` itself spawns from them. A workflow author decorating a [workflow](../workflow.md) with roster review maps each spec onto a `:subagent` gate — `:harness`/`:prompt` onto the gate's `agent-run/harness`/`agent-run/prompt`, `:attrs` merged into the gate's attributes, and a synthesizer gate depending on every reviewer gate (the synthesis prompt is deliberately buildable before any run exists). Both paths share one prompt source, so roster contracts cannot drift between the verb and a composed workflow:
 
@@ -328,7 +328,7 @@ printf '%s' '{"feature":"<slug>","title":"...","body":"...?","tasks":[
 
 Task fields: `key`, `title`, `body` (the full worker contract: scope, owned files, validation commands, commit policy), `depends_on?` (sibling **keys**, resolved to strand ids at weave time), `harness?` (set it here — `delegate --ready` requires it), `cwd?`, `validation?` (list of commands), `max-attempts?`, `hitl?` (true = human-in-the-loop work; headless `delegate` refuses it, `delegate --interactive` opens it as a live session), `kind?` (`task` or `review`). Harness and validation are independent axes: harness picks **who** does the work; validation lists the commands that **prove** it.
 
-Contract change: pre-Skein-v1, sole-consumer window; specs closed under existing names. `change-context`, its nested `windows`, `agent-plan` input, and nested task maps reject unknown keys rather than silently ignoring them.
+Contract change: pre-Millstrand-v1, sole-consumer window; specs closed under existing names. `change-context`, its nested `windows`, `agent-plan` input, and nested task maps reject unknown keys rather than silently ignoring them.
 
 ---
 
@@ -432,5 +432,5 @@ Like rosters, `panel-specs`/`panel!` take an **inline panel value** — any map 
 
 - [agent-run/README.md](../agent-run/README.md) — the run engine this spool composes (harness registry, run lifecycle, preamble seam).
 - [executors/subagent.md](../executors/subagent.md) — bridges workflow `:subagent` gates to agent-run runs.
-- `test/skein/delegation_test.clj` — executable coverage for the op surface, delegation, retry, status, and the weave pattern.
+- `test/ct/spools/delegation_test.clj` — executable coverage for the op surface, delegation, retry, status, and the weave pattern.
 - [Weaver Runtime](../../devflow/specs/daemon-runtime.md) — CLI operation registry, pattern registry, and named queries.

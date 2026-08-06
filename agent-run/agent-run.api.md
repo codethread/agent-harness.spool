@@ -69,7 +69,7 @@ Userland spool that spawns coding agents in user-chosen harnesses.
   still terminate at the tool. Every actual launch snapshots the resolved
   harness/backend operations; later registry refresh affects only later launches.
 
-  The whole spool composes public surfaces (`skein.api.weaver.alpha` inside the
+  The whole spool composes public surfaces (`millstrand.api.weaver.alpha` inside the
   weaver JVM) and owns no privileged runtime state. Higher-level spools, such as
   `ct.spools.delegation`, register CLI operations over this engine.
 
@@ -226,7 +226,7 @@ Kill a run's harness process (or interactive session) and mark it failed.
 Function.
 
 Append a note strand to `target-id`'s memory via the blessed
-  `skein.api.notes.alpha/note!`, threading this spool's runtime.
+  `millstrand.api.notes.alpha/note!`, threading this spool's runtime.
 
   The note is born closed (memory, not work), linked to the target by a `notes`
   edge alone — no `note/for` attribute — and carries optional `note/by`/`note/round`.
@@ -242,7 +242,7 @@ Append a note strand to `target-id`'s memory via the blessed
 Function.
 
 Return `target-id`'s notes in `note/at` order, optionally one `:round`, via
-  the blessed `skein.api.notes.alpha/notes` threading this spool's runtime.
+  the blessed `millstrand.api.notes.alpha/notes` threading this spool's runtime.
 
   Walks the incoming `notes` edges to the target, so it reads every writer's
   notes regardless of decorating attrs.
@@ -393,7 +393,7 @@ Register a harness definition under `name`.
   transcript text to stdout, overriding the backend's scrollback capture.
   Harness capture is the seam for harness-aware transcripts (session logs,
   user hook-written dialogue logs) without the engine knowing any harness's
-  log format; correlate via the SKEIN_RUN_ID env var every session exports.
+  log format; correlate via the MILLSTRAND_RUN_ID env var every session exports.
 
   Writes only the harness (tool) registry; a same-named seat may coexist in the
   alias registry and shadows this tool at resolution time. The def shape is the
@@ -409,7 +409,7 @@ Register a harness definition under `name`.
 Function.
 
 Return the runtime-owned owner registry for harness, alias, and backend
-  declarations. The handle lives directly in spool-state so Skein's module
+  declarations. The handle lives directly in spool-state so Millstrand's module
   publication coordinator discovers all three kinds.
 <p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L141-L149">Source</a></sub></p>
 
@@ -667,7 +667,7 @@ Succeed a dead run `old-run-id` with a fresh successor — the sole succession
   phase mirrors because this call writes edge and phase together. Returns the
   successor run strand.
 
-  Diverges from `skein.api.weaver.alpha/supersede` under the inherited name, in
+  Diverges from `millstrand.api.weaver.alpha/supersede` under the inherited name, in
   two ways worth knowing before reading either as the other. The primitive
   rewires the predecessor's dependents onto the replacement; this does not — it
   copies the predecessor's own outgoing `depends-on` edges to the successor and

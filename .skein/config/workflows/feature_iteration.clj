@@ -6,8 +6,8 @@
   registers nothing itself. Drive a run with `strand workflow`."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.format.alpha :as format-alpha]
-            [skein.spools.workflow :as workflow]))
+            [millstrand.api.format.alpha :as format-alpha]
+            [millstrand.spools.workflow :as workflow]))
 
 (s/def ::brief (s/and string? (complement str/blank?)))
 (s/def ::cwd (s/and string? (complement str/blank?)))

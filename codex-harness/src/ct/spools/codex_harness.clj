@@ -4,9 +4,9 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [skein.api.vocab.alpha :as vocab]))
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
+            [millstrand.api.vocab.alpha :as vocab]))
 
 (def ^:private reasoning-efforts #{"minimal" "low" "medium" "high" "xhigh"})
 

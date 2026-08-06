@@ -18,7 +18,7 @@ Trusted userland spool for deterministic, containerized benchmarking of
   only judgment is a model. Two registries — harness definitions and suites — are
   weaver-lifetime trusted config validated loudly at registration. All public
   functions take `runtime` explicitly and keep state runtime-owned via
-  `skein.api.runtime.alpha/spool-state` (shared-spool rules); the versioned
+  `millstrand.api.runtime.alpha/spool-state` (shared-spool rules); the versioned
   state carries the bounded executor, the registries, and in-flight container
   tracking, and its `:close-fn` kills live containers on runtime stop.
 
@@ -40,7 +40,7 @@ Abort a bench run: kill live containers, fail outstanding entries, and close
   `bench/error "aborted"` (the same marking as an aborted entry, whether the
   judge is an agent run or an external seam); an agent-run judge additionally
   gets `agent-run/phase "superseded"` so the run engine treats it as retired.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L975-L1015">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L975-L1015">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/about">`about`</a>
 ``` clojure
@@ -53,7 +53,7 @@ Return the authored bench manual: purpose, determinism model, run lifecycle,
 
   Deliberately carries no argument shapes — `strand help bench` projects those
   from the declared `:subcommands`.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1212-L1312">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1212-L1312">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/bench-op">`bench-op`</a>
 ``` clojure
@@ -67,7 +67,7 @@ Dispatch parsed `strand bench ...` subcommands to the engine functions.
   supplies flags and positionals; rich data stays in trusted Clojure. A bare
   `strand bench` or an unknown verb fails during parser routing (the declared
   `:subcommands` machinery), never here.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1378-L1399">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1378-L1399">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/cross">`cross`</a>
 ``` clojure
@@ -80,7 +80,7 @@ Return the cross-product of axis maps as an explicit vector of entry cells.
   `(cross {:harness [:claude :codex]} {:prompt [:baseline :strict]})` expands to
   the four `{:harness .. :prompt ..}` cells. A convenience for authoring suites;
   the persisted suite always holds explicit entries.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L360-L373">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L360-L373">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/engine">`engine`</a>
 ``` clojure
@@ -89,7 +89,7 @@ Return the cross-product of axis maps as an explicit vector of entry cells.
 Function.
 
 Return the resolved container engine argv prefix, or nil when none is set.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L340-L343">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L340-L343">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/extractors">`extractors`</a>
 ``` clojure
@@ -98,7 +98,7 @@ Return the resolved container engine argv prefix, or nil when none is set.
 Function.
 
 Return the registered extractor keys for `runtime`, sorted.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L355-L358">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L355-L358">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/gc!">`gc!`</a>
 ``` clojure
@@ -110,7 +110,7 @@ Delete bench artifact directories, keeping strand-side metrics and verdicts.
 
   With `:run <id>` removes that run's dir; otherwise removes every run dir under
   the bench data root (the mirror cache is preserved). Returns the removed ids.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1017-L1039">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1017-L1039">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/harnesses">`harnesses`</a>
 ``` clojure
@@ -119,7 +119,7 @@ Delete bench artifact directories, keeping strand-side metrics and verdicts.
 Function.
 
 Return registered bench harness definitions for `runtime`, sorted by key.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L345-L348">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L345-L348">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/judge-spec">`judge-spec`</a>
 ``` clojure
@@ -161,7 +161,7 @@ Return a bench run's judge fulfilment seam as plain data — the one prompt
   Fails loudly when the suite declares `:judge :none` (there is no judge to
   spec). A read over the suite registry, the workspace's suite-prompt files,
   and the passed run context.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L738-L798">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L738-L798">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/reconcile!">`reconcile!`</a>
 ``` clojure
@@ -176,7 +176,7 @@ Fail entries orphaned by a weaver restart and best-effort kill their
   `preparing`/`running` entry with no claim is orphaned: it becomes `failed`
   with `bench/error "orphaned by weaver restart"` and its container is killed
   by name. Returns the reconciled entry ids.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1421-L1441">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1421-L1441">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/register-extractor!">`register-extractor!`</a>
 ``` clojure
@@ -193,7 +193,7 @@ Register a metrics extractor `f` under `k` for this `runtime`.
   still completes). The shipped `:claude`/`:pi`/`:codex`/`:generic` extractors
   register through this registry; userland extends it. Fails loudly when `f` is
   not a function.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L312-L327">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L312-L327">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/register-harness!">`register-harness!`</a>
 ``` clojure
@@ -222,7 +222,7 @@ Register a bench harness definition under `k` for this `runtime`.
   `agent-run/spawn-run!`, and an agent-run harness cannot run an entry. Both
   words appear in one suite map: an entry cell's `:harness` resolves here, while
   the suite's `:judge :harness` resolves agent-run's registry.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L197-L224">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L197-L224">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/register-suite!">`register-suite!`</a>
 ``` clojure
@@ -236,7 +236,7 @@ Register a benchmark suite under `k` for this `runtime`.
   at registration (closed key set, spec, one-of `:sha`/`:rev` and
   `:prompts`/`:prompt`, unique slugs). Stores the raw definition; `run!`
   normalizes it. Returns the stored definition.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L299-L310">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L299-L310">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/report">`report`</a>
 ``` clojure
@@ -249,7 +249,7 @@ Return the full comparison document for a bench run (§10): per-entry
   notes, plus the judge verdict resolved per §8 (the judge strand's
   `bench/verdict` attr, else a serving run's `agent-run/result`) with its
   `:verdict-source` (attr|run|none). A pure read.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1174-L1207">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1174-L1207">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/retry!">`retry!`</a>
 ``` clojure
@@ -261,7 +261,7 @@ Re-run one failed entry on a fresh workspace, incrementing `bench/attempt`.
 
   Only a `bench/phase failed` entry is retryable (TEN-003). Resets it to
   `pending`, clears `bench/error`, and re-queues it on the executor.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L943-L967">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L943-L967">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/run!">`run!`</a>
 ``` clojure
@@ -280,7 +280,7 @@ Pour and start a bench run for `suite-name-or-inline` on `runtime`.
   mode, a bare fulfilment-seam strand in `:external` mode — queues entries on the
   bounded executor, and returns `{:run root-id :entries {slug id} :judge
   judge-id}` immediately; execution is async.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L841-L921">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L841-L921">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/runs">`runs`</a>
 ``` clojure
@@ -291,7 +291,7 @@ Function.
 Return bench run roots with per-run entry phase counts.
 
   `opts` may carry `:suite` to scope the listing to one suite. A pure read.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1111-L1127">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1111-L1127">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/set-engine!">`set-engine!`</a>
 ``` clojure
@@ -303,7 +303,7 @@ Override the detected container engine with `argv` (a prefix vector speaking
   the docker/podman `run`/`inspect`/`kill` dialect), e.g. `["podman"]`.
 
   Trusted config pins the engine; tests inject a fake-engine script this way.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L329-L338">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L329-L338">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/status">`status`</a>
 ``` clojure
@@ -313,7 +313,7 @@ Function.
 
 Return a bench run's entries with phase and headline metrics, judge run
   state, and the slugs of blocking (failed) entries. A pure read (§10).
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L1129-L1149">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L1129-L1149">Source</a></sub></p>
 
 ## <a name="ct.spools.bench/suites">`suites`</a>
 ``` clojure
@@ -322,4 +322,4 @@ Return a bench run's entries with phase and headline metrics, judge run
 Function.
 
 Return registered suite definitions for `runtime`, sorted by key.
-<p><sub><a href="https://github.com/codethread/skein/blob/main/spools/bench/src/ct/spools/bench.clj#L350-L353">Source</a></sub></p>
+<p><sub><a href="https://github.com/codethread/millstrand/blob/main/spools/bench/src/ct/spools/bench.clj#L350-L353">Source</a></sub></p>

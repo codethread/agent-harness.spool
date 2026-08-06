@@ -13,12 +13,12 @@
             [ct.spools.delegation :as delegation]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as subagent]
-            [skein.test.alpha :as test-alpha]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.notes.alpha :as notes]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.weaver.alpha :as weaver]
+            [millstrand.test.alpha :as test-alpha]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
 
 (deftest modules-export-resource-lifecycle-declarations
@@ -41,7 +41,7 @@
   per-call binding, so they need the ambient singleton to actually exist."
   [f]
   (test-support/with-runtime
-    {:publish? true :prefix "skein-shuttle-config"}
+    {:publish? true :prefix "millstrand-shuttle-config"}
     (fn [rt _config-dir]
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (f rt))))
@@ -72,8 +72,8 @@
     (fn [rt]
       (let [decl (attr-namespace-declaration rt "agent-run")
             keys (set (:keys decl))]
-        (is (= :skein/spools-shuttle (:owner decl))
-            "the agent-run namespace stays owned by :skein/spools-shuttle")
+        (is (= :millstrand/spools-shuttle (:owner decl))
+            "the agent-run namespace stays owned by :millstrand/spools-shuttle")
         (testing "the four completion-time usage keys are declared"
           (doseq [k ["agent-run/cost-usd" "agent-run/tokens-total"
                      "agent-run/tokens" "agent-run/usage-source"]]
@@ -421,12 +421,12 @@
   ;; The peer head added this regression against a post-baseline Clock API.
   ;; Keep it active there while allowing the frozen owner-refresh baseline,
   ;; which predates manual-clock, to exercise the wall-deadline fallback.
-  (when-let [manual-clock (ns-resolve 'skein.test.alpha 'manual-clock)]
+  (when-let [manual-clock (ns-resolve 'millstrand.test.alpha 'manual-clock)]
     (with-shuttle
       (fn [rt]
         (let [start java.time.Instant/EPOCH
               manual (manual-clock start)
-              clock-now (requiring-resolve 'skein.api.clock.alpha/now)
+              clock-now (requiring-resolve 'millstrand.api.clock.alpha/now)
               blocker (weaver/add! rt {:title "never closes"})
               stuck (shuttle/spawn-run! {:harness :sh :prompt "echo never"
                                          :depends-on [(:id blocker)]})]
@@ -711,7 +711,7 @@
             {:keys [run pid]} (spawn-interactive! rt {:parent (:id target)})]
         (is (= "claim" (get-in run [:attributes :agent-run/completion])))
         (is (= (:id target) (get-in run [:attributes :agent-run/completes-on])))
-        (is (str/starts-with? (get-in run [:attributes :agent-run/session]) "skein-"))
+        (is (str/starts-with? (get-in run [:attributes :agent-run/session]) "millstrand-"))
         (testing "summary carries interactive fields"
           (let [summary (shuttle/run-summary (weaver/show rt (:id run)))]
             (is (= "interactive" (:mode summary)))
@@ -778,7 +778,7 @@
     (fn [rt]
       (shuttle/register-backend! :fake-mux fake-mux)
       ;; a harness-aware capture source (stands in for hook-written dialogue
-      ;; logs) keyed by the run id the engine exports as SKEIN_RUN_ID
+      ;; logs) keyed by the run id the engine exports as MILLSTRAND_RUN_ID
       ;; the harness sets a default cwd: capture must receive that effective
       ;; launch cwd, not the workspace root
       (shuttle/register-harness! :sh-hooked
@@ -2004,7 +2004,7 @@
 
 (defn- gate-dir! []
   (.toFile (java.nio.file.Files/createTempDirectory
-            "skein-fanout-gate"
+            "millstrand-fanout-gate"
             (make-array java.nio.file.attribute.FileAttribute 0))))
 
 (defn- gate-run!

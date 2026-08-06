@@ -1,0 +1,512 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Repository-private release gate. This is maintainer tooling invoked by the
+# Makefile; it is not a shipped or supported agent-harness user CLI. Keep its
+# local parser strict so malformed release evidence fails before any smoke work.
+usage() {
+  cat >&2 <<'EOF'
+repository-private usage:
+  bin/verify-release --mode pre-tag --source-root DIR \
+    --core-release release/msr04-release.json \
+    --kanban-release release/msr05-release.json
+  bin/verify-release --mode published --repository URL --tag vN --sha SHA \
+    --core-release release/msr04-release.json \
+    --kanban-release release/msr05-release.json
+EOF
+  exit 2
+}
+
+die() { echo "verify-release: $*" >&2; exit 1; }
+
+seen_options=""
+claim_option() {
+  local option=$1
+  case " $seen_options " in
+    *" $option "*) die "duplicate option: $option" ;;
+  esac
+  seen_options="${seen_options}${seen_options:+ }$option"
+}
+
+mode=""
+source_root=""
+repository=""
+tag=""
+sha=""
+core_release=""
+kanban_release=""
+help_requested=0
+
+while (($# > 0)); do
+  case "$1" in
+    --mode) claim_option "$1"; [[ $# -ge 2 ]] || usage; mode=$2; shift 2 ;;
+    --source-root) claim_option "$1"; [[ $# -ge 2 ]] || usage; source_root=$2; shift 2 ;;
+    --repository) claim_option "$1"; [[ $# -ge 2 ]] || usage; repository=$2; shift 2 ;;
+    --tag) claim_option "$1"; [[ $# -ge 2 ]] || usage; tag=$2; shift 2 ;;
+    --sha) claim_option "$1"; [[ $# -ge 2 ]] || usage; sha=$2; shift 2 ;;
+    --core-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; core_release=$2; shift 2 ;;
+    --kanban-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; kanban_release=$2; shift 2 ;;
+    -h|--help) claim_option "--help"; help_requested=1; shift ;;
+    *) echo "verify-release: unknown argument: $1" >&2; usage ;;
+  esac
+done
+
+(( help_requested == 0 )) || usage
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
+[[ "$mode" == "pre-tag" || "$mode" == "published" ]] || usage
+[[ -f "$core_release" ]] || die "--core-release must name a JSON file"
+[[ -f "$kanban_release" ]] || die "--kanban-release must name a JSON file"
+need git
+need python3
+need clojure
+
+release_values=$(python3 - "$core_release" "$kanban_release" <<'PY'
+import json
+import re
+import sys
+
+core_path, kanban_path = sys.argv[1:]
+with open(core_path, encoding="utf-8") as handle:
+    core = json.load(handle)
+with open(kanban_path, encoding="utf-8") as handle:
+    kanban = json.load(handle)
+
+required_core = {
+    "card", "repository", "coordinate", "ref-kind", "sha",
+    "landed-main-commit", "land-run", "verification",
+}
+missing = sorted(required_core - core.keys())
+if missing:
+    raise SystemExit(f"core release is missing fields: {', '.join(missing)}")
+forbidden = sorted({"tag", "peeled-sha"} & core.keys())
+if forbidden:
+    raise SystemExit(f"core release contains forbidden fields: {', '.join(forbidden)}")
+if core["card"] != "MSR-04" or core["repository"] != "codethread/millstrand":
+    raise SystemExit("core release identity does not match MSR-04")
+if core["coordinate"] != "io.millstrand/millstrand" or core["ref-kind"] != "sha":
+    raise SystemExit("core release must use io.millstrand/millstrand SHA identity")
+for field in ("sha", "landed-main-commit"):
+    if not re.fullmatch(r"[0-9a-f]{40}", core[field]):
+        raise SystemExit(f"core release {field} must be a lowercase 40-hex SHA")
+if core["sha"] != core["landed-main-commit"]:
+    raise SystemExit("core release SHA must equal landed-main-commit")
+if not isinstance(core["verification"], list) or not core["verification"]:
+    raise SystemExit("core release verification must be a non-empty array")
+
+required_kanban = {
+    "card", "repository", "coordinate", "tag", "peeled-sha",
+    "landed-main-commit", "land-run", "verification",
+}
+missing = sorted(required_kanban - kanban.keys())
+if missing:
+    raise SystemExit(f"Kanban release is missing fields: {', '.join(missing)}")
+if kanban["card"] != "MSR-05" or kanban["repository"] != "codethread/kanban.spool":
+    raise SystemExit("Kanban release identity does not match MSR-05")
+if kanban["coordinate"] != "codethread/kanban" or not re.fullmatch(r"v[0-9]+", kanban["tag"]):
+    raise SystemExit("Kanban release has an invalid coordinate or tag")
+for field in ("peeled-sha", "landed-main-commit"):
+    if not re.fullmatch(r"[0-9a-f]{40}", kanban[field]):
+        raise SystemExit(f"Kanban release {field} must be a lowercase 40-hex SHA")
+if kanban["peeled-sha"] != kanban["landed-main-commit"]:
+    raise SystemExit("Kanban peeled SHA must equal landed-main-commit")
+if not isinstance(kanban["verification"], list) or not kanban["verification"]:
+    raise SystemExit("Kanban verification must be a non-empty array")
+
+print(core["repository"])
+print(core["coordinate"])
+print(core["sha"])
+print(kanban["repository"])
+print(kanban["coordinate"])
+print(kanban["tag"])
+print(kanban["peeled-sha"])
+PY
+)
+core_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
+core_coordinate=$(printf '%s\n' "$release_values" | sed -n '2p')
+core_sha=$(printf '%s\n' "$release_values" | sed -n '3p')
+kanban_repository=$(printf '%s\n' "$release_values" | sed -n '4p')
+kanban_coordinate=$(printf '%s\n' "$release_values" | sed -n '5p')
+kanban_tag=$(printf '%s\n' "$release_values" | sed -n '6p')
+kanban_sha=$(printf '%s\n' "$release_values" | sed -n '7p')
+core_url="https://github.com/${core_repository%.git}.git"
+kanban_url="https://github.com/${kanban_repository%.git}.git"
+
+if [[ "$mode" == "pre-tag" ]]; then
+  [[ -n "$source_root" && -d "$source_root" ]] || die "--source-root must name a directory"
+  [[ -z "$repository" && -z "$tag" && -z "$sha" ]] || \
+    die "--repository, --tag, and --sha are published-mode options"
+  source_root=$(cd "$source_root" && pwd -P)
+  [[ -d "$source_root/.git" || -f "$source_root/.git" ]] || \
+    die "source root is not a Git checkout: $source_root"
+  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
+else
+  [[ -z "$source_root" ]] || die "--source-root is a pre-tag option"
+  [[ -n "$repository" && -n "$tag" && -n "$sha" ]] || \
+    die "published mode requires --repository, --tag, and --sha"
+  [[ "$tag" =~ ^v[0-9]+$ ]] || die "tag must be an annotated v<int> marker"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "sha must be a lowercase 40-hex commit"
+  [[ "$repository" != *"../"* && "$repository" != /* ]] || \
+    die "published repository must not be a local path"
+  remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  [[ "$remote_sha" == "$sha" ]] || \
+    die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
+  tmp_root=$(mktemp -d /tmp/ah.XXXXXX)
+  git clone --quiet --depth 1 --branch "$tag" "$repository" "$tmp_root/agent-harness"
+  candidate_root="$tmp_root/agent-harness"
+  [[ "$(git -C "$candidate_root" rev-parse HEAD)" == "$sha" ]] || \
+    die "checked-out $tag does not match $sha"
+  release_ref="$tag@$sha"
+fi
+
+tmp_root=${tmp_root:-$(mktemp -d /tmp/ah.XXXXXX)}
+if [[ "$mode" == "pre-tag" ]]; then
+  # Verify a disposable copy so evidence and generated metadata never touch
+  # the caller's checkout. Copy the complete worktree so pre-tag checks cover
+  # uncommitted candidate changes, and keep read-only source roots viable.
+  mkdir -p "$tmp_root/agent-harness"
+  cp -R "$source_root/." "$tmp_root/agent-harness/"
+  chmod -R u+rwX "$tmp_root/agent-harness"
+  candidate_root="$tmp_root/agent-harness"
+fi
+consumer_root="$tmp_root/consumer"
+gitlibs_root="$tmp_root/.gitlibs"
+mkdir -p "$consumer_root"
+cleanup() {
+  local rc=$?
+  if [[ "${weaver_active:-0}" == 1 ]]; then
+    XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+    kill "$mill_pid" 2>/dev/null || true
+    wait "$mill_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_root"
+  trap - EXIT
+  exit "$rc"
+}
+trap cleanup EXIT
+
+core_root="$tmp_root/millstrand"
+git clone --quiet "$core_url" "$core_root"
+git -C "$core_root" checkout --quiet "$core_sha"
+[[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || \
+  die "resolved core checkout does not match $core_sha"
+
+cat >"$consumer_root/deps.edn" <<EOF
+{:paths ["$candidate_root/agent-run/src"
+         "$candidate_root/harness-core/src"
+         "$candidate_root/claude-harness/src"
+         "$candidate_root/codex-harness/src"
+         "$candidate_root/cursor-harness/src"
+         "$candidate_root/pi-harness/src"
+         "$candidate_root/agent-cli/src"
+         "$candidate_root/delegation/src"
+         "$candidate_root/bench/src"
+         "$core_root/spools/workflow/src"]
+ :deps {$core_coordinate {:git/url "$core_url" :git/sha "$core_sha"}
+        $kanban_coordinate {:git/url "$kanban_url" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+EOF
+if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
+  die "generated consumer metadata contains a local/root or source-root override"
+fi
+
+classpath=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -Spath 2>&1) || \
+  die "clean consumer dependency resolution failed: $classpath"
+smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
+  (doseq [ns (quote [ct.spools.agent-run ct.spools.delegation
+                    ct.spools.executors.subagent ct.spools.harness-core
+                    ct.spools.claude-harness ct.spools.codex-harness
+                    ct.spools.pi-harness ct.spools.cursor-harness
+                    ct.spools.agent-cli ct.spools.bench])]
+    (require ns))
+  (println :agent-harness-consumer-loaded)
+' 2>&1) || die "clean consumer load failed: $smoke"
+
+if [[ -n "${MILL_BIN:-}" ]]; then
+  mill_bin="$MILL_BIN"
+elif [[ "$mode" == "pre-tag" && -x "$source_root/../millstrand/bin/mill" ]]; then
+  # A source checkout next to Millstrand is the deterministic development
+  # binary; it must speak the same protocol as the SHA-pinned core checkout.
+  mill_bin="$source_root/../millstrand/bin/mill"
+else
+  mill_bin=$(command -v mill || true)
+fi
+[[ -n "$mill_bin" && -x "$mill_bin" ]] || \
+  die "missing mill executable; set MILL_BIN to the published Millstrand mill"
+strand_bin=${STRAND_BIN:-$(dirname "$mill_bin")/strand}
+if [[ ! -x "$strand_bin" ]]; then
+  strand_bin=$(command -v strand || true)
+fi
+[[ -n "$strand_bin" && -x "$strand_bin" ]] || \
+  die "missing strand executable; set STRAND_BIN to the published Millstrand strand"
+state_root="$tmp_root/state"
+workspace_root="$tmp_root/workspace"
+mkdir -p "$state_root" "$workspace_root"
+mill_log="$tmp_root/mill.log"
+mill_pid=""
+weaver_workspace="$workspace_root/.millstrand"
+weaver_active=0
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+  "$mill_bin" start >"$mill_log" 2>&1 &
+mill_pid=$!
+metadata_path=""
+deadline=$((SECONDS + 30))
+until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
+  kill -0 "$mill_pid" 2>/dev/null || die "mill exited before publishing runtime metadata: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "mill did not publish runtime metadata within 30s"
+  metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
+  sleep 0.05
+done
+deadline=$((SECONDS + 30))
+until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+  kill -0 "$mill_pid" 2>/dev/null || die "mill exited before becoming ready: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "mill did not become ready within 30s"
+  sleep 0.05
+done
+
+mill_cmd() {
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"
+}
+strand_cmd() {
+  XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$weaver_workspace" "$@"
+}
+
+mill_cmd init --workspace "$weaver_workspace" >/dev/null
+[[ -d "$weaver_workspace" ]] || die "mill init did not create .millstrand"
+
+# Use the candidate's workspace modules in disposable paths. Core and Kanban
+# stay immutable: they are the SHA/tag-pinned checkouts resolved above.
+candidate_coord="$candidate_root/.$(printf '%s%s' sk ein)"
+cp -R "$candidate_coord/." "$weaver_workspace/"
+for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
+  ln -s "$candidate_root/$root" "$workspace_root/$root"
+done
+cat >"$weaver_workspace/spools.edn" <<'EOF'
+{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
+          millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
+          ct.spools/harness-core {:local/root "../harness-core"}
+          ct.spools/claude-harness {:local/root "../claude-harness"}
+          ct.spools/codex-harness {:local/root "../codex-harness"}
+          ct.spools/pi-harness {:local/root "../pi-harness"}
+          ct.spools/cursor-harness {:local/root "../cursor-harness"}
+          ct.spools/agent-cli {:local/root "../agent-cli"}
+          ct.spools/agent-run {:local/root "../agent-run"}
+          ct.spools/delegation {:local/root "../delegation"}
+          ct.spools/bench {:local/root "../bench"}
+          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
+                             :git/tag "KANBAN_TAG"
+                             :git/sha "KANBAN_SHA"
+                             :roots {codethread/kanban "."}}}}
+EOF
+python3 - "$weaver_workspace/spools.edn" "$kanban_tag" "$kanban_sha" <<'PY'
+import pathlib
+import sys
+
+path, tag, sha = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+pathlib.Path(path).write_text(text.replace("KANBAN_TAG", tag).replace("KANBAN_SHA", sha), encoding="utf-8")
+PY
+cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
+(ns harnesses
+  (:require [millstrand.api.current.alpha :as current]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [ct.spools.agent-run :as shuttle]
+            [ct.spools.delegation :as agents]))
+
+;; Fixed JSONL output drives the real parser, cost-rate derivation, and spend
+;; reducer without invoking a provider binary.
+(shuttle/defharnesses ^:private smoke-harnesses
+  "Disposable release smoke harnesses."
+  {:release-smoke {:argv ["sh" "-c"
+                          "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
+                   :parse :codex-json
+                   :preamble? false
+                   :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
+
+(defn open-harnesses!
+  [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! agents/review-contract)
+    (shuttle/set-default-task-contract! agents/worker-contract))
+  {:opened :harnesses})
+
+(defn close-harnesses!
+  [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! nil)
+    (shuttle/set-default-task-contract! nil))
+  {:closed :harnesses})
+
+(lifecycle/defresource harnesses-runtime
+  "Own the disposable release smoke contracts."
+  {:open 'harnesses/open-harnesses!
+   :close 'harnesses/close-harnesses!})
+EOF
+
+mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
+weaver_active=1
+status_before=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
+  die "initial disposable weaver status failed"
+printf '%s\n' "$status_before" >"$tmp_root/status-before.json"
+python3 - "$tmp_root/status-before.json" "$tmp_root/marker-before.json" "$weaver_workspace" <<'PY'
+import json
+import os
+import sys
+
+status_path, identity_path, workspace = sys.argv[1:]
+status = json.load(open(status_path, encoding="utf-8"))
+required = ["database_kind", "database_label", "database_path", "state_dir", "data_dir", "weaver_id"]
+missing = [key for key in required if not status.get(key)]
+if missing:
+    raise SystemExit(f"disposable weaver status missing identity fields: {', '.join(missing)}")
+if status["database_kind"] != "sqlite-file":
+    raise SystemExit(f"disposable weaver did not use sqlite storage: {status['database_kind']}")
+if status.get("config_dir") != os.path.realpath(workspace):
+    raise SystemExit("disposable weaver selected the wrong canonical workspace")
+json.dump({key: status[key] for key in required}, open(identity_path, "w", encoding="utf-8"), indent=2)
+PY
+
+state_before=$(strand_cmd add "release marker smoke state" --attr body=release-marker-smoke)
+task_id=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["id"])' <<<"$state_before")
+[[ -n "$task_id" ]] || die "disposable state creation returned no strand id"
+state_before=$(strand_cmd show "$task_id")
+printf '%s\n' "$state_before" >"$tmp_root/state-before.json"
+
+mill_cmd weaver stop --workspace "$weaver_workspace" >/dev/null
+weaver_active=0
+if ! XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; then
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+    "$mill_bin" start >>"$mill_log" 2>&1 &
+  mill_pid=$!
+  metadata_path=""
+  deadline=$((SECONDS + 30))
+  until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
+    kill -0 "$mill_pid" 2>/dev/null || die "mill exited while restarting after marker stop: $(sed -n '1,80p' "$mill_log")"
+    ((SECONDS < deadline)) || die "mill did not restart within 30s"
+    metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
+    sleep 0.05
+  done
+  deadline=$((SECONDS + 30))
+  until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+    kill -0 "$mill_pid" 2>/dev/null || die "mill exited before restart became ready: $(sed -n '1,80p' "$mill_log")"
+    ((SECONDS < deadline)) || die "mill restart did not become ready within 30s"
+    sleep 0.05
+  done
+fi
+mv "$workspace_root/.millstrand" "$workspace_root/.ms"
+weaver_workspace="$workspace_root/.ms"
+[[ -d "$weaver_workspace" ]] || die "marker rename did not preserve .ms workspace"
+mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
+weaver_active=1
+status_after=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
+  die "renamed disposable weaver status failed"
+printf '%s\n' "$status_after" >"$tmp_root/status-after.json"
+state_after=$(strand_cmd show "$task_id")
+printf '%s\n' "$state_after" >"$tmp_root/state-after.json"
+# Sibling databases and generations may be fresh: UUID continuity is
+# intentionally excluded, while storage identity and state remain smoke proof.
+python3 - "$tmp_root/status-before.json" "$tmp_root/status-after.json" "$tmp_root/state-before.json" "$tmp_root/state-after.json" "$tmp_root/marker-proof.json" <<'PY'
+import json
+import sys
+
+status_before, status_after, state_before, state_after, proof_path = sys.argv[1:]
+before = json.load(open(status_before, encoding="utf-8"))
+after = json.load(open(status_after, encoding="utf-8"))
+state_a = json.load(open(state_before, encoding="utf-8"))
+state_b = json.load(open(state_after, encoding="utf-8"))
+identity = ["database_kind", "database_label", "database_path", "state_dir", "data_dir"]
+if any(before[key] != after[key] for key in identity):
+    raise SystemExit(".millstrand to .ms changed canonical workspace/database identity")
+if state_a != state_b:
+    raise SystemExit(".millstrand to .ms changed representative strand state")
+for label, status in (("before", before), ("after", after)):
+    if not status.get("weaver_id"):
+        raise SystemExit(f"disposable weaver status {label} lost its smoke UUID")
+json.dump({"database-storage-identity-unchanged": True,
+           "representative-functional-state-unchanged": True,
+           "weaver-id-continuity": "intentionally-excluded",
+           "weaver-id-before": before["weaver_id"],
+           "weaver-id-after": after["weaver_id"]},
+          open(proof_path, "w", encoding="utf-8"), indent=2)
+PY
+
+delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
+delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
+await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
+python3 - "$await_result" <<'PY'
+import json
+import sys
+
+result = json.loads(sys.argv[1])
+runs = result.get("runs", [])
+if result.get("timed-out") or len(runs) != 1 or runs[0].get("phase") != "done":
+    raise SystemExit(f"delegate/await smoke did not finish successfully: {result}")
+PY
+
+review_result=$(strand_cmd agent review "$task_id" --seats 1 --harness release-smoke --cwd "$candidate_root" --changed-files bin/verify-release)
+review_runs=$(python3 -c 'import json,sys; print("\\n".join(json.loads(sys.stdin.read())["reviewers"]))' <<<"$review_result")
+[[ -n "$review_runs" ]] || die "review smoke returned no reviewer run"
+review_count=0
+while IFS= read -r review_run; do
+  [[ -n "$review_run" ]] || continue
+  strand_cmd agent await "$review_run" --timeout-secs 30 >/dev/null
+  review_count=$((review_count + 1))
+done <<<"$review_runs"
+[[ "$review_count" == 1 ]] || die "review smoke returned an unexpected reviewer count: $review_count"
+
+spend_result=$(strand_cmd agent spend --group-by harness)
+printf '%s\n' "$spend_result" >"$tmp_root/spend.json"
+python3 - "$tmp_root/spend.json" "$tmp_root/smoke-summary.json" <<'PY'
+import json
+import sys
+
+spend_path, summary_path = sys.argv[1:]
+spend = json.load(open(spend_path, encoding="utf-8"))
+totals = spend.get("totals", {})
+expected_tokens = 4200
+expected_cost = 2 * ((1500 / 1_000_000) * 1.0 + (500 / 1_000_000) * 0.1 + (100 / 1_000_000) * 6.0)
+if totals.get("tokens-total") != expected_tokens:
+    raise SystemExit(f"token accounting smoke mismatch: {totals.get('tokens-total')} != {expected_tokens}")
+if abs(totals.get("cost-usd", -1) - expected_cost) > 1e-12:
+    raise SystemExit(f"cost accounting smoke mismatch: {totals.get('cost-usd')} != {expected_cost}")
+if len(spend.get("runs", [])) != 2:
+    raise SystemExit(f"spend smoke expected delegate plus reviewer, got {len(spend.get('runs', []))}")
+json.dump({"delegate": True, "await": True, "review": True,
+           "spend": True, "tokens-total": expected_tokens,
+           "cost-usd": totals["cost-usd"]},
+          open(summary_path, "w", encoding="utf-8"), indent=2)
+PY
+
+output_dir="$candidate_root/target/release"
+mkdir -p "$output_dir"
+MODE="$mode" RELEASE_REF="$release_ref" CORE_SHA="$core_sha" KANBAN_TAG="$kanban_tag" \
+  MARKER_PROOF_FILE="$tmp_root/marker-proof.json" SMOKE_SUMMARY_FILE="$tmp_root/smoke-summary.json" \
+  OUTPUT_FILE="$output_dir/$mode.json" python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["MARKER_PROOF_FILE"], encoding="utf-8") as handle:
+    marker_proof = json.load(handle)
+with open(os.environ["SMOKE_SUMMARY_FILE"], encoding="utf-8") as handle:
+    smoke = json.load(handle)
+payload = {
+    "mode": os.environ["MODE"],
+    "release": os.environ["RELEASE_REF"],
+    "core-sha": os.environ["CORE_SHA"],
+    "kanban-tag": os.environ["KANBAN_TAG"],
+    "consumer": "ct.spools/agent-run",
+    "marker-proof": marker_proof,
+    "agent-smoke": smoke,
+}
+with open(os.environ["OUTPUT_FILE"], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+PY
+
+echo "agent-harness release verification: clean"
+echo "  mode: $mode"
+echo "  release: $release_ref"
+echo "  core: $core_repository@$core_sha"
+echo "  kanban: $kanban_repository@$kanban_tag ($kanban_sha)"
+echo "  evidence: $output_dir/$mode.json"

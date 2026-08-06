@@ -131,7 +131,7 @@
   (for [form forms
         site (spool-declaration-sites form)]
     (str file ":" (:line (meta site))
-         ": legacy public `spool` declaration; use skein.api.lifecycle.alpha authoring forms")))
+         ": legacy public `spool` declaration; use millstrand.api.lifecycle.alpha authoring forms")))
 
 (defn source-findings
   "Return authored-source findings for `roots`."
@@ -172,9 +172,9 @@
    (for [{:keys [filename row from to]} (concat (:namespace-usages analysis)
                                                 (:var-usages analysis))
          :when (and (under-root? filename spool-roots)
-                    (str/starts-with? (str to) "skein.core."))]
+                    (str/starts-with? (str to) "millstrand.core."))]
      (str filename ":" row ": shared spool `" from
-          "` uses internal namespace `" to "`; use skein.api.*.alpha"))))
+          "` uses internal namespace `" to "`; use millstrand.api.*.alpha"))))
 
 (defn findings
   "Return every convention finding for the configured roots."

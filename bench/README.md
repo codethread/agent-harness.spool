@@ -1,4 +1,4 @@
-# Skein Bench Spool
+# Millstrand Bench Spool
 
 ## 1. Overview
 
@@ -35,7 +35,7 @@ The declaration names a source target and world policy only. Bench collects its 
 
 The module registers **no suites and no harness definitions**. Those are trusted config, like harness aliases.
 
-All public functions take `runtime` as the first argument (shared-spool rules). State lives in `skein.api.runtime.alpha/spool-state`; no module-level atoms.
+All public functions take `runtime` as the first argument (shared-spool rules). State lives in `millstrand.api.runtime.alpha/spool-state`; no module-level atoms.
 
 ## 3. The DSL (trusted config)
 
@@ -128,8 +128,8 @@ Rules:
 Per entry, the engine executes (conceptually):
 
 ```
-<engine> run --rm -i --name skein-bench-<run-id>-<slug> \
-  -e HOME=/bench/home -e SKEIN_BENCH_RUN=<run-id> <agent env> <auth env> \
+<engine> run --rm -i --name millstrand-bench-<run-id>-<slug> \
+  -e HOME=/bench/home -e MILLSTRAND_BENCH_RUN=<run-id> <agent env> <auth env> \
   -v <entry-dir>/home:/bench/home -v <entry-dir>/workspace:/bench/workspace \
   <auth mounts, ro> -w /bench/workspace <image> <compiled agent argv>
 ```
@@ -252,7 +252,7 @@ The judge is deliberately **not** asked to approve blind: validation exit codes 
 ## 9. Failure and recovery
 
 - Fail-loud validation happens before any strand exists (§6). Setup failure, timeout, and engine errors mark the entry `failed` + `bench/error`, judge blocked. A **non-zero agent exit** still finalizes the entry `done` **when there is something to measure** — non-empty stdout *or* a non-empty diff (the exit code is recorded as `bench/exit-code`); with nothing to measure (empty stdout *and* empty diff) the entry is `failed` with `bench/error "agent exited <code> with no artifacts"`.
-- Weaver crash mid-run: `reconcile` marks any `bench/phase preparing|running` entry with no in-flight executor claim as `failed` (`bench/error "orphaned by weaver restart"`). Containers are `--rm` and named `skein-bench-<run-id>-<slug>`; reconcile best-effort `<engine> kill`s a still-live container by name. No auto-respawn — `bench retry` is deliberate.
+- Weaver crash mid-run: `reconcile` marks any `bench/phase preparing|running` entry with no in-flight executor claim as `failed` (`bench/error "orphaned by weaver restart"`). Containers are `--rm` and named `millstrand-bench-<run-id>-<slug>`; reconcile best-effort `<engine> kill`s a still-live container by name. No auto-respawn — `bench retry` is deliberate.
 - `bench retry <entry-id>`: only for `failed` entries; resets to `pending` with a fresh workspace, increments `bench/attempt`.
 - Executor and registries are versioned spool state with `:close-fn`; runtime stop kills live containers loudly.
 
@@ -286,4 +286,4 @@ Not pinned (recorded where visible): model behavior (nondeterministic by nature 
 - [executors/subagent.md](../executors/subagent.md) — bridges workflow `:subagent` gates to agent runs; how a `judge-spec` gate (§8) is fulfilled inside a workflow.
 - [delegation/README.md](../delegation/README.md) — `strand agent retry` for judge recovery; harness/alias registry the judge seat resolves against; `roster-review-specs`, the seam pattern `judge-spec` mirrors.
 - `docs/spools/writing-shared-spools.md` — the shared-spool rules this spool is held to (explicit runtime, versioned spool state, fail loudly, subcommand arg-specs).
-- `test/skein/bench_test.clj` — executable coverage via the injected fake engine (no container runtime needed).
+- `test/ct/spools/bench_test.clj` — executable coverage via the injected fake engine (no container runtime needed).

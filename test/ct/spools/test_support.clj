@@ -6,11 +6,11 @@
   of reinventing its own deadline/sleep/recur loop."
   (:require [clojure.java.io :as io]
             [clojure.test :as t]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.weaver.alpha :as weaver]
-            [skein.core.db-test :as db-test]
-            [skein.core.weaver.config :as weaver-config]
-            [skein.core.weaver.runtime :as weaver-runtime]))
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.core.db-test :as db-test]
+            [millstrand.core.weaver.config :as weaver-config]
+            [millstrand.core.weaver.runtime :as weaver-runtime]))
 
 (defn activate-spool!
   "Declare and publish one spool module for a test runtime.
@@ -42,34 +42,34 @@
   workspace.
 
   opts: `:prefix` (temp-dir name prefix, for telling concurrent test runs
-  apart; default \"skein-spools-config\") and `:nest-skein?` (default false).
+  apart; default \"millstrand-spools-config\") and `:nest-millstrand?` (default false).
   Some spool code (e.g. agent-run's `pinned-strand-command`) derives a
   \"workspace root\" from the config-dir's parent, matching the real
-  repo-root/.skein layout; set `:nest-skein?` true so the returned config-dir
-  is a `.skein` child of the temp root instead of the root itself, when a
+  repo-root/.millstrand layout; set `:nest-millstrand?` true so the returned config-dir
+  is a `.millstrand` child of the temp root instead of the root itself, when a
   test exercises that derivation."
   ([] (temp-config-dir {}))
-  ([{:keys [prefix nest-skein?] :or {prefix "skein-spools-config"}}]
+  ([{:keys [prefix nest-millstrand?] :or {prefix "millstrand-spools-config"}}]
    (let [root (.toFile (java.nio.file.Files/createTempDirectory
                         (.toPath (io/file "/tmp"))
                         prefix
                         (make-array java.nio.file.attribute.FileAttribute 0)))
-         config-dir (if nest-skein? (io/file root ".skein") root)]
+         config-dir (if nest-millstrand? (io/file root ".millstrand") root)]
      (doto config-dir (.mkdirs)))))
 
 (defn await-budget-ms
   "Poll deadline for cross-thread/subprocess readiness waits, in ms. Scales
-  `base-ms` (default 10000) via the SKEIN_TEST_AWAIT_SCALE env var (a
+  `base-ms` (default 10000) via the MILLSTRAND_TEST_AWAIT_SCALE env var (a
   multiplier, default 1) so a single knob widens every test's fixed poll
   deadlines under fork-heavy or otherwise loaded machines instead of editing
   each call site."
   ([] (await-budget-ms 10000))
   ([base-ms]
-   (long (* base-ms (if-let [scale (System/getenv "SKEIN_TEST_AWAIT_SCALE")]
+   (long (* base-ms (if-let [scale (System/getenv "MILLSTRAND_TEST_AWAIT_SCALE")]
                       (try (Double/parseDouble scale)
                            (catch NumberFormatException _
-                             (throw (ex-info "SKEIN_TEST_AWAIT_SCALE must be a number"
-                                             {:env "SKEIN_TEST_AWAIT_SCALE" :value scale}))))
+                             (throw (ex-info "MILLSTRAND_TEST_AWAIT_SCALE must be a number"
+                                             {:env "MILLSTRAND_TEST_AWAIT_SCALE" :value scale}))))
                       1.0)))))
 
 (defn await-budget-secs
@@ -100,7 +100,7 @@
 
   opts: `:publish?` (default false — the runtime is thread-bound for `f` via
   `with-runtime-binding` rather than published as the process ambient
-  runtime), and `:prefix`/`:nest-skein?`, threaded straight to
+  runtime), and `:prefix`/`:nest-millstrand?`, threaded straight to
   `temp-config-dir`. Set `:publish? true` when `f` (or code it calls, e.g.
   spawned worker threads that resolve the runtime via `current/runtime`
   rather than a per-call binding) needs the ambient singleton to actually
@@ -109,7 +109,7 @@
   ([opts f]
    (let [{:keys [publish?] :or {publish? false}} opts
          db-file (db-test/temp-db-file)
-         config-dir (temp-config-dir (select-keys opts [:prefix :nest-skein?]))]
+         config-dir (temp-config-dir (select-keys opts [:prefix :nest-millstrand?]))]
      (try
        (let [rt (weaver-runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))
                                                 :publish? publish?})]

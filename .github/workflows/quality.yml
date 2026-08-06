@@ -20,9 +20,9 @@ jobs:
           path: agent-harness.spool
       - uses: actions/checkout@v4
         with:
-          repository: codethread/skein
-          ref: e2ef777cf32a8fe1d92390c0645b16548b7ee249
-          path: skein-src
+          repository: codethread/millstrand
+          ref: 5790c459e9bb692b5e975f9715df7d5b403feff2
+          path: millstrand
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -30,6 +30,12 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
           cli: latest
+      - name: Provision ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ripgrep
+          command -v rg
+          rg --version
       - name: Clojure format
         working-directory: agent-harness.spool
         run: make fmt-check
@@ -49,4 +55,7 @@ jobs:
         working-directory: agent-harness.spool
         run: make test
         env:
-          SKEIN_TEST_AWAIT_SCALE: '3'
+          MILLSTRAND_TEST_AWAIT_SCALE: '3'
+      - name: Millstrand identity audit
+        working-directory: agent-harness.spool
+        run: make identity-check
