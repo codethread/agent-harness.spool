@@ -91,7 +91,7 @@ normally.
   step reads it like any other completed step.
 
 Honest source: `happy-path-spawns-delivers-and-unblocks-next-step` in
-``test/millstrand/executors/subagent_test.clj``, and the worked example in
+``test/ct/spools/subagent_test.clj``, and the worked example in
 [`subagent.md`](./subagent.md#worked-example).
 
 ---
@@ -141,7 +141,7 @@ the gate rather than spawning a broken run.
   visible, never a silently dropped spawn (contract [`subagent.md`, "Gate request attributes"](./subagent.md#gate-request-attributes)).
 
 Honest source: the gate request table in [`subagent.md`](./subagent.md#gate-request-attributes), and
-`missing-harness-stamps-error-and-does-not-retry` in ``test/millstrand/executors/subagent_test.clj``.
+`missing-harness-stamps-error-and-does-not-retry` in ``test/ct/spools/subagent_test.clj``.
 
 ---
 
@@ -201,7 +201,7 @@ is data, not a delete.
 Honest source: `failed-run-stays-ready-and-agent-retry-recovers-the-gate`,
 `recovery-respawn-keeps-stalled-subagent-gates-in-lockstep-with-predicate`, and
 `stalled-subagent-gates-query-reports-spawn-errors-and-dead-runs` in
-``test/millstrand/executors/subagent_test.clj``.
+``test/ct/spools/subagent_test.clj``.
 
 ---
 
@@ -242,7 +242,7 @@ itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a
   invented. Stall is a graph fact, not a timeout (contract [`subagent.md`, "Coordination attention"](./subagent.md#coordination-attention)).
 
 Honest source: `blank-result-gate-fails-loudly-stays-discoverable-and-recovers` and
-`subagent-registers-executor-for-flow-await` in `test/millstrand/executors/subagent_test.clj`.
+`subagent-registers-executor-for-flow-await` in `test/ct/spools/subagent_test.clj`.
 
 ---
 

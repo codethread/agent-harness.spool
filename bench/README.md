@@ -18,7 +18,7 @@ Division of labor with the [agent-run engine](../agent-run/README.md):
 Approved local-root spool. Agent-run must be installed first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
 
 ```clojure
-;; .millstrand/spools.edn
+;; .skein/spools.edn
 {:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}
           ct.spools/bench   {:local/root "../spools/bench"}}}
 ```
@@ -286,4 +286,4 @@ Not pinned (recorded where visible): model behavior (nondeterministic by nature 
 - [executors/subagent.md](../executors/subagent.md) — bridges workflow `:subagent` gates to agent runs; how a `judge-spec` gate (§8) is fulfilled inside a workflow.
 - [delegation/README.md](../delegation/README.md) — `strand agent retry` for judge recovery; harness/alias registry the judge seat resolves against; `roster-review-specs`, the seam pattern `judge-spec` mirrors.
 - `docs/spools/writing-shared-spools.md` — the shared-spool rules this spool is held to (explicit runtime, versioned spool state, fail loudly, subcommand arg-specs).
-- `test/millstrand/bench_test.clj` — executable coverage via the injected fake engine (no container runtime needed).
+- `test/ct/spools/bench_test.clj` — executable coverage via the injected fake engine (no container runtime needed).

@@ -164,4 +164,4 @@ runs parked on `gate/delivery-blocked`.
 
 - [`millstrand.spools.workflow`](../workflow.md) — workflow gates and runtime API.
 - [`ct.spools.agent-run`](../agent-run/README.md) — agent-run run lifecycle and harness registry.
-- ``test/millstrand/executors/subagent_test.clj`` — executable contract tests.
+- ``test/ct/spools/subagent_test.clj`` — executable contract tests.

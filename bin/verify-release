@@ -123,7 +123,6 @@ if [[ "$mode" == "pre-tag" ]]; then
   source_root=$(cd "$source_root" && pwd -P)
   [[ -d "$source_root/.git" || -f "$source_root/.git" ]] || \
     die "source root is not a Git checkout: $source_root"
-  candidate_root="$source_root"
   release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
 else
   [[ -z "$source_root" ]] || die "--source-root is a pre-tag option"
@@ -145,6 +144,15 @@ else
 fi
 
 tmp_root=${tmp_root:-$(mktemp -d /tmp/ah.XXXXXX)}
+if [[ "$mode" == "pre-tag" ]]; then
+  # Verify a disposable copy so evidence and generated metadata never touch
+  # the caller's checkout. Copy the complete worktree so pre-tag checks cover
+  # uncommitted candidate changes, and keep read-only source roots viable.
+  mkdir -p "$tmp_root/agent-harness"
+  cp -R "$source_root/." "$tmp_root/agent-harness/"
+  chmod -R u+rwX "$tmp_root/agent-harness"
+  candidate_root="$tmp_root/agent-harness"
+fi
 consumer_root="$tmp_root/consumer"
 gitlibs_root="$tmp_root/.gitlibs"
 mkdir -p "$consumer_root"
@@ -381,6 +389,8 @@ status_after=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
 printf '%s\n' "$status_after" >"$tmp_root/status-after.json"
 state_after=$(strand_cmd show "$task_id")
 printf '%s\n' "$state_after" >"$tmp_root/state-after.json"
+# Sibling databases and generations may be fresh: UUID continuity is
+# intentionally excluded, while storage identity and state remain smoke proof.
 python3 - "$tmp_root/status-before.json" "$tmp_root/status-after.json" "$tmp_root/state-before.json" "$tmp_root/state-after.json" "$tmp_root/marker-proof.json" <<'PY'
 import json
 import sys
@@ -395,7 +405,14 @@ if any(before[key] != after[key] for key in identity):
     raise SystemExit(".millstrand to .ms changed canonical workspace/database identity")
 if state_a != state_b:
     raise SystemExit(".millstrand to .ms changed representative strand state")
-json.dump({"identity-unchanged": True, "state-unchanged": True},
+for label, status in (("before", before), ("after", after)):
+    if not status.get("weaver_id"):
+        raise SystemExit(f"disposable weaver status {label} lost its smoke UUID")
+json.dump({"database-storage-identity-unchanged": True,
+           "representative-functional-state-unchanged": True,
+           "weaver-id-continuity": "intentionally-excluded",
+           "weaver-id-before": before["weaver_id"],
+           "weaver-id-after": after["weaver_id"]},
           open(proof_path, "w", encoding="utf-8"), indent=2)
 PY
 
