@@ -25,7 +25,7 @@ Every recipe has the same four parts, so you can skim to the one that matches yo
 4. **Why this shape** — the reasoning: what the readiness graph buys you, which
    guard you're leaning on, and what the sloppy version would cost.
 
-Each recipe cites the honest source it was distilled from — the README contract, a consuming workspace's trusted roster configuration, or the executable coverage in ``delegation_test.clj`` — so you can read the load-bearing version.
+Each recipe cites the honest source it was distilled from: the README contract, a consuming workspace's trusted roster configuration, or the executable coverage in ``delegation_test.clj``, so you can read the load-bearing version.
 
 ---
 
