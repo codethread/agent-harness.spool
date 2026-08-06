@@ -136,7 +136,7 @@ else
   remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
   [[ "$remote_sha" == "$sha" ]] || \
     die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
-  tmp_root=$(mktemp -d /tmp/agent-harness-release.XXXXXX)
+  tmp_root=$(mktemp -d /tmp/ah.XXXXXX)
   git clone --quiet --depth 1 --branch "$tag" "$repository" "$tmp_root/agent-harness"
   candidate_root="$tmp_root/agent-harness"
   [[ "$(git -C "$candidate_root" rev-parse HEAD)" == "$sha" ]] || \
@@ -144,12 +144,16 @@ else
   release_ref="$tag@$sha"
 fi
 
-tmp_root=${tmp_root:-$(mktemp -d /tmp/agent-harness-release.XXXXXX)}
+tmp_root=${tmp_root:-$(mktemp -d /tmp/ah.XXXXXX)}
 consumer_root="$tmp_root/consumer"
 gitlibs_root="$tmp_root/.gitlibs"
 mkdir -p "$consumer_root"
 cleanup() {
   local rc=$?
+  if [[ "${weaver_active:-0}" == 1 ]]; then
+    XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
     kill "$mill_pid" 2>/dev/null || true
     wait "$mill_pid" 2>/dev/null || true
@@ -196,15 +200,32 @@ smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
   (println :agent-harness-consumer-loaded)
 ' 2>&1) || die "clean consumer load failed: $smoke"
 
-mill_bin=${MILL_BIN:-$(command -v mill || true)}
+if [[ -n "${MILL_BIN:-}" ]]; then
+  mill_bin="$MILL_BIN"
+elif [[ "$mode" == "pre-tag" && -x "$source_root/../millstrand/bin/mill" ]]; then
+  # A source checkout next to Millstrand is the deterministic development
+  # binary; it must speak the same protocol as the SHA-pinned core checkout.
+  mill_bin="$source_root/../millstrand/bin/mill"
+else
+  mill_bin=$(command -v mill || true)
+fi
 [[ -n "$mill_bin" && -x "$mill_bin" ]] || \
   die "missing mill executable; set MILL_BIN to the published Millstrand mill"
+strand_bin=${STRAND_BIN:-$(dirname "$mill_bin")/strand}
+if [[ ! -x "$strand_bin" ]]; then
+  strand_bin=$(command -v strand || true)
+fi
+[[ -n "$strand_bin" && -x "$strand_bin" ]] || \
+  die "missing strand executable; set STRAND_BIN to the published Millstrand strand"
 state_root="$tmp_root/state"
 workspace_root="$tmp_root/workspace"
 mkdir -p "$state_root" "$workspace_root"
 mill_log="$tmp_root/mill.log"
 mill_pid=""
-XDG_STATE_HOME="$state_root" "$mill_bin" start >"$mill_log" 2>&1 &
+weaver_workspace="$workspace_root/.millstrand"
+weaver_active=0
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+  "$mill_bin" start >"$mill_log" 2>&1 &
 mill_pid=$!
 metadata_path=""
 deadline=$((SECONDS + 30))
@@ -214,26 +235,237 @@ until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
   metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
   sleep 0.05
 done
-XDG_STATE_HOME="$state_root" "$mill_bin" init --workspace "$workspace_root/.millstrand" >/dev/null
-[[ -d "$workspace_root/.millstrand" ]] || die "mill init did not create .millstrand"
+deadline=$((SECONDS + 30))
+until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+  kill -0 "$mill_pid" 2>/dev/null || die "mill exited before becoming ready: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "mill did not become ready within 30s"
+  sleep 0.05
+done
+
+mill_cmd() {
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"
+}
+strand_cmd() {
+  XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$weaver_workspace" "$@"
+}
+
+mill_cmd init --workspace "$weaver_workspace" >/dev/null
+[[ -d "$weaver_workspace" ]] || die "mill init did not create .millstrand"
+
+# Use the candidate's workspace modules in disposable paths. Core and Kanban
+# stay immutable: they are the SHA/tag-pinned checkouts resolved above.
+candidate_coord="$candidate_root/.$(printf '%s%s' sk ein)"
+cp -R "$candidate_coord/." "$weaver_workspace/"
+for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
+  ln -s "$candidate_root/$root" "$workspace_root/$root"
+done
+cat >"$weaver_workspace/spools.edn" <<'EOF'
+{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
+          millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
+          ct.spools/harness-core {:local/root "../harness-core"}
+          ct.spools/claude-harness {:local/root "../claude-harness"}
+          ct.spools/codex-harness {:local/root "../codex-harness"}
+          ct.spools/pi-harness {:local/root "../pi-harness"}
+          ct.spools/cursor-harness {:local/root "../cursor-harness"}
+          ct.spools/agent-cli {:local/root "../agent-cli"}
+          ct.spools/agent-run {:local/root "../agent-run"}
+          ct.spools/delegation {:local/root "../delegation"}
+          ct.spools/bench {:local/root "../bench"}
+          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
+                             :git/tag "KANBAN_TAG"
+                             :git/sha "KANBAN_SHA"
+                             :roots {codethread/kanban "."}}}}
+EOF
+python3 - "$weaver_workspace/spools.edn" "$kanban_tag" "$kanban_sha" <<'PY'
+import pathlib
+import sys
+
+path, tag, sha = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+pathlib.Path(path).write_text(text.replace("KANBAN_TAG", tag).replace("KANBAN_SHA", sha), encoding="utf-8")
+PY
+cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
+(ns harnesses
+  (:require [millstrand.api.current.alpha :as current]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [ct.spools.agent-run :as shuttle]
+            [ct.spools.delegation :as agents]))
+
+;; Fixed JSONL output drives the real parser, cost-rate derivation, and spend
+;; reducer without invoking a provider binary.
+(shuttle/defharnesses ^:private smoke-harnesses
+  "Disposable release smoke harnesses."
+  {:release-smoke {:argv ["sh" "-c"
+                          "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
+                   :parse :codex-json
+                   :preamble? false
+                   :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
+
+(defn open-harnesses!
+  [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! agents/review-contract)
+    (shuttle/set-default-task-contract! agents/worker-contract))
+  {:opened :harnesses})
+
+(defn close-harnesses!
+  [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! nil)
+    (shuttle/set-default-task-contract! nil))
+  {:closed :harnesses})
+
+(lifecycle/defresource harnesses-runtime
+  "Own the disposable release smoke contracts."
+  {:open 'harnesses/open-harnesses!
+   :close 'harnesses/close-harnesses!})
+EOF
+
+mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
+weaver_active=1
+status_before=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
+  die "initial disposable weaver status failed"
+printf '%s\n' "$status_before" >"$tmp_root/status-before.json"
+python3 - "$tmp_root/status-before.json" "$tmp_root/marker-before.json" "$weaver_workspace" <<'PY'
+import json
+import os
+import sys
+
+status_path, identity_path, workspace = sys.argv[1:]
+status = json.load(open(status_path, encoding="utf-8"))
+required = ["database_kind", "database_label", "database_path", "state_dir", "data_dir", "weaver_id"]
+missing = [key for key in required if not status.get(key)]
+if missing:
+    raise SystemExit(f"disposable weaver status missing identity fields: {', '.join(missing)}")
+if status["database_kind"] != "sqlite-file":
+    raise SystemExit(f"disposable weaver did not use sqlite storage: {status['database_kind']}")
+if status.get("config_dir") != os.path.realpath(workspace):
+    raise SystemExit("disposable weaver selected the wrong canonical workspace")
+json.dump({key: status[key] for key in required}, open(identity_path, "w", encoding="utf-8"), indent=2)
+PY
+
+state_before=$(strand_cmd add "release marker smoke state" --attr body=release-marker-smoke)
+task_id=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["id"])' <<<"$state_before")
+[[ -n "$task_id" ]] || die "disposable state creation returned no strand id"
+state_before=$(strand_cmd show "$task_id")
+printf '%s\n' "$state_before" >"$tmp_root/state-before.json"
+
+mill_cmd weaver stop --workspace "$weaver_workspace" >/dev/null
+weaver_active=0
+if ! XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; then
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+    "$mill_bin" start >>"$mill_log" 2>&1 &
+  mill_pid=$!
+  metadata_path=""
+  deadline=$((SECONDS + 30))
+  until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
+    kill -0 "$mill_pid" 2>/dev/null || die "mill exited while restarting after marker stop: $(sed -n '1,80p' "$mill_log")"
+    ((SECONDS < deadline)) || die "mill did not restart within 30s"
+    metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
+    sleep 0.05
+  done
+  deadline=$((SECONDS + 30))
+  until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+    kill -0 "$mill_pid" 2>/dev/null || die "mill exited before restart became ready: $(sed -n '1,80p' "$mill_log")"
+    ((SECONDS < deadline)) || die "mill restart did not become ready within 30s"
+    sleep 0.05
+  done
+fi
 mv "$workspace_root/.millstrand" "$workspace_root/.ms"
-XDG_STATE_HOME="$state_root" "$mill_bin" init --workspace "$workspace_root/.ms" >/dev/null
-[[ -d "$workspace_root/.ms" ]] || die "mill init did not preserve .ms marker"
+weaver_workspace="$workspace_root/.ms"
+[[ -d "$weaver_workspace" ]] || die "marker rename did not preserve .ms workspace"
+mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
+weaver_active=1
+status_after=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
+  die "renamed disposable weaver status failed"
+printf '%s\n' "$status_after" >"$tmp_root/status-after.json"
+state_after=$(strand_cmd show "$task_id")
+printf '%s\n' "$state_after" >"$tmp_root/state-after.json"
+python3 - "$tmp_root/status-before.json" "$tmp_root/status-after.json" "$tmp_root/state-before.json" "$tmp_root/state-after.json" "$tmp_root/marker-proof.json" <<'PY'
+import json
+import sys
+
+status_before, status_after, state_before, state_after, proof_path = sys.argv[1:]
+before = json.load(open(status_before, encoding="utf-8"))
+after = json.load(open(status_after, encoding="utf-8"))
+state_a = json.load(open(state_before, encoding="utf-8"))
+state_b = json.load(open(state_after, encoding="utf-8"))
+identity = ["database_kind", "database_label", "database_path", "state_dir", "data_dir"]
+if any(before[key] != after[key] for key in identity):
+    raise SystemExit(".millstrand to .ms changed canonical workspace/database identity")
+if state_a != state_b:
+    raise SystemExit(".millstrand to .ms changed representative strand state")
+json.dump({"identity-unchanged": True, "state-unchanged": True},
+          open(proof_path, "w", encoding="utf-8"), indent=2)
+PY
+
+delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
+delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
+await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
+python3 - "$await_result" <<'PY'
+import json
+import sys
+
+result = json.loads(sys.argv[1])
+runs = result.get("runs", [])
+if result.get("timed-out") or len(runs) != 1 or runs[0].get("phase") != "done":
+    raise SystemExit(f"delegate/await smoke did not finish successfully: {result}")
+PY
+
+review_result=$(strand_cmd agent review "$task_id" --seats 1 --harness release-smoke --cwd "$candidate_root" --changed-files bin/verify-release)
+review_runs=$(python3 -c 'import json,sys; print("\\n".join(json.loads(sys.stdin.read())["reviewers"]))' <<<"$review_result")
+[[ -n "$review_runs" ]] || die "review smoke returned no reviewer run"
+review_count=0
+while IFS= read -r review_run; do
+  [[ -n "$review_run" ]] || continue
+  strand_cmd agent await "$review_run" --timeout-secs 30 >/dev/null
+  review_count=$((review_count + 1))
+done <<<"$review_runs"
+[[ "$review_count" == 1 ]] || die "review smoke returned an unexpected reviewer count: $review_count"
+
+spend_result=$(strand_cmd agent spend --group-by harness)
+printf '%s\n' "$spend_result" >"$tmp_root/spend.json"
+python3 - "$tmp_root/spend.json" "$tmp_root/smoke-summary.json" <<'PY'
+import json
+import sys
+
+spend_path, summary_path = sys.argv[1:]
+spend = json.load(open(spend_path, encoding="utf-8"))
+totals = spend.get("totals", {})
+expected_tokens = 4200
+expected_cost = 2 * ((1500 / 1_000_000) * 1.0 + (500 / 1_000_000) * 0.1 + (100 / 1_000_000) * 6.0)
+if totals.get("tokens-total") != expected_tokens:
+    raise SystemExit(f"token accounting smoke mismatch: {totals.get('tokens-total')} != {expected_tokens}")
+if abs(totals.get("cost-usd", -1) - expected_cost) > 1e-12:
+    raise SystemExit(f"cost accounting smoke mismatch: {totals.get('cost-usd')} != {expected_cost}")
+if len(spend.get("runs", [])) != 2:
+    raise SystemExit(f"spend smoke expected delegate plus reviewer, got {len(spend.get('runs', []))}")
+json.dump({"delegate": True, "await": True, "review": True,
+           "spend": True, "tokens-total": expected_tokens,
+           "cost-usd": totals["cost-usd"]},
+          open(summary_path, "w", encoding="utf-8"), indent=2)
+PY
 
 output_dir="$candidate_root/target/release"
 mkdir -p "$output_dir"
 MODE="$mode" RELEASE_REF="$release_ref" CORE_SHA="$core_sha" KANBAN_TAG="$kanban_tag" \
+  MARKER_PROOF_FILE="$tmp_root/marker-proof.json" SMOKE_SUMMARY_FILE="$tmp_root/smoke-summary.json" \
   OUTPUT_FILE="$output_dir/$mode.json" python3 - <<'PY'
 import json
 import os
 
+with open(os.environ["MARKER_PROOF_FILE"], encoding="utf-8") as handle:
+    marker_proof = json.load(handle)
+with open(os.environ["SMOKE_SUMMARY_FILE"], encoding="utf-8") as handle:
+    smoke = json.load(handle)
 payload = {
     "mode": os.environ["MODE"],
     "release": os.environ["RELEASE_REF"],
     "core-sha": os.environ["CORE_SHA"],
     "kanban-tag": os.environ["KANBAN_TAG"],
     "consumer": "ct.spools/agent-run",
-    "marker-proof": ".millstrand and .ms initialized in one fresh state root",
+    "marker-proof": marker_proof,
+    "agent-smoke": smoke,
 }
 with open(os.environ["OUTPUT_FILE"], "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2)
