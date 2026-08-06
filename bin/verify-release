@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Repository-private release gate. This is maintainer tooling invoked by the
+# Makefile; it is not a shipped or supported agent-harness user CLI. Keep its
+# local parser strict so malformed release evidence fails before any smoke work.
 usage() {
   cat >&2 <<'EOF'
-usage:
+repository-private usage:
   bin/verify-release --mode pre-tag --source-root DIR \
     --core-release release/msr04-release.json \
     --kanban-release release/msr05-release.json

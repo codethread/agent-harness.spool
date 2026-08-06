@@ -12,4 +12,8 @@ The core is consumed by immutable commit SHA, not a core tag:
 
 The released Kanban dependency is pinned to `v24` and peeled SHA `87f61bc2750e7026f3650235907db25f19b1536e`. Local sibling development may use `{:local/root "../millstrand"}` only in a private override; it is not release proof. The release verifier rejects local roots and exercises delegation, await/review, and accounting entry points in a fresh disposable workspace.
 
+The marker-rename smoke intentionally excludes sibling weaver UUID continuity: a
+fresh sibling weaver generation is allowed, while storage identity and
+representative functional state must remain unchanged.
+
 Rollback is to the prior published v25 Agent Harness release. This release does not migrate or activate any existing `.skein` world and does not recreate the forbidden core `v1` marker.
