@@ -2,11 +2,11 @@
   "Provider-neutral structure, registry, and lifecycle for harness runs."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.weaver.alpha :as weaver])
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.weaver.alpha :as weaver])
   (:import [java.util UUID]))
 
 (def ^:private registry-version 1)

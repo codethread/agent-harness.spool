@@ -1,0 +1,4 @@
+# scope<TAB>pattern<TAB>reason
+.skein	.*	Repository coordination configuration is intentionally retained as .skein; it is not a consumer workspace marker.
+AGENTS.md	\.skein	Repository instructions identify the checked-in coordination workspace.
+scripts/quality/conventions_check.clj	\.skein	The quality scanner includes the checked-in coordination workspace in its source roots.

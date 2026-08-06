@@ -17,7 +17,7 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.spool.alpha :refer [fail!]])
+            [millstrand.api.spool.alpha :refer [fail!]])
   (:import [java.io File]
            [java.lang ProcessBuilder$Redirect]
            [java.util.concurrent ConcurrentHashMap TimeUnit]
@@ -307,7 +307,7 @@
           removed (apply-remove! ws remove-paths)]
       (git! ws "add" "-A")
       (when (overlay-dirty? ws)
-        (git! ws "-c" "user.email=bench@skein" "-c" "user.name=skein-bench"
+        (git! ws "-c" "user.email=bench@millstrand" "-c" "user.name=millstrand-bench"
               "commit" "-m" "bench: pinned overlay"))
       {:workspace ws
        :home home
@@ -338,9 +338,9 @@
 ;; Container engine argv
 
 (defn container-name
-  "Return the deterministic container name `skein-bench-<run-id>-<slug>`."
+  "Return the deterministic container name `millstrand-bench-<run-id>-<slug>`."
   [run-id slug]
-  (str "skein-bench-" run-id "-" slug))
+  (str "millstrand-bench-" run-id "-" slug))
 
 (defn- env-args [env]
   (vec (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env)))
@@ -356,7 +356,7 @@
   (let [name (container-name run-id slug)
         home-mount (str (.getCanonicalPath (io/file entry-dir "home")) ":/bench/home")
         ws-mount (str (.getCanonicalPath (io/file entry-dir "workspace")) ":/bench/workspace")
-        base-env (merge {"HOME" "/bench/home" "SKEIN_BENCH_RUN" run-id} env)
+        base-env (merge {"HOME" "/bench/home" "MILLSTRAND_BENCH_RUN" run-id} env)
         auth-names (:env auth)
         present-auth (filter #(System/getenv %) auth-names)
         auth-real (vec (mapcat (fn [n] ["-e" (str n "=" (System/getenv n))]) present-auth))

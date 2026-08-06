@@ -3,23 +3,23 @@
 
   The subagent executor watches workflow runs for ready `:subagent` gates, spawns
   an agent-run run for each gate, and delivers successful run results by
-  completing the gate through `skein.spools.workflow/complete!`. It intentionally
+  completing the gate through `millstrand.spools.workflow/complete!`. It intentionally
   adds no CLI surface and keeps workflow and agent-run decoupled: this namespace
   is the only adapter that knows both vocabularies."
   (:require [clojure.string :as str]
             [ct.spools.agent-run :as agent-run]
-            [skein.spools.workflow :as workflow]
-            [skein.api.spool.alpha :refer [fail! attr-get]]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.weaver.alpha :as weaver]
-            [skein.api.events.alpha :as events]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.skein.alpha :as skein]
-            [skein.api.format.alpha :as fmt]
-            [skein.api.current.alpha :as current]
-            [skein.api.return-shape.alpha :as return-shape]
-            [skein.api.vocab.alpha :as vocab]))
+            [millstrand.spools.workflow :as workflow]
+            [millstrand.api.spool.alpha :refer [fail! attr-get]]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.api.events.alpha :as events]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.millstrand.alpha :as millstrand]
+            [millstrand.api.format.alpha :as fmt]
+            [millstrand.api.current.alpha :as current]
+            [millstrand.api.return-shape.alpha :as return-shape]
+            [millstrand.api.vocab.alpha :as vocab]))
 
 (def ^:private event-types
   #{:strand/added :strand/updated :batch/applied :strand/burned :strand/superseded})
@@ -87,7 +87,7 @@
 
 (defn- attr
   "Read attribute `k` tolerating keyword- or string-keyed maps, via the shared
-  spool-tier tolerant reader (`skein.api.spool.alpha/attr-get`)."
+  spool-tier tolerant reader (`millstrand.api.spool.alpha/attr-get`)."
   [strand k]
   (attr-get strand k))
 
@@ -128,7 +128,7 @@
 (defn task-gate
   "Build a task-aware workflow subagent gate.
 
-  Accepts the same keyword options as `skein.spools.workflow/gate`, after `id`
+  Accepts the same keyword options as `millstrand.spools.workflow/gate`, after `id`
   and `title`, and always emits `gate/completion-policy status-implemented`.
   Use raw `workflow/gate` for generic run-completion semantics."
   [id title & options]
@@ -307,12 +307,12 @@
   [gate]
   (gate-stalled? gate))
 
-(skein/defquery stalled-subagent-gates
+(millstrand/defquery stalled-subagent-gates
   "Select ready subagent gates with no serving run."
   {}
   stalled-gates-query)
 
-(skein/defquery blocked-deliveries
+(millstrand/defquery blocked-deliveries
   "Select closed gates whose delivery remains blocked."
   {}
   [:and [:= :state "closed"]
@@ -332,14 +332,14 @@
         (when-not (contains? handlers :agent-run/engine)
           (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
     ;; The activation module owns the namespace, not the file location: the
-    ;; source sits in the agent-run package but `:skein/spools-treadle` is the
+    ;; source sits in the agent-run package but `:millstrand/spools-treadle` is the
     ;; use-key. `:keys` is advisory (the keys `deliver-run!`/`spawn-for-gate!`
     ;; stamp), not enforced. `gate/error` is the one key both gate executors
     ;; write, so the namespace spans them rather than belonging to this one.
         (vocab/declare! runtime
                         {:kind :attr-namespace
                          :name "gate"
-                         :owner :skein/spools-treadle
+                         :owner :millstrand/spools-treadle
                          :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
                          :doc (fmt/reflow "
                            |Workflow-gate completion, delivery, and spawn control attributes.

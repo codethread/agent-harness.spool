@@ -1,0 +1,14 @@
+{
+  "card": "MSR-05",
+  "repository": "codethread/kanban.spool",
+  "coordinate": "codethread/kanban",
+  "tag": "v24",
+  "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
+  "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+  "land-run": "land-hqtjg-20260806-1709",
+  "verification": [
+    "clojure -M:test",
+    "make identity-check",
+    "MILL_BIN=/Users/ct/dev/projects/millstrand/bin/mill bin/verify-release --mode published --repository https://github.com/codethread/kanban.spool.git --tag v24 --sha 87f61bc2750e7026f3650235907db25f19b1536e --core-release release/msr04-release.json"
+  ]
+}

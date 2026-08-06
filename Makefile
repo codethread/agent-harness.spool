@@ -1,4 +1,4 @@
-.PHONY: test fmt-check lint lint-clj lint-splint lint-conventions reflect-check quality
+.PHONY: test fmt-check lint lint-clj lint-splint lint-conventions reflect-check quality identity-check release-check
 
 test:
 	clojure -M:test
@@ -21,3 +21,11 @@ reflect-check:
 	clojure -M:reflect-check
 
 quality: fmt-check lint reflect-check test
+
+identity-check:
+	bin/identity-check
+
+release-check:
+	bin/verify-release --mode pre-tag --source-root "$(CURDIR)" \
+		--core-release release/msr04-release.json \
+		--kanban-release release/msr05-release.json

@@ -14,7 +14,7 @@
   only judgment is a model. Two registries — harness definitions and suites — are
   weaver-lifetime trusted config validated loudly at registration. All public
   functions take `runtime` explicitly and keep state runtime-owned via
-  `skein.api.runtime.alpha/spool-state` (shared-spool rules); the versioned
+  `millstrand.api.runtime.alpha/spool-state` (shared-spool rules); the versioned
   state carries the bounded executor, the registries, and in-flight container
   tracking, and its `:close-fn` kills live containers on runtime stop."
   (:refer-clojure :exclude [run!])
@@ -22,18 +22,18 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
-            [skein.api.lifecycle.alpha :as lifecycle]
-            [skein.api.registry.alpha :as registry]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.api.skein.alpha :as skein]
-            [skein.api.vocab.alpha :as vocab]
-            [skein.api.graph.alpha :as graph]
-            [skein.api.weaver.alpha :as weaver]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [millstrand.api.registry.alpha :as registry]
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.api.millstrand.alpha :as millstrand]
+            [millstrand.api.vocab.alpha :as vocab]
+            [millstrand.api.graph.alpha :as graph]
+            [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.bench.exec :as exec]
             [ct.spools.bench.metrics :as metrics]
-            [skein.api.format.alpha :as fmt]
+            [millstrand.api.format.alpha :as fmt]
             [ct.spools.agent-run :as agent-run]
-            [skein.api.spool.alpha :refer [fail! reject-unknown-keys! require-valid! attr-get]])
+            [millstrand.api.spool.alpha :refer [fail! reject-unknown-keys! require-valid! attr-get]])
   (:import [java.io File]
            [java.util.concurrent ExecutorService Executors Semaphore ThreadFactory TimeUnit]))
 
@@ -51,8 +51,8 @@
 (def extractor-kind
   "Owner-partitioned kind id for metrics extractor declarations."
   :ct.spools.bench/extractor)
-(def ^:private direct-owner :skein.owner/repl)
-(def ^:private system-owner :skein.owner/system)
+(def ^:private direct-owner :millstrand.owner/repl)
+(def ^:private system-owner :millstrand.owner/system)
 
 (defn registry-handle
   "Return the runtime-owned registry for harnesses, suites, and extractors."
@@ -465,11 +465,11 @@
 (defn- workspace-root
   "Return the host root against which suite `:files` relative paths resolve.
 
-  Matches the repo-root/.skein layout: the config-dir's parent when it is named
-  `.skein`, else the config-dir itself."
+  Matches the repo-root/.millstrand layout: the config-dir's parent when it is named
+  `.millstrand`, else the config-dir itself."
   [runtime]
   (let [cfg (io/file (get-in runtime [:metadata :config-dir]))]
-    (if (= ".skein" (.getName cfg)) (.getParent cfg) (.getPath cfg))))
+    (if (= ".millstrand" (.getName cfg)) (.getParent cfg) (.getPath cfg))))
 
 ;; ---------------------------------------------------------------------------
 ;; Prompt / harness-command resolution
@@ -1447,7 +1447,7 @@
 
 (declare bench-op)
 
-(skein/defop bench
+(millstrand/defop bench
   "Dispatch parsed `strand bench ...` subcommands to the engine functions.
 
   Each verb is a thin JSON wrapper: the parser routes on `:subcommand` and
@@ -1522,7 +1522,7 @@
   which bench owns. `:keys` is advisory."
   {:kind :attr-namespace
    :name "bench"
-   :owner :skein/spools-bench
+   :owner :millstrand/spools-bench
    :keys ["bench/run" "bench/suite" "bench/repo" "bench/sha" "bench/data-dir"
           "bench/entry" "bench/slug" "bench/harness" "bench/model" "bench/thinking"
           "bench/prompt-slug" "bench/phase" "bench/attempt" "bench/image-digest"
@@ -1550,7 +1550,7 @@
                         :entry-spec ::registered-extractor
                         :binding-moment :run})
 
-(skein/defquery bench-runs
+(millstrand/defquery bench-runs
   "Select active benchmark run roots."
   {}
   [:and [:= :state "active"]

@@ -20,9 +20,9 @@ jobs:
           path: agent-harness.spool
       - uses: actions/checkout@v4
         with:
-          repository: codethread/skein
+          repository: codethread/millstrand
           ref: e2ef777cf32a8fe1d92390c0645b16548b7ee249
-          path: skein-src
+          path: millstrand
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -49,4 +49,7 @@ jobs:
         working-directory: agent-harness.spool
         run: make test
         env:
-          SKEIN_TEST_AWAIT_SCALE: '3'
+          MILLSTRAND_TEST_AWAIT_SCALE: '3'
+      - name: Millstrand identity audit
+        working-directory: agent-harness.spool
+        run: make identity-check

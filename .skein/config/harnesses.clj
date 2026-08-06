@@ -1,5 +1,5 @@
 (ns harnesses
-  "Repo-local harness seats and routing policy, ported from skein-src.
+  "Repo-local harness seats and routing policy, ported from millstrand.
 
   Aliases are pure model handles (`:sol-low`, `:terra-med`, `:opus`) rather
   than role names. A `-ro` suffix marks an enforced read-only sandbox.
@@ -10,7 +10,7 @@
      :coordination N :docs-prose N :cost N}
 
   Nine is best, X is untested, and `-` means do not route that work to the
-  seat. Scores and routing policy retain their skein-src bench provenance.
+  seat. Scores and routing policy retain their millstrand bench provenance.
 
   GPT seats work best from goals, constraints, and Done-when; reserve long
   prohibition lists for Claude seats. Bench judges run on :oracle or
@@ -19,9 +19,9 @@
 
   Harness aliases are weaver-lifetime state. `strand agent harnesses` lists
   the live registry."
-  (:require [skein.api.current.alpha :as current]
-            [skein.api.format.alpha :as format-alpha]
-            [skein.api.lifecycle.alpha :as lifecycle]
+  (:require [millstrand.api.current.alpha :as current]
+            [millstrand.api.format.alpha :as format-alpha]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]))
 
@@ -80,10 +80,10 @@
            | :coordination - :cost 9}
            |gpt-5.6-luna low via Codex. Concrete, well-scoped recon, fan-out
            |search, and single-concern review sweeps at the lowest Codex cost.
-           |Won skein-src's deep-trace and needle explore arms and matched
+           |Won millstrand's deep-trace and needle explore arms and matched
            |:terra-med's change-review recall at about 28% of the price. Quits
            |at environment friction and scored lowest on authored-code quality.
-           |Source: skein-src cards vk5re, vw8pf, and nihrl; UI is a prior.")}
+           |Source: millstrand cards vk5re, vw8pf, and nihrl; UI is a prior.")}
    :luna-low-ro
    {:alias-of :codex-ro
     :extra-args ["-m" "gpt-5.6-luna" "-c" "model_reasoning_effort=low"]
@@ -117,7 +117,7 @@
            |and validation on clean checkouts; benched the cleanest test-writing
            |of the Codex tiers at about 40% of Sol's price. It missed
            |cross-package fallout when tests could not run and gives up on
-           |broken toolchains. Source: skein-src card nihrl; UI is a prior.")}
+           |broken toolchains. Source: millstrand card nihrl; UI is a prior.")}
    :terra-med-ro
    {:alias-of :codex-ro
     :extra-args ["-m" "gpt-5.6-terra" "-c" "model_reasoning_effort=medium"]
@@ -133,7 +133,7 @@
            |gpt-5.6-sol low via Codex. General build and default delegation
            |seat, including diff-shaped refactors. It was the only model to
            |ship a passing gate under every benched environment condition,
-           |recovering hostile toolchains when needed. Source: skein-src card
+           |recovering hostile toolchains when needed. Source: millstrand card
            |nihrl; UI is a prior.")}
    :sol-med
    {:alias-of :codex
@@ -145,7 +145,7 @@
            |gpt-5.6-sol medium via Codex. Best benched Codex quality with Sol's
            |environment resilience: use when quality outweighs roughly twice
            |:sol-low's cost, for cross-vendor review of Claude-authored work,
-           |and for delegated sub-supervision. Source: skein-src card nihrl and
+           |and for delegated sub-supervision. Source: millstrand card nihrl and
            |the 2026-07-13 coordination test; UI is a prior.")}
    :sol-med-ro
    {:alias-of :codex-ro
@@ -161,7 +161,7 @@
            | :coordination X :docs-prose 8 :cost 3}
            |gpt-5.6-sol high via Codex. Use for the most complex implementation
            |before :oracle escalation, agent-facing docs, and bench judging.
-           |The skein-src docs bake-off found it strong on structured long-form
+           |The millstrand docs bake-off found it strong on structured long-form
            |work, with drier prose than Claude. Code axes at high effort remain
            |untested; treat early code runs as trials. Source: card x6gam.")}
    :opus
@@ -174,7 +174,7 @@
            |archaeology-first and strongest on known-work code quality. Keep
            |cross-vendor GPT sign-off for Opus-authored changes. Suitable for
            |agent-facing docs, though the docs bake-off found its restructuring
-           |paste-up-prone. Source: skein-src cards nihrl and x6gam; UI is a
+           |paste-up-prone. Source: millstrand cards nihrl and x6gam; UI is a
            |prior.")}
    :oracle
    {:alias-of :claude
@@ -186,7 +186,7 @@
            |coordination, user-facing prose where writing is the product, and
            |bench judging. Brief one case per run and require incremental
            |notes: a context-overflowed run that writes nothing is unusually
-           |expensive. Source: skein-src card x6gam and coordinator priors.")}
+           |expensive. Source: millstrand card x6gam and coordinator priors.")}
    :gpt-mini
    {:alias-of :codex
     :extra-args ["-m" "gpt-5.4-mini" "-c" "model_reasoning_effort=medium"]
@@ -205,10 +205,10 @@
           "|{:complexity X :code-taste X :resilience X :ui-design X
            | :coordination - :cost 9}
            |DeepSeek v4 Flash via Pi. Enumeration-shaped recon and quota
-           |fallback at very low cost. It won skein-src's wide fan-out explore
+           |fallback at very low cost. It won millstrand's wide fan-out explore
            |arm but loses precision on deep traces and exact citations; verify
            |citations and do not route load-bearing deep dives here. Source:
-           |skein-src card vk5re.")}
+           |millstrand card vk5re.")}
    :deepseek
    {:alias-of :pi
     :extra-args ["--agent" "main" "--model" "deepseek/deepseek-v4-pro:high"]

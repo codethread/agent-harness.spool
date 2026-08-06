@@ -1,10 +1,10 @@
 {:lint-as
- {skein.api.lifecycle.alpha/defresource clojure.core/def
-  skein.api.skein.alpha/defop clojure.core/defn
-  skein.api.skein.alpha/defpattern clojure.core/defn
-  skein.api.skein.alpha/defquery clojure.core/def
-  skein.spools.workflow/defexecutor clojure.core/defn}
+ {millstrand.api.lifecycle.alpha/defresource clojure.core/def
+  millstrand.api.millstrand.alpha/defop clojure.core/defn
+  millstrand.api.millstrand.alpha/defpattern clojure.core/defn
+  millstrand.api.millstrand.alpha/defquery clojure.core/def
+  millstrand.spools.workflow/defexecutor clojure.core/defn}
  :linters
  {:unresolved-var
-  {:exclude [skein.api.runtime.alpha/collect-kind!
-             skein.spools.workflow/defexecutor]}}}
+  {:exclude [millstrand.api.runtime.alpha/collect-kind!
+             millstrand.spools.workflow/defexecutor]}}}

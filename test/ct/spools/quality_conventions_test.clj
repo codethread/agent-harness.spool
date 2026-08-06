@@ -45,7 +45,7 @@
                   :namespace-usages [{:filename "bench/src/x.clj"
                                       :row 2
                                       :from 'x
-                                      :to 'skein.core.db}]}
+                                      :to 'millstrand.core.db}]}
         findings (vec (conventions/analysis-findings analysis))]
     (is (some #(re-find #"public var `public-api`" %) findings))
-    (is (some #(re-find #"uses internal namespace `skein.core.db`" %) findings))))
+    (is (some #(re-find #"uses internal namespace `millstrand.core.db`" %) findings))))

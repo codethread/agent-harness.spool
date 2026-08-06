@@ -13,7 +13,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [skein.api.registry.alpha :as registry]
+            [millstrand.api.registry.alpha :as registry]
             [ct.spools.bench :as bench]
             [ct.spools.bench.metrics :as metrics]
             [ct.spools.test-support :as test-support])
@@ -24,7 +24,7 @@
 ;; Fixtures
 
 (defn- temp-home []
-  (.toFile (Files/createTempDirectory (.toPath (io/file "/tmp")) "skein-bench-metrics"
+  (.toFile (Files/createTempDirectory (.toPath (io/file "/tmp")) "millstrand-bench-metrics"
                                       (make-array FileAttribute 0))))
 
 ;; a tiny JSON writer so fixtures read like the real transcripts
@@ -265,7 +265,7 @@
 
 (deftest activation-registers-shipped-extractors-without-clobbering-user
   (test-support/with-runtime
-    {:prefix "skein-bench-metrics"}
+    {:prefix "millstrand-bench-metrics"}
     (fn [rt _]
       (let [sentinel (fn [_ctx] {:cost-usd 9.99})]
         ;; a trusted config that registered its own :claude before activation wins.

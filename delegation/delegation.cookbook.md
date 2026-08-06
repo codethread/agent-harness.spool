@@ -1,4 +1,4 @@
-# Skein Delegation Spool — Cookbook
+# Millstrand Delegation Spool — Cookbook
 
 Composition recipes for `ct.spools.delegation`: the shapes real delegation takes as a loop — plan, delegate, await, verify, close, repeat — and *why* each shape holds up.
 
@@ -156,7 +156,7 @@ strand agent review <target> --seats 2 --harness claude,review-gpt --synthesize 
   with `--seats`, `--harness`, or `--contract` is rejected — you can't half-
   override a policy. That's what makes the roster file a *reviewable* artifact:
   changing who reviews a change is a diff to one document
-  ([`.skein/reviewers.clj`](../.skein/reviewers.clj)), not scattered flags.
+  ([`.millstrand/reviewers.clj`](../.millstrand/reviewers.clj)), not scattered flags.
 - **Single-concern beats generalist, and routing is by waste-type.** Each roster
   entry hunts one defect class with a per-concern call budget; `grunt` (sonnet)
   is the default read-through seat, `explore` (haiku) is reserved for trivially
@@ -173,7 +173,7 @@ strand agent review <target> --seats 2 --harness claude,review-gpt --synthesize 
   Prefer the merge-base, or another range whose changed files match the review
   surface you mean.
 
-Honest source: this repo's [`.skein/reviewers.clj`](../.skein/reviewers.clj) `change-review` roster (six single-concern reviewers, `review-gpt` synthesizer), and the review verb and roster semantics in [`delegation/README.md` §3](./delegation/README.md#reviewer-rosters).
+Honest source: this repo's [`.millstrand/reviewers.clj`](../.millstrand/reviewers.clj) `change-review` roster (six single-concern reviewers, `review-gpt` synthesizer), and the review verb and roster semantics in [`delegation/README.md` §3](./delegation/README.md#reviewer-rosters).
 
 ---
 
@@ -220,7 +220,7 @@ Honest source: this repo's [`.skein/reviewers.clj`](../.skein/reviewers.clj) `ch
   function — a typoed key fails at runtime, not against a named spec. Copy the
   shape from the API doc rather than from memory.
 
-Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), this repo's cross-vendor GPT seats declared in [`.skein/config/harnesses.clj`](../.skein/config/harnesses.clj) (`review-gpt`, `hard-gpt`), and the same synthesizer-must-be-cross-vendor rule live in [`.skein/reviewers.clj`](../.skein/reviewers.clj).
+Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), this repo's cross-vendor GPT seats declared in [`.millstrand/config/harnesses.clj`](../.millstrand/config/harnesses.clj) (`review-gpt`, `hard-gpt`), and the same synthesizer-must-be-cross-vendor rule live in [`.millstrand/reviewers.clj`](../.millstrand/reviewers.clj).
 
 ---
 

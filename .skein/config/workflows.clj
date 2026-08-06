@@ -15,8 +15,8 @@
   loading one defines a Var and registers nothing."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [skein.api.runtime.alpha :as runtime]
-            [skein.spools.workflow :as workflow]))
+            [millstrand.api.runtime.alpha :as runtime]
+            [millstrand.spools.workflow :as workflow]))
 
 (def ^:private definitions-dir
   "The `workflows` directory beside this file, holding one file per workflow."

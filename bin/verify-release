@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  bin/verify-release --mode pre-tag --source-root DIR \
+    --core-release release/msr04-release.json \
+    --kanban-release release/msr05-release.json
+  bin/verify-release --mode published --repository URL --tag vN --sha SHA \
+    --core-release release/msr04-release.json \
+    --kanban-release release/msr05-release.json
+EOF
+  exit 2
+}
+
+mode=""
+source_root=""
+repository=""
+tag=""
+sha=""
+core_release=""
+kanban_release=""
+
+while (($# > 0)); do
+  case "$1" in
+    --mode) [[ $# -ge 2 ]] || usage; mode=$2; shift 2 ;;
+    --source-root) [[ $# -ge 2 ]] || usage; source_root=$2; shift 2 ;;
+    --repository) [[ $# -ge 2 ]] || usage; repository=$2; shift 2 ;;
+    --tag) [[ $# -ge 2 ]] || usage; tag=$2; shift 2 ;;
+    --sha) [[ $# -ge 2 ]] || usage; sha=$2; shift 2 ;;
+    --core-release) [[ $# -ge 2 ]] || usage; core_release=$2; shift 2 ;;
+    --kanban-release) [[ $# -ge 2 ]] || usage; kanban_release=$2; shift 2 ;;
+    -h|--help) usage ;;
+    *) echo "verify-release: unknown argument: $1" >&2; usage ;;
+  esac
+done
+
+die() { echo "verify-release: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
+[[ "$mode" == "pre-tag" || "$mode" == "published" ]] || usage
+[[ -f "$core_release" ]] || die "--core-release must name a JSON file"
+[[ -f "$kanban_release" ]] || die "--kanban-release must name a JSON file"
+need git
+need python3
+need clojure
+
+release_values=$(python3 - "$core_release" "$kanban_release" <<'PY'
+import json
+import re
+import sys
+
+core_path, kanban_path = sys.argv[1:]
+with open(core_path, encoding="utf-8") as handle:
+    core = json.load(handle)
+with open(kanban_path, encoding="utf-8") as handle:
+    kanban = json.load(handle)
+
+required_core = {
+    "card", "repository", "coordinate", "ref-kind", "sha",
+    "landed-main-commit", "land-run", "verification",
+}
+missing = sorted(required_core - core.keys())
+if missing:
+    raise SystemExit(f"core release is missing fields: {', '.join(missing)}")
+forbidden = sorted({"tag", "peeled-sha"} & core.keys())
+if forbidden:
+    raise SystemExit(f"core release contains forbidden fields: {', '.join(forbidden)}")
+if core["card"] != "MSR-04" or core["repository"] != "codethread/millstrand":
+    raise SystemExit("core release identity does not match MSR-04")
+if core["coordinate"] != "io.millstrand/millstrand" or core["ref-kind"] != "sha":
+    raise SystemExit("core release must use io.millstrand/millstrand SHA identity")
+for field in ("sha", "landed-main-commit"):
+    if not re.fullmatch(r"[0-9a-f]{40}", core[field]):
+        raise SystemExit(f"core release {field} must be a lowercase 40-hex SHA")
+if core["sha"] != core["landed-main-commit"]:
+    raise SystemExit("core release SHA must equal landed-main-commit")
+if not isinstance(core["verification"], list) or not core["verification"]:
+    raise SystemExit("core release verification must be a non-empty array")
+
+required_kanban = {
+    "card", "repository", "coordinate", "tag", "peeled-sha",
+    "landed-main-commit", "land-run", "verification",
+}
+missing = sorted(required_kanban - kanban.keys())
+if missing:
+    raise SystemExit(f"Kanban release is missing fields: {', '.join(missing)}")
+if kanban["card"] != "MSR-05" or kanban["repository"] != "codethread/kanban.spool":
+    raise SystemExit("Kanban release identity does not match MSR-05")
+if kanban["coordinate"] != "codethread/kanban" or not re.fullmatch(r"v[0-9]+", kanban["tag"]):
+    raise SystemExit("Kanban release has an invalid coordinate or tag")
+for field in ("peeled-sha", "landed-main-commit"):
+    if not re.fullmatch(r"[0-9a-f]{40}", kanban[field]):
+        raise SystemExit(f"Kanban release {field} must be a lowercase 40-hex SHA")
+if kanban["peeled-sha"] != kanban["landed-main-commit"]:
+    raise SystemExit("Kanban peeled SHA must equal landed-main-commit")
+if not isinstance(kanban["verification"], list) or not kanban["verification"]:
+    raise SystemExit("Kanban verification must be a non-empty array")
+
+print(core["repository"])
+print(core["coordinate"])
+print(core["sha"])
+print(kanban["repository"])
+print(kanban["coordinate"])
+print(kanban["tag"])
+print(kanban["peeled-sha"])
+PY
+)
+core_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
+core_coordinate=$(printf '%s\n' "$release_values" | sed -n '2p')
+core_sha=$(printf '%s\n' "$release_values" | sed -n '3p')
+kanban_repository=$(printf '%s\n' "$release_values" | sed -n '4p')
+kanban_coordinate=$(printf '%s\n' "$release_values" | sed -n '5p')
+kanban_tag=$(printf '%s\n' "$release_values" | sed -n '6p')
+kanban_sha=$(printf '%s\n' "$release_values" | sed -n '7p')
+core_url="https://github.com/${core_repository%.git}.git"
+kanban_url="https://github.com/${kanban_repository%.git}.git"
+
+if [[ "$mode" == "pre-tag" ]]; then
+  [[ -n "$source_root" && -d "$source_root" ]] || die "--source-root must name a directory"
+  [[ -z "$repository" && -z "$tag" && -z "$sha" ]] || \
+    die "--repository, --tag, and --sha are published-mode options"
+  source_root=$(cd "$source_root" && pwd -P)
+  [[ -d "$source_root/.git" || -f "$source_root/.git" ]] || \
+    die "source root is not a Git checkout: $source_root"
+  candidate_root="$source_root"
+  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
+else
+  [[ -z "$source_root" ]] || die "--source-root is a pre-tag option"
+  [[ -n "$repository" && -n "$tag" && -n "$sha" ]] || \
+    die "published mode requires --repository, --tag, and --sha"
+  [[ "$tag" =~ ^v[0-9]+$ ]] || die "tag must be an annotated v<int> marker"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "sha must be a lowercase 40-hex commit"
+  [[ "$repository" != *"../"* && "$repository" != /* ]] || \
+    die "published repository must not be a local path"
+  remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  [[ "$remote_sha" == "$sha" ]] || \
+    die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
+  tmp_root=$(mktemp -d /tmp/agent-harness-release.XXXXXX)
+  git clone --quiet --depth 1 --branch "$tag" "$repository" "$tmp_root/agent-harness"
+  candidate_root="$tmp_root/agent-harness"
+  [[ "$(git -C "$candidate_root" rev-parse HEAD)" == "$sha" ]] || \
+    die "checked-out $tag does not match $sha"
+  release_ref="$tag@$sha"
+fi
+
+tmp_root=${tmp_root:-$(mktemp -d /tmp/agent-harness-release.XXXXXX)}
+consumer_root="$tmp_root/consumer"
+gitlibs_root="$tmp_root/.gitlibs"
+mkdir -p "$consumer_root"
+cleanup() {
+  local rc=$?
+  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+    kill "$mill_pid" 2>/dev/null || true
+    wait "$mill_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_root"
+  trap - EXIT
+  exit "$rc"
+}
+trap cleanup EXIT
+
+core_root="$tmp_root/millstrand"
+git clone --quiet "$core_url" "$core_root"
+git -C "$core_root" checkout --quiet "$core_sha"
+[[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || \
+  die "resolved core checkout does not match $core_sha"
+
+cat >"$consumer_root/deps.edn" <<EOF
+{:paths ["$candidate_root/agent-run/src"
+         "$candidate_root/harness-core/src"
+         "$candidate_root/claude-harness/src"
+         "$candidate_root/codex-harness/src"
+         "$candidate_root/cursor-harness/src"
+         "$candidate_root/pi-harness/src"
+         "$candidate_root/agent-cli/src"
+         "$candidate_root/delegation/src"
+         "$candidate_root/bench/src"
+         "$core_root/spools/workflow/src"]
+ :deps {$core_coordinate {:git/url "$core_url" :git/sha "$core_sha"}
+        $kanban_coordinate {:git/url "$kanban_url" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+EOF
+if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
+  die "generated consumer metadata contains a local/root or source-root override"
+fi
+
+classpath=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -Spath 2>&1) || \
+  die "clean consumer dependency resolution failed: $classpath"
+smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
+  (doseq [ns (quote [ct.spools.agent-run ct.spools.delegation
+                    ct.spools.executors.subagent ct.spools.harness-core
+                    ct.spools.claude-harness ct.spools.codex-harness
+                    ct.spools.pi-harness ct.spools.cursor-harness
+                    ct.spools.agent-cli ct.spools.bench])]
+    (require ns))
+  (println :agent-harness-consumer-loaded)
+' 2>&1) || die "clean consumer load failed: $smoke"
+
+mill_bin=${MILL_BIN:-$(command -v mill || true)}
+[[ -n "$mill_bin" && -x "$mill_bin" ]] || \
+  die "missing mill executable; set MILL_BIN to the published Millstrand mill"
+state_root="$tmp_root/state"
+workspace_root="$tmp_root/workspace"
+mkdir -p "$state_root" "$workspace_root"
+mill_log="$tmp_root/mill.log"
+mill_pid=""
+XDG_STATE_HOME="$state_root" "$mill_bin" start >"$mill_log" 2>&1 &
+mill_pid=$!
+metadata_path=""
+deadline=$((SECONDS + 30))
+until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
+  kill -0 "$mill_pid" 2>/dev/null || die "mill exited before publishing runtime metadata: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "mill did not publish runtime metadata within 30s"
+  metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
+  sleep 0.05
+done
+XDG_STATE_HOME="$state_root" "$mill_bin" init --workspace "$workspace_root/.millstrand" >/dev/null
+[[ -d "$workspace_root/.millstrand" ]] || die "mill init did not create .millstrand"
+mv "$workspace_root/.millstrand" "$workspace_root/.ms"
+XDG_STATE_HOME="$state_root" "$mill_bin" init --workspace "$workspace_root/.ms" >/dev/null
+[[ -d "$workspace_root/.ms" ]] || die "mill init did not preserve .ms marker"
+
+output_dir="$candidate_root/target/release"
+mkdir -p "$output_dir"
+MODE="$mode" RELEASE_REF="$release_ref" CORE_SHA="$core_sha" KANBAN_TAG="$kanban_tag" \
+  OUTPUT_FILE="$output_dir/$mode.json" python3 - <<'PY'
+import json
+import os
+
+payload = {
+    "mode": os.environ["MODE"],
+    "release": os.environ["RELEASE_REF"],
+    "core-sha": os.environ["CORE_SHA"],
+    "kanban-tag": os.environ["KANBAN_TAG"],
+    "consumer": "ct.spools/agent-run",
+    "marker-proof": ".millstrand and .ms initialized in one fresh state root",
+}
+with open(os.environ["OUTPUT_FILE"], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+PY
+
+echo "agent-harness release verification: clean"
+echo "  mode: $mode"
+echo "  release: $release_ref"
+echo "  core: $core_repository@$core_sha"
+echo "  kanban: $kanban_repository@$kanban_tag ($kanban_sha)"
+echo "  evidence: $output_dir/$mode.json"

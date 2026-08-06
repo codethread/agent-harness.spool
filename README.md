@@ -1,6 +1,6 @@
 # agent-harness.spool
 
-This monorepo contains four related Skein surfaces:
+This monorepo contains four related Millstrand surfaces:
 
 - `agent-run`: the durable agent-run engine and harness process lifecycle.
 - `agent-run`'s `ct.spools.executors.subagent`: the workflow-gate executor.
@@ -40,20 +40,20 @@ Equivalent local coordinates:
   ct.spools/bench {:local/root "/path/to/agent-harness.spool/bench"}}}
 ```
 
-The subagent executor also requires Skein's workflow spool. Approve either its
-root in a local Skein checkout:
+The subagent executor also requires Millstrand's workflow spool. Approve either its
+root in a local Millstrand checkout:
 
 ```clojure
 {:spools
- {skein.spools/workflow {:local/root "/path/to/skein/spools/workflow"}}}
+ {millstrand.spools/workflow {:local/root "/path/to/millstrand/spools/workflow"}}}
 ```
 
 or a pinned nested root:
 
 ```clojure
 {:spools
- {skein.spools/workflow
-  {:git/url "https://github.com/codethread/skein.git"
+ {millstrand.spools/workflow
+  {:git/url "https://github.com/codethread/millstrand.git"
    :git/sha "<40-hex-sha-for-the-pinned-commit>"
    :deps/root "spools/workflow"}}}
 ```
@@ -81,14 +81,14 @@ published-name change and ships as a new release (**v8**), not an accretion:
   new-release break by classification, not silent accretion.
 - **The engine run preamble** now points delegated agents at `about agent`
   (was `agent about`), matching the new grammar.
-- **New Skein API floor.** This release requires a Skein checkout shipping the
+- **New Millstrand API floor.** This release requires a Millstrand checkout shipping the
   discovery-tier deltas (DELTA-Dtf-001/002/003): the runtime glossary registry
-  (`skein.api.runtime.glossary.alpha/register-glossary-outcome!`), op-metadata
+  (`millstrand.api.runtime.glossary.alpha/register-glossary-outcome!`), op-metadata
   `:about`/`:prime`, arg-spec `:annotations`, and the builtin `about`/`prime`/`help`
   grammar with the retired-`<op> help` redirect. Encode this as the advisory
-  `:skein/min` floor (a `vN` marker of the first Skein release carrying the
+  `:millstrand/min` floor (a `vN` marker of the first Millstrand release carrying the
   deltas) in `spool.edn` **at tag time** (Task 10/11); it is intentionally left
-  unpinned here because the Skein release marker is cut later.
+  unpinned here because the Millstrand release marker is cut later.
 - **Producer compat alarm.** `bin/compat-alarm <v7-tag>` against this working tree
   is expected to go **red** (the retired grammar and the changed `about` shape).
   That red is the correct signal that the change ships under a new release rather
@@ -97,16 +97,16 @@ published-name change and ships as a new release (**v8**), not an accretion:
 ## Activation
 
 After approving the coordinates needed by the workspace, activate them from
-trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spools.bench`, plus `ct.spools.executors.subagent`, collect their core and domain contributions while their source is evaluated. Named lifecycle resource declarations own setup and removal. A consumer names only a source target and world policy. The Skein checkout must contain the contribution and lifecycle authoring APIs:
+trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spools.bench`, plus `ct.spools.executors.subagent`, collect their core and domain contributions while their source is evaluated. Named lifecycle resource declarations own setup and removal. A consumer names only a source target and world policy. The Millstrand checkout must contain the contribution and lifecycle authoring APIs:
 
 ```clojure
-(require '[skein.api.current.alpha :as current]
-         '[skein.api.runtime.alpha :as runtime])
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
 
 (def rt (current/runtime))
 (runtime/module! rt :workflow
-  {:ns 'skein.spools.workflow
-   :spools '[skein.spools/workflow]
+  {:ns 'millstrand.spools.workflow
+   :spools '[millstrand.spools/workflow]
    :required? true})
 
 (runtime/module! rt :agent-run
@@ -122,7 +122,7 @@ trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spool
 
 (runtime/module! rt :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools '[ct.spools/agent-run skein.spools/workflow]
+   :spools '[ct.spools/agent-run millstrand.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 
@@ -145,7 +145,7 @@ the same coordinate symbols with direct roots:
  {ct.spools/agent-run {:local/root "/Users/you/dev/agent-harness.spool/agent-run"}
   ct.spools/delegation {:local/root "/Users/you/dev/agent-harness.spool/delegation"}
   ct.spools/bench {:local/root "/Users/you/dev/agent-harness.spool/bench"}
-  skein.spools/workflow {:local/root "/Users/you/dev/skein/spools/workflow"}}}
+  millstrand.spools/workflow {:local/root "/Users/you/dev/millstrand/spools/workflow"}}}
 ```
 
 Local entries replace shared entries by coordinate. `:deps/root` is git-only;
@@ -153,7 +153,7 @@ a local root points directly at the selected spool directory.
 
 ## Development
 
-The root suite tests all five namespaces against a sibling `../skein-src`
+The root suite tests all five namespaces against a sibling `../millstrand`
 checkout:
 
 ```sh
