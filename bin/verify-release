@@ -17,6 +17,17 @@ EOF
   exit 2
 }
 
+die() { echo "verify-release: $*" >&2; exit 1; }
+
+seen_options=""
+claim_option() {
+  local option=$1
+  case " $seen_options " in
+    *" $option "*) die "duplicate option: $option" ;;
+  esac
+  seen_options="${seen_options}${seen_options:+ }$option"
+}
+
 mode=""
 source_root=""
 repository=""
@@ -24,22 +35,23 @@ tag=""
 sha=""
 core_release=""
 kanban_release=""
+help_requested=0
 
 while (($# > 0)); do
   case "$1" in
-    --mode) [[ $# -ge 2 ]] || usage; mode=$2; shift 2 ;;
-    --source-root) [[ $# -ge 2 ]] || usage; source_root=$2; shift 2 ;;
-    --repository) [[ $# -ge 2 ]] || usage; repository=$2; shift 2 ;;
-    --tag) [[ $# -ge 2 ]] || usage; tag=$2; shift 2 ;;
-    --sha) [[ $# -ge 2 ]] || usage; sha=$2; shift 2 ;;
-    --core-release) [[ $# -ge 2 ]] || usage; core_release=$2; shift 2 ;;
-    --kanban-release) [[ $# -ge 2 ]] || usage; kanban_release=$2; shift 2 ;;
-    -h|--help) usage ;;
+    --mode) claim_option "$1"; [[ $# -ge 2 ]] || usage; mode=$2; shift 2 ;;
+    --source-root) claim_option "$1"; [[ $# -ge 2 ]] || usage; source_root=$2; shift 2 ;;
+    --repository) claim_option "$1"; [[ $# -ge 2 ]] || usage; repository=$2; shift 2 ;;
+    --tag) claim_option "$1"; [[ $# -ge 2 ]] || usage; tag=$2; shift 2 ;;
+    --sha) claim_option "$1"; [[ $# -ge 2 ]] || usage; sha=$2; shift 2 ;;
+    --core-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; core_release=$2; shift 2 ;;
+    --kanban-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; kanban_release=$2; shift 2 ;;
+    -h|--help) claim_option "--help"; help_requested=1; shift ;;
     *) echo "verify-release: unknown argument: $1" >&2; usage ;;
   esac
 done
 
-die() { echo "verify-release: $*" >&2; exit 1; }
+(( help_requested == 0 )) || usage
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
 [[ "$mode" == "pre-tag" || "$mode" == "published" ]] || usage
 [[ -f "$core_release" ]] || die "--core-release must name a JSON file"

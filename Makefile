@@ -2,6 +2,7 @@
 
 test:
 	clojure -M:test
+	test/verify-release_test.sh
 
 fmt-check:
 	clojure -M:format
