@@ -7,6 +7,44 @@ findings=$(mktemp)
 trap 'rm -f "$findings"' EXIT
 
 cd "$repo_root"
+
+python3 - "$repo_root/release/msr04-release.json" "$repo_root/.github/workflows/quality.yml" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+release_path, workflow_path = map(Path, sys.argv[1:])
+with release_path.open(encoding="utf-8") as handle:
+    release = json.load(handle)
+
+expected_repository = release.get("repository")
+expected_sha = release.get("sha")
+if expected_repository != "codethread/millstrand":
+    raise SystemExit(
+        "millstrand identity audit: MSR-04 release repository is not codethread/millstrand"
+    )
+if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+    raise SystemExit(
+        "millstrand identity audit: MSR-04 release SHA is not a lowercase 40-hex SHA"
+    )
+
+workflow = workflow_path.read_text(encoding="utf-8")
+repositories = re.findall(r"(?m)^\s+repository:\s*(\S+)\s*$", workflow)
+refs = re.findall(r"(?m)^\s+ref:\s*([0-9a-f]{40})\s*$", workflow)
+if repositories != [expected_repository]:
+    raise SystemExit(
+        "millstrand identity audit: Quality Gates must have exactly one "
+        f"checkout of {expected_repository}"
+    )
+if refs != [expected_sha]:
+    actual = refs[0] if len(refs) == 1 else ", ".join(refs) or "missing"
+    raise SystemExit(
+        "millstrand identity audit: Quality Gates core pin "
+        f"{actual} does not match MSR-04 release SHA {expected_sha}"
+    )
+PY
+
 scan_paths=(
   .github .skein agent-cli agent-run bench claude-harness codex-harness
   cursor-harness delegation harness-core pi-harness test bin scripts

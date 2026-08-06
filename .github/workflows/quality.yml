@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: codethread/millstrand
-          ref: e2ef777cf32a8fe1d92390c0645b16548b7ee249
+          ref: 5790c459e9bb692b5e975f9715df7d5b403feff2
           path: millstrand
       - uses: actions/setup-java@v4
         with:
