@@ -30,6 +30,12 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
           cli: latest
+      - name: Provision ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ripgrep
+          command -v rg
+          rg --version
       - name: Clojure format
         working-directory: agent-harness.spool
         run: make fmt-check
