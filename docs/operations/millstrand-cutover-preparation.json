@@ -25,11 +25,19 @@
     }
   },
   "target": {
-    "marker": "target/millstrand-cutover-preparation/fresh-world/.millstrand",
-    "database": "target/millstrand-cutover-preparation/fresh-world/state/millstrand/weavers/<disposable-weaver>/data/millstrand.sqlite",
-    "fresh": true,
-    "database-policy": "create a new database; do not import the source database",
-    "staging": "inactive disposable copy under mktemp -d; MSR-15 owns live activation"
+    "marker": "/Users/ct/dev/projects/agent-harness.spool/.millstrand",
+    "database": "/Users/ct/.local/state/millstrand/weavers/92ad6dd941f0840553fd7f0fdef15752/data/millstrand.sqlite",
+    "world-hash": "92ad6dd941f0840553fd7f0fdef15752",
+    "world-hash-algorithm": "first 32 lowercase hex of SHA-256(canonical .millstrand config identity); .ms is marker-neutral",
+    "activation": "future inactive/live target; MSR-15 owns live activation",
+    "database-policy": "marker-neutral Millstrand database for the target world; do not import the source database"
+  },
+  "staging": {
+    "root": "target/millstrand-cutover-preparation/",
+    "marker": "disposable mktemp -d workspace/fresh-world/.ms",
+    "database": "disposable XDG_STATE_HOME under mktemp -d/state/millstrand/weavers/<world-hash>/data/millstrand.sqlite",
+    "evidence": "target/millstrand-cutover-preparation/",
+    "policy": "staging and evidence are never the future inactive/live target"
   },
   "release-inputs": [
     {
@@ -106,6 +114,7 @@
   "artifacts": [
     "docs/operations/millstrand-cutover-preparation.json",
     "bin/verify-millstrand-preparation",
-    "target/millstrand-cutover-preparation/identity-check.txt"
+    "target/millstrand-cutover-preparation/identity-check.txt",
+    "target/millstrand-cutover-preparation/activated-spools.edn"
   ]
 }

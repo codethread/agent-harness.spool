@@ -30,6 +30,7 @@ printf '%s  %s\n' "$identity_sha" "$identity_transcript" >"$evidence_root/identi
 
 release_values=$(python3 - "$manifest" <<'PY'
 import json
+import hashlib
 import re
 import sys
 
@@ -98,6 +99,30 @@ if source.get("database") == doc.get("target", {}).get("database"):
 if source.get("observed-pid") != 73514:
     raise SystemExit("manifest source PID must retain the observed live PID")
 
+target = doc.get("target", {})
+expected_target_marker = "/Users/ct/dev/projects/agent-harness.spool/.millstrand"
+expected_target_hash = hashlib.sha256(expected_target_marker.encode()).hexdigest()[:32]
+expected_target_database = (
+    "/Users/ct/.local/state/millstrand/weavers/"
+    f"{expected_target_hash}/data/millstrand.sqlite"
+)
+if target.get("marker") != expected_target_marker:
+    raise SystemExit("manifest target marker is not the future .millstrand target")
+if target.get("world-hash") != expected_target_hash:
+    raise SystemExit("manifest target world hash does not match the checked-in WorldHash algorithm")
+if target.get("database") != expected_target_database:
+    raise SystemExit("manifest target database does not match its marker-neutral world hash")
+if ".millstrand" not in target.get("world-hash-algorithm", ""):
+    raise SystemExit("manifest target must name the canonical .millstrand hash identity")
+if "staging" in target:
+    raise SystemExit("disposable staging must be outside the final target metadata")
+if not isinstance(doc.get("staging"), dict):
+    raise SystemExit("manifest must keep disposable staging/evidence in a separate field")
+target_text = json.dumps(target, sort_keys=True)
+for forbidden in (":local/root", ":override-deps", "v23", "v20"):
+    if forbidden in target_text:
+        raise SystemExit(f"final target metadata contains forbidden release marker: {forbidden}")
+
 print(core["repository"])
 print(core["sha"])
 print(msr06["repository"])
@@ -107,6 +132,9 @@ print(msr05["repository"])
 print(msr05["tag"])
 print(msr05["peeled-sha"])
 print(source["database"])
+print(target["marker"])
+print(target["database"])
+print(target["world-hash"])
 PY
 ) || die "preparation manifest validation failed"
 
@@ -119,6 +147,9 @@ kanban_repository=$(printf '%s\n' "$release_values" | sed -n '6p')
 kanban_tag=$(printf '%s\n' "$release_values" | sed -n '7p')
 kanban_sha=$(printf '%s\n' "$release_values" | sed -n '8p')
 source_db=$(printf '%s\n' "$release_values" | sed -n '9p')
+expected_target_marker=$(printf '%s\n' "$release_values" | sed -n '10p')
+expected_target_db=$(printf '%s\n' "$release_values" | sed -n '11p')
+expected_target_hash=$(printf '%s\n' "$release_values" | sed -n '12p')
 
 for value in "$core_repository" "$agent_repository" "$kanban_repository"; do
   [[ "$value" != /* && "$value" != *"../"* ]] || die "release repository may not be a local root: $value"
@@ -199,8 +230,8 @@ cat >"$fixture_root/target-deps.edn" <<EOF
         codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}
         codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
 EOF
-if rg -n ':local/root|:millstrand/source-root|/Users/|/tmp/|/private/' "$fixture_root/target-deps.edn" >/dev/null; then
-  die "generated consumer metadata contains a local/root or absolute source override"
+if rg -n ':local/root|:override-deps|:millstrand/source-root|v23|v20|/Users/|/tmp/|/private/' "$fixture_root/target-deps.edn" >/dev/null; then
+  die "generated consumer metadata contains a local root, override, old pin, or absolute source override"
 fi
 
 # Build a fresh, inactive target from the published core and candidate source.
@@ -253,30 +284,68 @@ if [[ -n "$target_db" && "$target_db" == "$source_db" ]]; then
   die "fresh target database points at the source database"
 fi
 
-# Activate only the disposable marker. The candidate modules are linked into
-# this fixture, while release metadata is generated from the immutable pins
-# above; neither the live marker nor its database is consulted by Millstrand.
+# Activate only the disposable marker. The target consumes Agent Harness from
+# its immutable published coordinate and root map; only the workspace-owned
+# smoke harness configuration remains local. Neither the live marker nor its
+# database is consulted by Millstrand.
 cp -R "$candidate_root/.skein/." "$target_marker/"
-for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
-  ln -s "$candidate_root/$root" "$target_parent/$root"
-done
 cat >"$target_marker/spools.edn" <<EOF
 {:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
           millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
-          ct.spools/harness-core {:local/root "../harness-core"}
-          ct.spools/claude-harness {:local/root "../claude-harness"}
-          ct.spools/codex-harness {:local/root "../codex-harness"}
-          ct.spools/pi-harness {:local/root "../pi-harness"}
-          ct.spools/cursor-harness {:local/root "../cursor-harness"}
-          ct.spools/agent-cli {:local/root "../agent-cli"}
-          ct.spools/agent-run {:local/root "../agent-run"}
-          ct.spools/delegation {:local/root "../delegation"}
-          ct.spools/bench {:local/root "../bench"}
+          ct.spools/agent-run
+          {:git/url "https://github.com/codethread/agent-harness.spool.git"
+           :git/tag "$agent_tag"
+           :git/sha "$agent_sha"
+           :roots {ct.spools/agent-run "agent-run"
+                   ct.spools/harness-core "harness-core"
+                   ct.spools/claude-harness "claude-harness"
+                   ct.spools/codex-harness "codex-harness"
+                   ct.spools/pi-harness "pi-harness"
+                   ct.spools/cursor-harness "cursor-harness"
+                   ct.spools/agent-cli "agent-cli"
+                   ct.spools/delegation "delegation"
+                   ct.spools/bench "bench"}}
           codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
                              :git/tag "$kanban_tag"
                              :git/sha "$kanban_sha"
                              :roots {codethread/kanban "."}}}}
 EOF
+python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_tag" "$kanban_sha" <<'PY'
+import pathlib
+import sys
+
+path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_tag, kanban_sha = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+for forbidden in (":local/root", ":override-deps", "v23", "v20"):
+    if forbidden in text:
+        raise SystemExit(f"activated release spools contain forbidden marker: {forbidden}")
+expected = {
+    "ct.spools/agent-run": "agent-run",
+    "ct.spools/harness-core": "harness-core",
+    "ct.spools/claude-harness": "claude-harness",
+    "ct.spools/codex-harness": "codex-harness",
+    "ct.spools/pi-harness": "pi-harness",
+    "ct.spools/cursor-harness": "cursor-harness",
+    "ct.spools/agent-cli": "agent-cli",
+    "ct.spools/delegation": "delegation",
+    "ct.spools/bench": "bench",
+}
+for coordinate, root in expected.items():
+    if f"{coordinate} \"{root}\"" not in text:
+        raise SystemExit(f"activated Agent Harness root map is missing {coordinate} -> {root}")
+for value in (
+    f':git/url "https://github.com/{agent_repository}.git"',
+    f':git/tag "{agent_tag}"',
+    f':git/sha "{agent_sha}"',
+    f':git/url "https://github.com/{kanban_repository}.git"',
+    f':git/tag "{kanban_tag}"',
+    f':git/sha "{kanban_sha}"',
+):
+    if value not in text:
+        raise SystemExit(f"activated release spools are missing immutable pin {value}")
+if text.count(":roots") != 2:
+    raise SystemExit("activated release spools must contain exactly the Agent Harness and Kanban root maps")
+PY
 cat >"$target_marker/config/harnesses.clj" <<'EOF'
 (ns harnesses
   (:require [millstrand.api.current.alpha :as current]
@@ -420,6 +489,7 @@ cp "$fixture_root/weaver-millstrand.log" "$evidence_root/weaver-millstrand.log"
 cp "$fixture_root/weaver-ms.log" "$evidence_root/weaver-ms.log"
 cp "$fixture_root/status-millstrand.json" "$evidence_root/status-millstrand.json"
 cp "$fixture_root/status-ms.json" "$evidence_root/status-ms.json"
+cp "$weaver_workspace/spools.edn" "$evidence_root/activated-spools.edn"
 
 echo "agent-harness preparation verification: clean"
 echo "  MSR-06: $agent_tag@$agent_sha"
