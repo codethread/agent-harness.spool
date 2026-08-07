@@ -295,7 +295,7 @@ fi
 # its immutable published coordinate and root map; only the workspace-owned
 # smoke harness configuration remains local. Neither the live marker nor its
 # database is consulted by Millstrand.
-cp -R "$candidate_root/.skein/." "$target_marker/"
+cp -R "$candidate_root/.millstrand/." "$target_marker/"
 cat >"$target_marker/spools.edn" <<EOF
 {:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
           millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}

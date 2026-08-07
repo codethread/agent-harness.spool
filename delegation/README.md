@@ -70,7 +70,7 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 `delegation` layers over agent-run, so agent-run must be installed first. A workspace opts in with `spools.edn` and trusted startup or REPL code:
 
 ```clojure
-;; .skein/spools.edn
+;; .millstrand/spools.edn
 {:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}
           ct.spools/delegation  {:local/root "../spools/delegation"}}}
 ```
@@ -291,7 +291,7 @@ Route reviewers by **waste-type, not call count**: `grunt` (sonnet) is the defau
 
 Data shape, validated loudly at registration against the **`:ct.spools.delegation/roster`** clojure.spec (inspect it with `s/form`; the seam output below is likewise specced as `:ct.spools.delegation/review-specs`): a roster is the panel primitive's seat vector, so it speaks panel's seat vocabulary: each seat requires a unique `:name` (doubles as the run's review focus), a `:harness` (resolved against the agent-run registry at **review time**, not registration time, so roster files may load before config registers aliases), and a `:brief` — the reviewer's precise single-concern mandate, layered onto the workspace base review contract in the prompt. `:scope` is optional prompt-level confinement text. `:synthesis` optionally overrides the synthesis run's harness (default: first seat's). Unknown keys fail loudly to catch typos (closed key sets and name uniqueness are checked beyond the spec, which is structurally open).
 
-`agent review --roster <name>` spawns one read-only run per seat (stamped `review/roster` for attribution) plus the synthesizer, which receives the base review contract; synthesis weighs findings roster-independently. This repository ships no named reviewer roster: `.skein/config/harnesses.clj` declares harnesses and aliases only. A consuming workspace must register its own roster near the root of its trusted config so the review policy is one obvious document.
+`agent review --roster <name>` spawns one read-only run per seat (stamped `review/roster` for attribution) plus the synthesizer, which receives the base review contract; synthesis weighs findings roster-independently. This repository ships no named reviewer roster: `.millstrand/config/harnesses.clj` declares harnesses and aliases only. A consuming workspace must register its own roster near the root of its trusted config so the review policy is one obvious document.
 
 **Composing rosters into workflows.** The verb is agent-run-native, but the prompt building is not verb-private: `ct.spools.delegation/roster-review-specs` returns the whole fan-out as plain, fully-built run specs, and `review!` itself spawns from them. A workflow author decorating a [workflow](../workflow.md) with roster review maps each spec onto a `:subagent` gate — `:harness`/`:prompt` onto the gate's `agent-run/harness`/`agent-run/prompt`, `:attrs` merged into the gate's attributes, and a synthesizer gate depending on every reviewer gate (the synthesis prompt is deliberately buildable before any run exists). Both paths share one prompt source, so roster contracts cannot drift between the verb and a composed workflow:
 
