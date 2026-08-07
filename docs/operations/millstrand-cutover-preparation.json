@@ -1,0 +1,111 @@
+{
+  "schema": "devflow/consumer-preparation",
+  "card": "MSR-14C",
+  "consumer": "agent-harness.spool",
+  "repository": "/Users/ct/dev/projects/agent-harness.spool",
+  "disposition": "ready",
+  "source": {
+    "marker": "/Users/ct/dev/projects/agent-harness.spool/.skein",
+    "database": "/Users/ct/.local/state/skein/weavers/0245892212ec336f39b2496a53ed3269/data/skein.sqlite",
+    "weaver-id": "027ba5d8-9cbf-413f-b5eb-7a1d84a89ecf",
+    "observed-pid": 73514,
+    "status-command": "ps -p 73514 -o pid=,ppid=,stat=,lstart=,command=",
+    "weaver-status-command": "XDG_STATE_HOME=/Users/ct/.local/state mill weaver status --workspace /Users/ct/dev/projects/agent-harness.spool/.skein",
+    "active-pins": {
+      "agent-harness": {
+        "repository": "codethread/agent-harness.spool",
+        "tag": "v23",
+        "peeled-sha": "2e689490d875bc66887b158f34382b97ade4df6b"
+      },
+      "kanban": {
+        "repository": "codethread/kanban.spool",
+        "tag": "v20",
+        "peeled-sha": "398a1610d094c85ad9c6691dafd213aaa35d73de"
+      }
+    }
+  },
+  "target": {
+    "marker": "target/millstrand-cutover-preparation/fresh-world/.millstrand",
+    "database": "target/millstrand-cutover-preparation/fresh-world/state/millstrand/weavers/<disposable-weaver>/data/millstrand.sqlite",
+    "fresh": true,
+    "database-policy": "create a new database; do not import the source database",
+    "staging": "inactive disposable copy under mktemp -d; MSR-15 owns live activation"
+  },
+  "release-inputs": [
+    {
+      "card": "MSR-06",
+      "repository": "codethread/agent-harness.spool",
+      "coordinate": "ct.spools/agent-run",
+      "tag": "v26",
+      "peeled-sha": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+      "landed-main-commit": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+      "land-run": "land-7qeqm-20260806",
+      "verification": ["published v26 verifier evidence on MSR-06 card"]
+    },
+    {
+      "card": "MSR-04",
+      "repository": "codethread/millstrand",
+      "coordinate": "io.millstrand/millstrand",
+      "ref-kind": "sha",
+      "sha": "5790c459e9bb692b5e975f9715df7d5b403feff2",
+      "landed-main-commit": "5790c459e9bb692b5e975f9715df7d5b403feff2",
+      "land-run": "land-bxwq0-sha-20260806",
+      "verification": ["make build", "published verifier evidence on MSR-04 card"]
+    },
+    {
+      "card": "MSR-05",
+      "repository": "codethread/kanban.spool",
+      "coordinate": "codethread/kanban",
+      "tag": "v24",
+      "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
+      "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+      "land-run": "land-hqtjg-20260806-1709",
+      "verification": ["published v24 verifier evidence on MSR-05 card"]
+    }
+  ],
+  "runtime": {
+    "status-command": "MILL_BIN=<published-millstrand-bin> XDG_STATE_HOME=<isolated-state> mill weaver status --workspace <target-marker>",
+    "pid-command": "ps -p <target-pid> -o pid=,ppid=,stat=,lstart=,command=",
+    "database-command": "sqlite3 <target-database> 'PRAGMA integrity_check;'"
+  },
+  "rollback": {
+    "owner": "MSR-15",
+    "live-switch": "Do not stop, repoint, rename, restart, or activate the live .skein world in this preparation task.",
+    "source-marker": "/Users/ct/dev/projects/agent-harness.spool/.skein",
+    "source-database": "/Users/ct/.local/state/skein/weavers/0245892212ec336f39b2496a53ed3269/data/skein.sqlite",
+    "restore-pins": "Restore the source marker's recorded v23 Agent Harness and v20 Kanban pins if the controlled MSR-15 switch is aborted before activation.",
+    "backup-policy": "MSR-15 retains the source database backup and whole core-world history; this fresh consumer world is never a source-history backup."
+  },
+  "verification": [
+    {
+      "command": "bin/identity-check > target/millstrand-cutover-preparation/identity-check.txt",
+      "result": "pass",
+      "artifact": "target/millstrand-cutover-preparation/identity-check.txt"
+    },
+    {
+      "command": "bin/verify-millstrand-preparation",
+      "result": "pass",
+      "artifact": "target/millstrand-cutover-preparation/fixture-summary.json"
+    },
+    {
+      "command": "make quality",
+      "result": "pass",
+      "artifact": "target/millstrand-cutover-preparation/quality.txt"
+    }
+  ],
+  "verification-plan": {
+    "transcripts": "target/millstrand-cutover-preparation/",
+    "expected": [
+      "MSR-06 v26 resolves to its exact peeled SHA",
+      "MSR-04 resolves by repository and SHA with no local root",
+      "the target database is fresh and distinct from the source database",
+      "delegate, await, and spend pass in disposable .millstrand and .ms fixtures",
+      "the live PID and source marker remain untouched"
+    ]
+  },
+  "artifacts": [
+    "docs/operations/millstrand-cutover-preparation.json",
+    "bin/verify-millstrand-preparation",
+    "target/millstrand-cutover-preparation/identity-check.txt"
+  ]
+}

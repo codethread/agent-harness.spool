@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Disposable consumer preparation gate. It intentionally never operates on the
+# live Agent Harness workspace: every marker, database, and XDG root is created
+# below a temporary directory and removed on exit.
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+manifest="$repo_root/docs/operations/millstrand-cutover-preparation.json"
+evidence_root="$repo_root/target/millstrand-cutover-preparation"
+die() { echo "verify-millstrand-preparation: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
+
+need git
+need python3
+need clojure
+need mktemp
+
+[[ -f "$manifest" ]] || die "missing preparation manifest: $manifest"
+mkdir -p "$evidence_root"
+
+# The identity transcript is an explicit prerequisite and is retained as a
+# handoff artifact, while all later state stays disposable.
+identity_transcript="$evidence_root/identity-check.txt"
+if ! (cd "$repo_root" && bin/identity-check >"$identity_transcript"); then
+  die "identity-check failed; see $identity_transcript"
+fi
+identity_sha=$(shasum -a 256 "$identity_transcript" | awk '{print $1}')
+printf '%s  %s\n' "$identity_sha" "$identity_transcript" >"$evidence_root/identity-check.sha256"
+
+release_values=$(python3 - "$manifest" <<'PY'
+import json
+import re
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    doc = json.load(handle)
+
+if doc.get("schema") != "devflow/consumer-preparation":
+    raise SystemExit("manifest schema must be devflow/consumer-preparation")
+if doc.get("card") != "MSR-14C" or doc.get("consumer") != "agent-harness.spool":
+    raise SystemExit("manifest identity must be MSR-14C / agent-harness.spool")
+if doc.get("disposition") != "ready":
+    raise SystemExit("manifest disposition must be ready")
+
+inputs = {item.get("card"): item for item in doc.get("release-inputs", [])}
+for card in ("MSR-04", "MSR-05", "MSR-06"):
+    if card not in inputs:
+        raise SystemExit(f"manifest is missing release input {card}")
+
+msr06 = inputs["MSR-06"]
+expected06 = {
+    "repository": "codethread/agent-harness.spool",
+    "coordinate": "ct.spools/agent-run",
+    "tag": "v26",
+    "peeled-sha": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+    "landed-main-commit": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+}
+if any(msr06.get(key) != value for key, value in expected06.items()):
+    raise SystemExit("MSR-06 does not match the authoritative v26 release input")
+
+core = inputs["MSR-04"]
+required_core = {
+    "card", "repository", "coordinate", "ref-kind", "sha",
+    "landed-main-commit", "land-run",
+}
+if set(core) & {"tag", "peeled-sha"}:
+    raise SystemExit("MSR-04 core input must not contain tag or peeled-sha")
+if not required_core.issubset(core):
+    raise SystemExit("MSR-04 core input is incomplete")
+if (core["repository"], core["coordinate"], core["ref-kind"]) != (
+    "codethread/millstrand", "io.millstrand/millstrand", "sha"
+):
+    raise SystemExit("MSR-04 core input has the wrong repository, coordinate, or ref-kind")
+for key in ("sha", "landed-main-commit"):
+    if not re.fullmatch(r"[0-9a-f]{40}", core[key]):
+        raise SystemExit(f"MSR-04 {key} must be a lowercase 40-hex SHA")
+if core["sha"] != core["landed-main-commit"]:
+    raise SystemExit("MSR-04 SHA must equal landed-main-commit")
+
+msr05 = inputs["MSR-05"]
+expected05 = {
+    "repository": "codethread/kanban.spool",
+    "coordinate": "codethread/kanban",
+    "tag": "v24",
+    "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
+    "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+}
+if any(msr05.get(key) != value for key, value in expected05.items()):
+    raise SystemExit("MSR-05 does not match the authoritative v24 release input")
+
+source = doc.get("source", {})
+if source.get("marker") != "/Users/ct/dev/projects/agent-harness.spool/.skein":
+    raise SystemExit("manifest source marker is not the observed live marker")
+if source.get("database") == doc.get("target", {}).get("database"):
+    raise SystemExit("source and target database paths must differ")
+if source.get("observed-pid") != 73514:
+    raise SystemExit("manifest source PID must retain the observed live PID")
+
+print(core["repository"])
+print(core["sha"])
+print(msr06["repository"])
+print(msr06["tag"])
+print(msr06["peeled-sha"])
+print(msr05["repository"])
+print(msr05["tag"])
+print(msr05["peeled-sha"])
+print(source["database"])
+PY
+) || die "preparation manifest validation failed"
+
+core_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
+core_sha=$(printf '%s\n' "$release_values" | sed -n '2p')
+agent_repository=$(printf '%s\n' "$release_values" | sed -n '3p')
+agent_tag=$(printf '%s\n' "$release_values" | sed -n '4p')
+agent_sha=$(printf '%s\n' "$release_values" | sed -n '5p')
+kanban_repository=$(printf '%s\n' "$release_values" | sed -n '6p')
+kanban_tag=$(printf '%s\n' "$release_values" | sed -n '7p')
+kanban_sha=$(printf '%s\n' "$release_values" | sed -n '8p')
+source_db=$(printf '%s\n' "$release_values" | sed -n '9p')
+
+for value in "$core_repository" "$agent_repository" "$kanban_repository"; do
+  [[ "$value" != /* && "$value" != *"../"* ]] || die "release repository may not be a local root: $value"
+done
+
+# Keep the disposable state path short enough for the Unix socket used by the
+# local mill. macOS may expose a long TMPDIR, which otherwise makes bind(2)
+# fail before the fixture can start.
+tmp_root=$(mktemp -d "/tmp/ah-cutover.XXXXXX")
+cleanup() {
+  local rc=$?
+  if [[ -n "${fixture_root:-}" && -d "$fixture_root" ]]; then
+    mkdir -p "$evidence_root"
+    cp "$fixture_root/summary.json" "$evidence_root/fixture-summary.json" 2>/dev/null || true
+  fi
+  if [[ "${weaver_active:-0}" == 1 && -n "${weaver_workspace:-}" && -n "${mill_bin:-}" ]]; then
+    XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="${core_root:-}" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+    kill "$mill_pid" 2>/dev/null || true
+    wait "$mill_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_root"
+  trap - EXIT
+  exit "$rc"
+}
+trap cleanup EXIT
+
+state_root="$tmp_root/state"
+workspace_root="$tmp_root/workspace"
+fixture_root="$tmp_root/fixtures"
+mkdir -p "$state_root" "$workspace_root" "$fixture_root"
+
+# Resolve each published identity into disposable source metadata. No local
+# root can satisfy these checks, and the checked-out object must be the exact
+# immutable SHA selected above.
+resolve_remote() {
+  local repository=$1 tag=$2 expected=$3
+  local url="https://github.com/${repository%.git}.git"
+  local actual
+  actual=$(git ls-remote "$url" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  [[ "$actual" == "$expected" ]] || die "$repository $tag resolves to ${actual:-<no peeled SHA>}, expected $expected"
+  printf '%s\n' "$actual"
+}
+
+agent_resolved=$(resolve_remote "$agent_repository" "$agent_tag" "$agent_sha")
+kanban_resolved=$(resolve_remote "$kanban_repository" "$kanban_tag" "$kanban_sha")
+[[ "$agent_resolved" == "$agent_sha" && "$kanban_resolved" == "$kanban_sha" ]] || die "published release resolution mismatch"
+printf '%s\n' \
+  "git ls-remote https://github.com/$agent_repository.git refs/tags/$agent_tag^{} -> $agent_resolved" \
+  "git ls-remote https://github.com/$kanban_repository.git refs/tags/$kanban_tag^{} -> $kanban_resolved" \
+  "git checkout https://github.com/$core_repository.git $core_sha" \
+  >"$evidence_root/release-resolution.txt"
+
+core_url="https://github.com/${core_repository%.git}.git"
+core_root="$tmp_root/millstrand"
+git clone --quiet --no-checkout "$core_url" "$core_root"
+git -C "$core_root" checkout --quiet "$core_sha"
+[[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || die "core checkout did not resolve to $core_sha"
+git -C "$core_root" config --get remote.origin.url | grep -Eq '^git@github\.com:codethread/millstrand\.git$|^https://github\.com/codethread/millstrand\.git$' || die "core checkout origin is not canonical"
+
+candidate_root="$tmp_root/agent-harness"
+mkdir -p "$candidate_root"
+cp -R "$repo_root/." "$candidate_root/"
+chmod -R u+rwX "$candidate_root"
+cat >"$fixture_root/manifest.edn" <<EOF
+{:core {:repository "$core_repository" :coordinate "io.millstrand/millstrand" :sha "$core_sha"}
+ :agent {:repository "$agent_repository" :tag "$agent_tag" :sha "$agent_sha"}
+ :kanban {:repository "$kanban_repository" :tag "$kanban_tag" :sha "$kanban_sha"}}
+EOF
+
+# Release-resolution metadata is the only source of pins for this target. The
+# live source's relative development roots remain untouched and are not copied
+# into this generated consumer metadata.
+cat >"$fixture_root/target-deps.edn" <<EOF
+{:deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git" :git/sha "$core_sha"}
+        codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}
+        codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+EOF
+if rg -n ':local/root|:millstrand/source-root|/Users/|/tmp/|/private/' "$fixture_root/target-deps.edn" >/dev/null; then
+  die "generated consumer metadata contains a local/root or absolute source override"
+fi
+
+# Build a fresh, inactive target from the published core and candidate source.
+# The two marker names exercise the cutover boundary independently; no marker
+# is created beside the live .skein directory.
+mill_bin=${MILL_BIN:-}
+if [[ -z "$mill_bin" && -x "$repo_root/../millstrand/bin/mill" ]]; then
+  mill_bin="$repo_root/../millstrand/bin/mill"
+fi
+if [[ -z "$mill_bin" ]]; then
+  mill_bin=$(command -v mill || true)
+fi
+[[ -n "$mill_bin" && -x "$mill_bin" ]] || die "missing mill executable; set MILL_BIN to published Millstrand mill"
+
+target_parent="$workspace_root/fresh-world"
+mkdir -p "$target_parent"
+target_marker="$target_parent/.millstrand"
+target_state="$state_root/millstrand"
+mkdir -p "$target_state"
+
+mill_log="$fixture_root/mill.log"
+mill_pid=""
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" start >"$mill_log" 2>&1 &
+mill_pid=$!
+deadline=$((SECONDS + 30))
+until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+  kill -0 "$mill_pid" 2>/dev/null || die "disposable mill exited before readiness: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "disposable mill did not become ready within 30s"
+  sleep 0.05
+done
+
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" init --workspace "$target_marker" >"$fixture_root/init-millstrand.txt" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/init-millstrand.txt" >&2
+  die "fresh .millstrand init failed"
+}
+[[ -d "$target_marker" ]] || die "fresh .millstrand marker was not created"
+[[ ! -e "$target_state/skein.sqlite" ]] || die "target database unexpectedly pre-existed"
+
+target_db=""
+if [[ -f "$target_marker/weaver.json" ]]; then
+  target_db=$(python3 - "$target_marker/weaver.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("database_path", ""))
+PY
+)
+fi
+if [[ -n "$target_db" && "$target_db" == "$source_db" ]]; then
+  die "fresh target database points at the source database"
+fi
+
+# Activate only the disposable marker. The candidate modules are linked into
+# this fixture, while release metadata is generated from the immutable pins
+# above; neither the live marker nor its database is consulted by Millstrand.
+cp -R "$candidate_root/.skein/." "$target_marker/"
+for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
+  ln -s "$candidate_root/$root" "$target_parent/$root"
+done
+cat >"$target_marker/spools.edn" <<EOF
+{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
+          millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
+          ct.spools/harness-core {:local/root "../harness-core"}
+          ct.spools/claude-harness {:local/root "../claude-harness"}
+          ct.spools/codex-harness {:local/root "../codex-harness"}
+          ct.spools/pi-harness {:local/root "../pi-harness"}
+          ct.spools/cursor-harness {:local/root "../cursor-harness"}
+          ct.spools/agent-cli {:local/root "../agent-cli"}
+          ct.spools/agent-run {:local/root "../agent-run"}
+          ct.spools/delegation {:local/root "../delegation"}
+          ct.spools/bench {:local/root "../bench"}
+          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
+                             :git/tag "$kanban_tag"
+                             :git/sha "$kanban_sha"
+                             :roots {codethread/kanban "."}}}}
+EOF
+cat >"$target_marker/config/harnesses.clj" <<'EOF'
+(ns harnesses
+  (:require [millstrand.api.current.alpha :as current]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [ct.spools.agent-run :as shuttle]
+            [ct.spools.delegation :as agents]))
+
+(shuttle/defharnesses ^:private smoke-harnesses
+  "Disposable preparation smoke harness."
+  {:release-smoke
+   {:argv ["sh" "-c"
+           "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"preparation-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"preparation smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'" ]
+    :parse :codex-json
+    :preamble? false
+    :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
+
+(defn open-harnesses! [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! agents/review-contract)
+    (shuttle/set-default-task-contract! agents/worker-contract))
+  {:opened :harnesses})
+
+(defn close-harnesses! [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! nil)
+    (shuttle/set-default-task-contract! nil))
+  {:closed :harnesses})
+
+(lifecycle/defresource harnesses-runtime
+  "Own the disposable preparation smoke harness."
+  {:open 'harnesses/open-harnesses!
+   :close 'harnesses/close-harnesses!})
+EOF
+
+strand_bin=${STRAND_BIN:-$(dirname "$mill_bin")/strand}
+[[ -x "$strand_bin" ]] || strand_bin=$(command -v strand || true)
+[[ -n "$strand_bin" && -x "$strand_bin" ]] || die "missing strand executable; set STRAND_BIN to published Millstrand strand"
+mill_cmd() {
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"
+}
+strand_cmd() {
+  XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$weaver_workspace" "$@"
+}
+
+weaver_workspace="$target_marker"
+weaver_active=0
+mill_cmd weaver start --workspace "$weaver_workspace" >"$fixture_root/weaver-millstrand.log" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/weaver-millstrand.log" >&2
+  die "fresh .millstrand weaver failed to start"
+}
+weaver_active=1
+mill_cmd weaver status --workspace "$weaver_workspace" >"$fixture_root/status-millstrand.json"
+
+smoke_marker() {
+  local label=$1
+  local state_json task_id delegate_result delegate_run await_result spend_result
+  state_json=$(strand_cmd add "preparation $label delegate await spend" --attr body=preparation-smoke)
+  task_id=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["id"])' <<<"$state_json")
+  [[ -n "$task_id" ]] || die "$label smoke did not create a strand"
+  delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
+  delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
+  await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
+  python3 - "$await_result" "$label" <<'PY'
+import json
+import sys
+result = json.loads(sys.argv[1])
+if result.get("timed-out") or len(result.get("runs", [])) != 1 or result["runs"][0].get("phase") != "done":
+    raise SystemExit(f"{sys.argv[2]} delegate/await smoke did not finish successfully: {result}")
+PY
+  spend_result=$(strand_cmd agent spend --group-by harness)
+  printf '%s\n' "$spend_result" >"$fixture_root/spend-$label.json"
+  printf '%s\n' "$state_json" >"$evidence_root/strand-$label.json"
+  printf '%s\n' "$delegate_result" >"$evidence_root/delegate-$label.json"
+  printf '%s\n' "$await_result" >"$evidence_root/await-$label.json"
+  cp "$fixture_root/spend-$label.json" "$evidence_root/spend-$label.json"
+}
+
+smoke_marker millstrand
+mill_cmd weaver stop --workspace "$weaver_workspace" >/dev/null
+weaver_active=0
+mv "$target_marker" "$target_parent/.ms"
+[[ -d "$target_parent/.ms" && ! -e "$target_parent/.millstrand" ]] || die "marker rename did not produce an inactive .ms fixture"
+weaver_workspace="$target_parent/.ms"
+mill_cmd weaver start --workspace "$weaver_workspace" >"$fixture_root/weaver-ms.log" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/weaver-ms.log" >&2
+  die "fresh .ms weaver failed to start"
+}
+weaver_active=1
+mill_cmd weaver status --workspace "$weaver_workspace" >"$fixture_root/status-ms.json"
+smoke_marker ms
+
+target_db=$(python3 - "$fixture_root/status-ms.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("database_path", ""))
+PY
+)
+[[ -n "$target_db" && "$target_db" != "$source_db" ]] || die "fresh target database is missing or points at source database"
+[[ ! -e "$source_db" || "$(stat -f '%i' "$source_db" 2>/dev/null || true)" != "$(stat -f '%i' "$target_db" 2>/dev/null || true)" ]] || die "target database aliases source database"
+printf '%s\n' "target-marker=$target_parent/.ms" "target-database=$target_db" >"$fixture_root/fresh-world.txt"
+
+python3 - "$fixture_root/spend-ms.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    spend = json.load(handle)
+if len(spend.get("runs", [])) != 2:
+    raise SystemExit(f"spend smoke expected two disposable marker runs: {spend}")
+if spend.get("totals", {}).get("tokens-total") != 4200:
+    raise SystemExit(f"spend smoke token total mismatch: {spend}")
+PY
+
+python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$agent_tag" "$agent_sha" "$kanban_tag" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
+import json
+import os
+import sys
+
+out, repo, core_sha, agent_tag, agent_sha, kanban_tag, kanban_sha, marker, database = sys.argv[1:]
+summary = {
+    "identity-check": "pass",
+    "core": {"repository": "codethread/millstrand", "sha": core_sha, "local-root-rejected": True},
+    "agent-harness": {"tag": agent_tag, "peeled-sha": agent_sha, "exact": True},
+    "kanban": {"tag": kanban_tag, "peeled-sha": kanban_sha, "exact": True},
+    "fresh-database": {"marker": marker, "database": database, "source-database-imported": False},
+    "delegate": "pass",
+    "await": "pass",
+    "spend": "pass",
+    "live-workspace-touched": False,
+    "repository": os.path.realpath(repo),
+}
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2)
+    handle.write("\n")
+PY
+
+cp "$fixture_root/fresh-world.txt" "$evidence_root/fresh-world.txt"
+cp "$fixture_root/summary.json" "$evidence_root/fixture-summary.json"
+cp "$fixture_root/init-millstrand.txt" "$evidence_root/init-millstrand.txt"
+cp "$fixture_root/weaver-millstrand.log" "$evidence_root/weaver-millstrand.log"
+cp "$fixture_root/weaver-ms.log" "$evidence_root/weaver-ms.log"
+cp "$fixture_root/status-millstrand.json" "$evidence_root/status-millstrand.json"
+cp "$fixture_root/status-ms.json" "$evidence_root/status-ms.json"
+
+echo "agent-harness preparation verification: clean"
+echo "  MSR-06: $agent_tag@$agent_sha"
+echo "  core: $core_repository@$core_sha"
+echo "  target marker: $target_parent/.ms"
+echo "  evidence: $evidence_root"
