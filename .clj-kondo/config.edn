@@ -3,8 +3,8 @@
   millstrand.api.millstrand.alpha/defop clojure.core/defn
   millstrand.api.millstrand.alpha/defpattern clojure.core/defn
   millstrand.api.millstrand.alpha/defquery clojure.core/def
-  millstrand.spools.workflow/defexecutor clojure.core/defn}
+  millhouse.spools.workflow/defexecutor clojure.core/defn}
  :linters
  {:unresolved-var
   {:exclude [millstrand.api.runtime.alpha/collect-kind!
-             millstrand.spools.workflow/defexecutor]}}}
+             millhouse.spools.workflow/defexecutor]}}}

@@ -1,8 +1,8 @@
 {:paths []
  :aliases
- {:test {;; Keep every Millstrand root on the same sibling checkout. The workflow
-         ;; spool is outside Millstrand's base classpath and joins the test JVM
-         ;; explicitly because the subagent executor requires it.
+ {:test {;; Keep Millstrand core on the sibling checkout. Workflow is an
+         ;; independent, untagged Millhouse root pinned exactly because the
+         ;; subagent executor requires it.
          :extra-paths ["test"
                        "agent-run/src"
                        "harness-core/src"
@@ -14,9 +14,12 @@
                        "delegation/src"
                        "bench/src"
                        "../skein-src/test"
-                       "../skein-src/spools/workflow/src"
                        "scripts"]
          :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
+                      millhouse.spools/workflow
+                      {:git/url "https://github.com/codethread/millhouse.spool.git"
+                       :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+                       :deps/root "spools/workflow"}
                       clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "ct.spools.test-runner"]}
@@ -43,6 +46,10 @@
                                    "delegation/src"
                                    "bench/src"]
                      :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
+                                  millhouse.spools/workflow
+                                  {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                   :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+                                   :deps/root "spools/workflow"}
                                   clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                      :main-opts ["-m" "quality.conventions-check"]}
   :reflect-check {:extra-paths ["scripts"
@@ -54,7 +61,10 @@
                        "cursor-harness/src"
                                 "agent-cli/src"
                                 "delegation/src"
-                                "bench/src"
-                                "../skein-src/spools/workflow/src"]
-                  :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}}
+                                "bench/src"]
+                  :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
+                               millhouse.spools/workflow
+                               {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+                                :deps/root "spools/workflow"}}
                   :main-opts ["-m" "quality.reflect-check"]}}}

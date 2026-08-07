@@ -40,27 +40,27 @@ Equivalent local coordinates:
   ct.spools/bench {:local/root "/path/to/agent-harness.spool/bench"}}}
 ```
 
-The subagent executor also requires Millstrand's workflow spool. Approve either its
-root in a local Millstrand checkout:
+The subagent executor also requires Millhouse's Workflow spool. Approve either
+its root in a local Millhouse checkout:
 
 ```clojure
 {:spools
- {millstrand.spools/workflow {:local/root "/path/to/millstrand/spools/workflow"}}}
+ {millhouse.spools/workflow {:local/root "/path/to/millhouse.spool/spools/workflow"}}}
 ```
 
 or a pinned nested root:
 
 ```clojure
 {:spools
- {millstrand.spools/workflow
-  {:git/url "https://github.com/codethread/millstrand.git"
-   :git/sha "<40-hex-sha-for-the-pinned-commit>"
+ {millhouse.spools/workflow
+  {:git/url "https://github.com/codethread/millhouse.spool.git"
+   :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
    :deps/root "spools/workflow"}}}
 ```
 
 No prerequisite is fetched transitively. A runtime loads one version of each
 namespace, so a pinned agent-harness commit runs against the consumer's single
-chosen workflow version. Compatibility across version skew follows the
+chosen Workflow version. Compatibility across version skew follows the
 accretion convention: the engine adds; it does not break. This is a convention,
 not a version contract the dependent spool can enforce.
 
@@ -105,8 +105,8 @@ trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spool
 
 (def rt (current/runtime))
 (runtime/module! rt :workflow
-  {:ns 'millstrand.spools.workflow
-   :spools '[millstrand.spools/workflow]
+  {:ns 'millhouse.spools.workflow
+   :spools '[millhouse.spools/workflow]
    :required? true})
 
 (runtime/module! rt :agent-run
@@ -122,7 +122,7 @@ trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spool
 
 (runtime/module! rt :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools '[ct.spools/agent-run millstrand.spools/workflow]
+   :spools '[ct.spools/agent-run millhouse.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 
@@ -145,7 +145,7 @@ the same coordinate symbols with direct roots:
  {ct.spools/agent-run {:local/root "/Users/you/dev/agent-harness.spool/agent-run"}
   ct.spools/delegation {:local/root "/Users/you/dev/agent-harness.spool/delegation"}
   ct.spools/bench {:local/root "/Users/you/dev/agent-harness.spool/bench"}
-  millstrand.spools/workflow {:local/root "/Users/you/dev/millstrand/spools/workflow"}}}
+  millhouse.spools/workflow {:local/root "/Users/you/dev/millhouse.spool/spools/workflow"}}}
 ```
 
 Local entries replace shared entries by coordinate. `:deps/root` is git-only;
@@ -153,8 +153,8 @@ a local root points directly at the selected spool directory.
 
 ## Development
 
-The root suite tests all five namespaces against the sibling `../skein-src`
-checkout:
+The root suite tests against Millstrand core from the sibling `../skein-src`
+checkout and Workflow from the exact Millhouse commit pinned in `deps.edn`:
 
 ```sh
 clojure -M:test
