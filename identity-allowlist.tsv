@@ -1,4 +1,5 @@
 # scope<TAB>pattern<TAB>reason
+.github/workflows/quality.yml	.*skein-src.*	CI checks Millstrand out under the same canonical sibling directory name used by local development.
 deps.edn	.*skein-src.*	Local development resolves Millstrand from the canonical sibling checkout, whose directory retains its pre-rename filesystem name.
 AGENTS.md	.*skein-src.*	Contributor instructions name the canonical sibling checkout used for local development.
 README.md	.*skein-src.*	The local test-suite instructions name the canonical sibling checkout.

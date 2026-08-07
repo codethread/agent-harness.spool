@@ -22,7 +22,7 @@ jobs:
         with:
           repository: codethread/millstrand
           ref: 5790c459e9bb692b5e975f9715df7d5b403feff2
-          path: millstrand
+          path: skein-src
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
