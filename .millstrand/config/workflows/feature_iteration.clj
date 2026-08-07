@@ -1,7 +1,7 @@
 (ns workflows.feature-iteration
   "The FEATURE ITERATION workflow (family \"feature-iteration\").
 
-  Loaded by `.skein/config/workflows.clj`, which is also what registers the
+  Loaded by `.millstrand/config/workflows.clj`, which is also what registers the
   `feature-iteration` Var below under the name a worker starts it by; this file
   registers nothing itself. Drive a run with `strand workflow`."
   (:require [clojure.spec.alpha :as s]
@@ -121,7 +121,7 @@
   contract it advertises.
 
   Building the value rather than using `defworkflow` keeps this namespace inert:
-  it registers nothing on load, and `.skein/config/workflows.clj` is the one
+  it registers nothing on load, and `.millstrand/config/workflows.clj` is the one
   place that binds it to the name `:feature-iteration`."
   (workflow/static-definition
    contract-doc

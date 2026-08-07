@@ -46,7 +46,7 @@ if refs != [expected_sha]:
 PY
 
 scan_paths=(
-  .github .skein agent-cli agent-run bench claude-harness codex-harness
+  .github .millstrand agent-cli agent-run bench claude-harness codex-harness
   cursor-harness delegation harness-core pi-harness test bin scripts
   Makefile deps.edn README.md AGENTS.md spool.edn
 )

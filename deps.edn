@@ -13,10 +13,10 @@
                        "agent-cli/src"
                        "delegation/src"
                        "bench/src"
-                       "../millstrand/test"
-                       "../millstrand/spools/workflow/src"
+                       "../skein-src/test"
+                       "../skein-src/spools/workflow/src"
                        "scripts"]
-         :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}
+         :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                       clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "ct.spools.test-runner"]}
@@ -42,7 +42,7 @@
                                    "agent-cli/src"
                                    "delegation/src"
                                    "bench/src"]
-                     :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}
+                     :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                                   clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                      :main-opts ["-m" "quality.conventions-check"]}
   :reflect-check {:extra-paths ["scripts"
@@ -55,6 +55,6 @@
                                 "agent-cli/src"
                                 "delegation/src"
                                 "bench/src"
-                                "../millstrand/spools/workflow/src"]
-                  :extra-deps {io.millstrand/millstrand {:local/root "../millstrand"}}
+                                "../skein-src/spools/workflow/src"]
+                  :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}}
                   :main-opts ["-m" "quality.reflect-check"]}}}

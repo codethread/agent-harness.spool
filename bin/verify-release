@@ -225,10 +225,10 @@ smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
 
 if [[ -n "${MILL_BIN:-}" ]]; then
   mill_bin="$MILL_BIN"
-elif [[ "$mode" == "pre-tag" && -x "$source_root/../millstrand/bin/mill" ]]; then
+elif [[ "$mode" == "pre-tag" && -x "$source_root/../skein-src/bin/mill" ]]; then
   # A source checkout next to Millstrand is the deterministic development
   # binary; it must speak the same protocol as the SHA-pinned core checkout.
-  mill_bin="$source_root/../millstrand/bin/mill"
+  mill_bin="$source_root/../skein-src/bin/mill"
 else
   mill_bin=$(command -v mill || true)
 fi
@@ -277,7 +277,7 @@ mill_cmd init --workspace "$weaver_workspace" >/dev/null
 
 # Use the candidate's workspace modules in disposable paths. Core and Kanban
 # stay immutable: they are the SHA/tag-pinned checkouts resolved above.
-candidate_coord="$candidate_root/.$(printf '%s%s' sk ein)"
+candidate_coord="$candidate_root/.millstrand"
 cp -R "$candidate_coord/." "$weaver_workspace/"
 for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
   ln -s "$candidate_root/$root" "$workspace_root/$root"

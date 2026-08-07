@@ -1,11 +1,9 @@
 # scope<TAB>pattern<TAB>reason
-.skein	.*	Repository coordination configuration is intentionally retained as .skein; it is not a consumer workspace marker.
-AGENTS.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository instructions identify the checked-in coordination workspace.
-scripts/quality/conventions_check.clj	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	The quality scanner includes the checked-in coordination workspace in its source roots.
-agent-run/README.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository documentation references the checked-in coordination/config workspace, not a consumer identity.
-agent-run/agent-run.cookbook.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository cookbook examples reference checked-in coordination/config paths, not a consumer identity.
-bench/README.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository documentation references the checked-in coordination/config workspace, not a consumer identity.
-delegation/README.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository documentation references the checked-in coordination/config workspace, not a consumer identity.
-delegation/delegation.cookbook.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository cookbook examples reference checked-in coordination/config paths, not a consumer identity.
+.github/workflows/quality.yml	.*skein-src.*	CI checks Millstrand out under the same canonical sibling directory name used by local development.
+deps.edn	.*skein-src.*	Local development resolves Millstrand from the canonical sibling checkout, whose directory retains its pre-rename filesystem name.
+AGENTS.md	.*skein-src.*	Contributor instructions name the canonical sibling checkout used for local development.
+README.md	.*skein-src.*	The local test-suite instructions name the canonical sibling checkout.
+bin/compat-alarm	.*skein-src.*	The local compatibility alarm tests against the canonical sibling checkout.
+bin/verify-release	.*skein-src.*	Pre-tag verification prefers the canonical sibling checkout's development binary.
 bin/verify-millstrand-preparation	.*	Disposable cutover verification names the live source marker and isolated Skein-compatible fixture paths without activating them.
 bin/validate-consumer-preparation	.*	The reusable MSR-14C manifest validator enforces the recorded live source marker and rollback boundary.

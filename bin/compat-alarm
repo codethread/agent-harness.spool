@@ -38,8 +38,8 @@ for n in $nss; do
 done
 
 exec clojure \
-  -Sdeps "{:paths [${src_paths}${test_paths}\"../millstrand/test\" \"../millstrand/spools/workflow/src\"]
-           :deps {io.millstrand/millstrand {:local/root \"../millstrand\"}}}" \
+  -Sdeps "{:paths [${src_paths}${test_paths}\"../skein-src/test\" \"../skein-src/spools/workflow/src\"]
+           :deps {io.millstrand/millstrand {:local/root \"../skein-src\"}}}" \
   -J--enable-native-access=ALL-UNNAMED \
   -M -e "
 (require 'clojure.test ${requires})

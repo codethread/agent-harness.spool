@@ -8,7 +8,7 @@
 
 (def source-roots
   "Clojure roots scanned by the conventions gate."
-  ["agent-run/src" "delegation/src" "bench/src" ".skein" "test"])
+  ["agent-run/src" "delegation/src" "bench/src" ".millstrand" "test"])
 
 (def spool-roots
   "Shared-spool production roots subject to public API and tier checks."

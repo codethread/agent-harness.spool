@@ -153,7 +153,7 @@ a local root points directly at the selected spool directory.
 
 ## Development
 
-The root suite tests all five namespaces against a sibling `../millstrand`
+The root suite tests all five namespaces against the sibling `../skein-src`
 checkout:
 
 ```sh

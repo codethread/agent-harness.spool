@@ -7,7 +7,7 @@
   the registration by omission at the next refresh.
 
   Two mechanics are worth knowing before editing a definition file. Definitions
-  are loaded rather than required, because `.skein` is a config directory and
+  are loaded rather than required, because `.millstrand` is a config directory and
   not a classpath root. And registration happens here rather than beside each
   definition, because a module's authoring forms are collected only from the
   module's own source file — a `defworkflow` in a loaded file would be refused

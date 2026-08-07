@@ -25,7 +25,7 @@ Agent-run is intentionally not core scheduler infrastructure. It composes existi
 Agent-run is shipped as an approved-local-root spool example under `spools/agent-run`. A workspace opts in with `spools.edn` and trusted startup or REPL code:
 
 ```clojure
-;; .skein/spools.edn
+;; .millstrand/spools.edn
 {:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}}}
 ```
 

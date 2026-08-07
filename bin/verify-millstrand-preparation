@@ -245,8 +245,8 @@ fi
 # The two marker names exercise the cutover boundary independently; no marker
 # is created beside the live .skein directory.
 mill_bin=${MILL_BIN:-}
-if [[ -z "$mill_bin" && -x "$repo_root/../millstrand/bin/mill" ]]; then
-  mill_bin="$repo_root/../millstrand/bin/mill"
+if [[ -z "$mill_bin" && -x "$repo_root/../skein-src/bin/mill" ]]; then
+  mill_bin="$repo_root/../skein-src/bin/mill"
 fi
 if [[ -z "$mill_bin" ]]; then
   mill_bin=$(command -v mill || true)
@@ -295,7 +295,7 @@ fi
 # its immutable published coordinate and root map; only the workspace-owned
 # smoke harness configuration remains local. Neither the live marker nor its
 # database is consulted by Millstrand.
-cp -R "$candidate_root/.skein/." "$target_marker/"
+cp -R "$candidate_root/.millstrand/." "$target_marker/"
 cat >"$target_marker/spools.edn" <<EOF
 {:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
           millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
