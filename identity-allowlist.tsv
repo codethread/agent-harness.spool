@@ -7,3 +7,5 @@ agent-run/agent-run.cookbook.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repo
 bench/README.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository documentation references the checked-in coordination/config workspace, not a consumer identity.
 delegation/README.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository documentation references the checked-in coordination/config workspace, not a consumer identity.
 delegation/delegation.cookbook.md	(^|[^[:alnum:]_])\.skein(/|[^[:alnum:]_]|$)	Repository cookbook examples reference checked-in coordination/config paths, not a consumer identity.
+bin/verify-millstrand-preparation	.*	Disposable cutover verification names the live source marker and isolated Skein-compatible fixture paths without activating them.
+bin/validate-consumer-preparation	.*	The reusable MSR-14C manifest validator enforces the recorded live source marker and rollback boundary.

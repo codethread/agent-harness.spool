@@ -1,0 +1,504 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Disposable consumer preparation gate. It intentionally never operates on the
+# live Agent Harness workspace: every marker, database, and XDG root is created
+# below a temporary directory and removed on exit.
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+manifest="$repo_root/docs/operations/millstrand-cutover-preparation.json"
+evidence_root="$repo_root/target/millstrand-cutover-preparation"
+die() { echo "verify-millstrand-preparation: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
+
+need git
+need python3
+need clojure
+need mktemp
+need awk
+
+file_identity() {
+  local path=$1 identity
+  if identity=$(stat -c '%d:%i' "$path" 2>/dev/null); then
+    printf '%s\n' "$identity"
+  else
+    identity=$(stat -f '%d:%i' "$path") || return
+    printf '%s\n' "$identity"
+  fi
+}
+
+[[ -f "$manifest" ]] || die "missing preparation manifest: $manifest"
+mkdir -p "$evidence_root"
+
+# The identity transcript is an explicit prerequisite and is retained as a
+# handoff artifact, while all later state stays disposable.
+identity_transcript="$evidence_root/identity-check.txt"
+if ! (cd "$repo_root" && bin/identity-check >"$identity_transcript"); then
+  die "identity-check failed; see $identity_transcript"
+fi
+identity_sha=$(shasum -a 256 "$identity_transcript" | awk '{print $1}')
+printf '%s  %s\n' "$identity_sha" "$identity_transcript" >"$evidence_root/identity-check.sha256"
+
+release_values=$("$repo_root/bin/validate-consumer-preparation" "$manifest") || die "preparation manifest validation failed"
+json_value() {
+  python3 -c 'import json,sys; print(json.loads(sys.stdin.read())[sys.argv[1]])' "$1" <<<"$release_values"
+}
+core_repository=$(json_value core_repository)
+core_sha=$(json_value core_sha)
+agent_repository=$(json_value agent_repository)
+agent_tag=$(json_value agent_tag)
+agent_sha=$(json_value agent_sha)
+kanban_repository=$(json_value kanban_repository)
+kanban_tag=$(json_value kanban_tag)
+kanban_sha=$(json_value kanban_sha)
+source_marker=$(json_value source_marker)
+source_db=$(json_value source_database)
+
+[[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
+[[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"
+source_marker_identity=$(file_identity "$source_marker")
+source_db_identity=$(file_identity "$source_db")
+printf '%s\n' "source-marker=$source_marker" "source-database=$source_db" \
+  "source-marker-identity=$source_marker_identity" "source-database-identity=$source_db_identity" \
+  >"$evidence_root/live-source.txt"
+printf '%s\n' "$release_values" >"$evidence_root/manifest-validation.json"
+
+for value in "$core_repository" "$agent_repository" "$kanban_repository"; do
+  [[ "$value" != /* && "$value" != *"../"* ]] || die "release repository may not be a local root: $value"
+done
+
+# Readiness is command-driven: `mill status` is the readiness event and the
+# agent await command owns run completion. These bounded knobs are the public
+# contract; they avoid an unbounded or undocumented arbitrary wait.
+MILL_READY_TIMEOUT_SECS=${MILL_READY_TIMEOUT_SECS:-30}
+MILL_READY_POLL_MS=${MILL_READY_POLL_MS:-50}
+AGENT_AWAIT_TIMEOUT_SECS=${AGENT_AWAIT_TIMEOUT_SECS:-30}
+for name in MILL_READY_TIMEOUT_SECS MILL_READY_POLL_MS AGENT_AWAIT_TIMEOUT_SECS; do
+  value=${!name}
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer (got: $value)"
+done
+mill_ready_poll_seconds=$(awk -v ms="$MILL_READY_POLL_MS" 'BEGIN { printf "%.3f", ms / 1000 }')
+
+# Keep the disposable state path short enough for the Unix socket used by the
+# local mill. macOS may expose a long TMPDIR, which otherwise makes bind(2)
+# fail before the fixture can start.
+tmp_root=$(mktemp -d "/tmp/ah-cutover.XXXXXX")
+state_root="$tmp_root/state"
+workspace_root="$tmp_root/workspace"
+fixture_root="$tmp_root/fixtures"
+mkdir -p "$state_root" "$workspace_root" "$fixture_root"
+
+preserve_required_evidence() {
+  local failed=0 source_file destination_file name
+  local -a fixture_evidence=(
+    "fresh-world.txt:fresh-world.txt"
+    "summary.json:fixture-summary.json"
+    "init-millstrand.txt:init-millstrand.txt"
+    "weaver-millstrand.log:weaver-millstrand.log"
+    "weaver-ms.log:weaver-ms.log"
+    "status-millstrand.json:status-millstrand.json"
+    "status-ms.json:status-ms.json"
+  )
+  for name in "${fixture_evidence[@]}"; do
+    source_file="$fixture_root/${name%%:*}"
+    destination_file="$evidence_root/${name##*:}"
+    if [[ ! -f "$source_file" ]]; then
+      echo "verify-millstrand-preparation: required evidence is missing: $source_file" >&2
+      failed=1
+    elif ! cp "$source_file" "$destination_file"; then
+      echo "verify-millstrand-preparation: failed to preserve evidence: $source_file -> $destination_file" >&2
+      failed=1
+    elif [[ ! -f "$destination_file" ]]; then
+      echo "verify-millstrand-preparation: preserved evidence is not present: $destination_file" >&2
+      failed=1
+    fi
+  done
+  if [[ -z "${weaver_workspace:-}" || ! -f "$weaver_workspace/spools.edn" ]]; then
+    echo "verify-millstrand-preparation: required evidence is missing: ${weaver_workspace:-<unstarted>}/spools.edn" >&2
+    failed=1
+  elif ! cp "$weaver_workspace/spools.edn" "$evidence_root/activated-spools.edn"; then
+    echo "verify-millstrand-preparation: failed to preserve activated spools evidence" >&2
+    failed=1
+  fi
+  for name in \
+    identity-check.txt identity-check.sha256 live-source.txt manifest-validation.json release-resolution.txt \
+    strand-millstrand.json delegate-millstrand.json await-millstrand.json spend-millstrand.json \
+    strand-ms.json delegate-ms.json await-ms.json spend-ms.json; do
+    if [[ ! -f "$evidence_root/$name" ]]; then
+      echo "verify-millstrand-preparation: required evidence is missing: $evidence_root/$name" >&2
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
+cleanup() {
+  local rc=$?
+  local cleanup_failed=0 cleanup_report wait_rc stop_output
+  cleanup_report="$evidence_root/cleanup-diagnostics.txt"
+  if ! : >"$cleanup_report"; then
+    echo "verify-millstrand-preparation: cannot create cleanup diagnostics: $cleanup_report" >&2
+    cleanup_failed=1
+  fi
+  report_cleanup_error() {
+    local message=$*
+    echo "verify-millstrand-preparation: cleanup: $message" >&2
+    printf '%s\n' "$message" >>"$cleanup_report" || true
+    cleanup_failed=1
+  }
+
+  if [[ -n "${fixture_root:-}" && -d "$fixture_root" ]]; then
+    if ! preserve_required_evidence; then
+      report_cleanup_error "required evidence preservation failed; inspect diagnostics and missing paths above"
+    fi
+  else
+    report_cleanup_error "fixture root is unavailable; required evidence cannot be preserved"
+  fi
+  if [[ "${weaver_active:-0}" == 1 && -n "${weaver_workspace:-}" && -n "${mill_bin:-}" ]]; then
+    if ! stop_output=$(XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="${core_root:-}" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" 2>&1); then
+      report_cleanup_error "weaver stop failed for $weaver_workspace: $stop_output"
+    else
+      printf 'weaver stop: %s\n' "$stop_output" >>"$cleanup_report" || true
+      weaver_active=0
+    fi
+  fi
+  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+    if ! kill "$mill_pid" 2>/dev/null; then
+      report_cleanup_error "failed to terminate disposable mill process PID $mill_pid"
+    else
+      wait_rc=0
+      wait "$mill_pid" 2>/dev/null || wait_rc=$?
+      printf 'mill process PID %s terminated with wait status %s\n' "$mill_pid" "$wait_rc" >>"$cleanup_report" || true
+      if kill -0 "$mill_pid" 2>/dev/null; then
+        report_cleanup_error "disposable mill process leaked: PID $mill_pid"
+      fi
+    fi
+  fi
+  if [[ -e "$tmp_root" ]]; then
+    if ! rm -rf "$tmp_root"; then
+      report_cleanup_error "failed to remove disposable root: $tmp_root"
+    elif [[ -e "$tmp_root" ]]; then
+      report_cleanup_error "disposable root remains after cleanup: $tmp_root"
+    fi
+  fi
+  if (( cleanup_failed != 0 && rc == 0 )); then
+    rc=1
+    echo "verify-millstrand-preparation: cleanup failed; diagnostics: $cleanup_report" >&2
+  fi
+  trap - EXIT
+  exit "$rc"
+}
+trap cleanup EXIT
+
+# Resolve each published identity into disposable source metadata. No local
+# root can satisfy these checks, and the checked-out object must be the exact
+# immutable SHA selected above.
+resolve_remote() {
+  local repository=$1 tag=$2 expected=$3
+  local url="https://github.com/${repository%.git}.git"
+  local actual
+  actual=$(git ls-remote "$url" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  [[ "$actual" == "$expected" ]] || die "$repository $tag resolves to ${actual:-<no peeled SHA>}, expected $expected"
+  printf '%s\n' "$actual"
+}
+
+agent_resolved=$(resolve_remote "$agent_repository" "$agent_tag" "$agent_sha")
+kanban_resolved=$(resolve_remote "$kanban_repository" "$kanban_tag" "$kanban_sha")
+[[ "$agent_resolved" == "$agent_sha" && "$kanban_resolved" == "$kanban_sha" ]] || die "published release resolution mismatch"
+printf '%s\n' \
+  "git ls-remote https://github.com/$agent_repository.git refs/tags/$agent_tag^{} -> $agent_resolved" \
+  "git ls-remote https://github.com/$kanban_repository.git refs/tags/$kanban_tag^{} -> $kanban_resolved" \
+  "git checkout https://github.com/$core_repository.git $core_sha" \
+  >"$evidence_root/release-resolution.txt"
+
+core_url="https://github.com/${core_repository%.git}.git"
+core_root="$tmp_root/millstrand"
+git clone --quiet --no-checkout "$core_url" "$core_root"
+git -C "$core_root" checkout --quiet "$core_sha"
+[[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || die "core checkout did not resolve to $core_sha"
+git -C "$core_root" config --get remote.origin.url | grep -Eq '^git@github\.com:codethread/millstrand\.git$|^https://github\.com/codethread/millstrand\.git$' || die "core checkout origin is not canonical"
+
+candidate_root="$tmp_root/agent-harness"
+mkdir -p "$candidate_root"
+cp -R "$repo_root/." "$candidate_root/"
+chmod -R u+rwX "$candidate_root"
+cat >"$fixture_root/manifest.edn" <<EOF
+{:core {:repository "$core_repository" :coordinate "io.millstrand/millstrand" :sha "$core_sha"}
+ :agent {:repository "$agent_repository" :tag "$agent_tag" :sha "$agent_sha"}
+ :kanban {:repository "$kanban_repository" :tag "$kanban_tag" :sha "$kanban_sha"}}
+EOF
+
+# Release-resolution metadata is the only source of pins for this target. The
+# live source's relative development roots remain untouched and are not copied
+# into this generated consumer metadata.
+cat >"$fixture_root/target-deps.edn" <<EOF
+{:deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git" :git/sha "$core_sha"}
+        codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}
+        codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+EOF
+if rg -n ':local/root|:override-deps|:millstrand/source-root|v23|v20|/Users/|/tmp/|/private/' "$fixture_root/target-deps.edn" >/dev/null; then
+  die "generated consumer metadata contains a local root, override, old pin, or absolute source override"
+fi
+
+# Build a fresh, inactive target from the published core and candidate source.
+# The two marker names exercise the cutover boundary independently; no marker
+# is created beside the live .skein directory.
+mill_bin=${MILL_BIN:-}
+if [[ -z "$mill_bin" && -x "$repo_root/../millstrand/bin/mill" ]]; then
+  mill_bin="$repo_root/../millstrand/bin/mill"
+fi
+if [[ -z "$mill_bin" ]]; then
+  mill_bin=$(command -v mill || true)
+fi
+[[ -n "$mill_bin" && -x "$mill_bin" ]] || die "missing mill executable; set MILL_BIN to published Millstrand mill"
+
+target_parent="$workspace_root/fresh-world"
+mkdir -p "$target_parent"
+target_marker="$target_parent/.millstrand"
+target_state="$state_root/millstrand"
+mkdir -p "$target_state"
+
+mill_log="$fixture_root/mill.log"
+mill_pid=""
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" start >"$mill_log" 2>&1 &
+mill_pid=$!
+deadline=$((SECONDS + MILL_READY_TIMEOUT_SECS))
+until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
+  kill -0 "$mill_pid" 2>/dev/null || die "disposable mill exited before readiness: $(sed -n '1,80p' "$mill_log")"
+  ((SECONDS < deadline)) || die "disposable mill did not become ready within ${MILL_READY_TIMEOUT_SECS}s; status command: $mill_bin status; log: $mill_log"
+  sleep "$mill_ready_poll_seconds"
+done
+
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" init --workspace "$target_marker" >"$fixture_root/init-millstrand.txt" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/init-millstrand.txt" >&2
+  die "fresh .millstrand init failed"
+}
+[[ -d "$target_marker" ]] || die "fresh .millstrand marker was not created"
+[[ ! -e "$target_state/skein.sqlite" ]] || die "target database unexpectedly pre-existed"
+
+target_db=""
+if [[ -f "$target_marker/weaver.json" ]]; then
+  target_db=$(python3 - "$target_marker/weaver.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("database_path", ""))
+PY
+)
+fi
+if [[ -n "$target_db" && "$target_db" == "$source_db" ]]; then
+  die "fresh target database points at the source database"
+fi
+
+# Activate only the disposable marker. The target consumes Agent Harness from
+# its immutable published coordinate and root map; only the workspace-owned
+# smoke harness configuration remains local. Neither the live marker nor its
+# database is consulted by Millstrand.
+cp -R "$candidate_root/.skein/." "$target_marker/"
+cat >"$target_marker/spools.edn" <<EOF
+{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
+          millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
+          ct.spools/agent-run
+          {:git/url "https://github.com/codethread/agent-harness.spool.git"
+           :git/tag "$agent_tag"
+           :git/sha "$agent_sha"
+           :roots {ct.spools/agent-run "agent-run"
+                   ct.spools/harness-core "harness-core"
+                   ct.spools/claude-harness "claude-harness"
+                   ct.spools/codex-harness "codex-harness"
+                   ct.spools/pi-harness "pi-harness"
+                   ct.spools/cursor-harness "cursor-harness"
+                   ct.spools/agent-cli "agent-cli"
+                   ct.spools/delegation "delegation"
+                   ct.spools/bench "bench"}}
+          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
+                             :git/tag "$kanban_tag"
+                             :git/sha "$kanban_sha"
+                             :roots {codethread/kanban "."}}}}
+EOF
+python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_tag" "$kanban_sha" <<'PY'
+import pathlib
+import sys
+
+path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_tag, kanban_sha = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+for forbidden in (":local/root", ":override-deps", "v23", "v20"):
+    if forbidden in text:
+        raise SystemExit(f"activated release spools contain forbidden marker: {forbidden}")
+expected = {
+    "ct.spools/agent-run": "agent-run",
+    "ct.spools/harness-core": "harness-core",
+    "ct.spools/claude-harness": "claude-harness",
+    "ct.spools/codex-harness": "codex-harness",
+    "ct.spools/pi-harness": "pi-harness",
+    "ct.spools/cursor-harness": "cursor-harness",
+    "ct.spools/agent-cli": "agent-cli",
+    "ct.spools/delegation": "delegation",
+    "ct.spools/bench": "bench",
+}
+for coordinate, root in expected.items():
+    if f"{coordinate} \"{root}\"" not in text:
+        raise SystemExit(f"activated Agent Harness root map is missing {coordinate} -> {root}")
+for value in (
+    f':git/url "https://github.com/{agent_repository}.git"',
+    f':git/tag "{agent_tag}"',
+    f':git/sha "{agent_sha}"',
+    f':git/url "https://github.com/{kanban_repository}.git"',
+    f':git/tag "{kanban_tag}"',
+    f':git/sha "{kanban_sha}"',
+):
+    if value not in text:
+        raise SystemExit(f"activated release spools are missing immutable pin {value}")
+if text.count(":roots") != 2:
+    raise SystemExit("activated release spools must contain exactly the Agent Harness and Kanban root maps")
+PY
+cat >"$target_marker/config/harnesses.clj" <<'EOF'
+(ns harnesses
+  (:require [millstrand.api.current.alpha :as current]
+            [millstrand.api.lifecycle.alpha :as lifecycle]
+            [ct.spools.agent-run :as shuttle]
+            [ct.spools.delegation :as agents]))
+
+(shuttle/defharnesses ^:private smoke-harnesses
+  "Disposable preparation smoke harness."
+  {:release-smoke
+   {:argv ["sh" "-c"
+           "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"preparation-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"preparation smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'" ]
+    :parse :codex-json
+    :preamble? false
+    :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
+
+(defn open-harnesses! [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! agents/review-contract)
+    (shuttle/set-default-task-contract! agents/worker-contract))
+  {:opened :harnesses})
+
+(defn close-harnesses! [{:keys [runtime]}]
+  (current/with-runtime runtime
+    (shuttle/set-default-review-contract! nil)
+    (shuttle/set-default-task-contract! nil))
+  {:closed :harnesses})
+
+(lifecycle/defresource harnesses-runtime
+  "Own the disposable preparation smoke harness."
+  {:open 'harnesses/open-harnesses!
+   :close 'harnesses/close-harnesses!})
+EOF
+
+strand_bin=${STRAND_BIN:-$(dirname "$mill_bin")/strand}
+[[ -x "$strand_bin" ]] || strand_bin=$(command -v strand || true)
+[[ -n "$strand_bin" && -x "$strand_bin" ]] || die "missing strand executable; set STRAND_BIN to published Millstrand strand"
+mill_cmd() {
+  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"
+}
+strand_cmd() {
+  XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$weaver_workspace" "$@"
+}
+
+weaver_workspace="$target_marker"
+weaver_active=0
+mill_cmd weaver start --workspace "$weaver_workspace" >"$fixture_root/weaver-millstrand.log" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/weaver-millstrand.log" >&2
+  die "fresh .millstrand weaver failed to start"
+}
+weaver_active=1
+mill_cmd weaver status --workspace "$weaver_workspace" >"$fixture_root/status-millstrand.json"
+
+smoke_marker() {
+  local label=$1
+  local state_json task_id delegate_result delegate_run await_result spend_result
+  state_json=$(strand_cmd add "preparation $label delegate await spend" --attr body=preparation-smoke)
+  task_id=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["id"])' <<<"$state_json")
+  [[ -n "$task_id" ]] || die "$label smoke did not create a strand"
+  delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
+  delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
+  await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs "$AGENT_AWAIT_TIMEOUT_SECS")
+  python3 - "$await_result" "$label" <<'PY'
+import json
+import sys
+result = json.loads(sys.argv[1])
+if result.get("timed-out") or len(result.get("runs", [])) != 1 or result["runs"][0].get("phase") != "done":
+    raise SystemExit(f"{sys.argv[2]} delegate/await smoke did not finish successfully: {result}")
+PY
+  spend_result=$(strand_cmd agent spend --group-by harness)
+  printf '%s\n' "$spend_result" >"$fixture_root/spend-$label.json"
+  printf '%s\n' "$state_json" >"$evidence_root/strand-$label.json"
+  printf '%s\n' "$delegate_result" >"$evidence_root/delegate-$label.json"
+  printf '%s\n' "$await_result" >"$evidence_root/await-$label.json"
+  cp "$fixture_root/spend-$label.json" "$evidence_root/spend-$label.json"
+}
+
+smoke_marker millstrand
+mill_cmd weaver stop --workspace "$weaver_workspace" >/dev/null
+weaver_active=0
+mv "$target_marker" "$target_parent/.ms"
+[[ -d "$target_parent/.ms" && ! -e "$target_parent/.millstrand" ]] || die "marker rename did not produce an inactive .ms fixture"
+weaver_workspace="$target_parent/.ms"
+mill_cmd weaver start --workspace "$weaver_workspace" >"$fixture_root/weaver-ms.log" 2>&1 || {
+  sed -n '1,120p' "$fixture_root/weaver-ms.log" >&2
+  die "fresh .ms weaver failed to start"
+}
+weaver_active=1
+mill_cmd weaver status --workspace "$weaver_workspace" >"$fixture_root/status-ms.json"
+smoke_marker ms
+
+target_db=$(python3 - "$fixture_root/status-ms.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("database_path", ""))
+PY
+)
+[[ -n "$target_db" && -f "$target_db" ]] || die "fresh target database does not exist; exact reported path: ${target_db:-<missing>}"
+[[ "$target_db" != "$source_db" ]] || die "fresh target database points at source database: $target_db"
+[[ ! -e "$source_db" || "$(file_identity "$source_db")" != "$(file_identity "$target_db")" ]] || die "target database aliases source database"
+printf '%s\n' "target-marker=$target_parent/.ms" "target-database=$target_db" >"$fixture_root/fresh-world.txt"
+
+[[ -d "$source_marker" ]] || die "live source marker disappeared during preparation: $source_marker"
+[[ -f "$source_db" ]] || die "live source database disappeared during preparation: $source_db"
+[[ "$(file_identity "$source_marker")" == "$source_marker_identity" ]] || die "live source marker changed during preparation: $source_marker"
+[[ "$(file_identity "$source_db")" == "$source_db_identity" ]] || die "live source database changed during preparation: $source_db"
+
+python3 - "$fixture_root/spend-ms.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    spend = json.load(handle)
+if len(spend.get("runs", [])) != 2:
+    raise SystemExit(f"spend smoke expected two disposable marker runs: {spend}")
+if spend.get("totals", {}).get("tokens-total") != 4200:
+    raise SystemExit(f"spend smoke token total mismatch: {spend}")
+PY
+
+python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$agent_tag" "$agent_sha" "$kanban_tag" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
+import json
+import os
+import sys
+
+out, repo, core_sha, agent_tag, agent_sha, kanban_tag, kanban_sha, marker, database = sys.argv[1:]
+summary = {
+    "identity-check": "pass",
+    "core": {"repository": "codethread/millstrand", "sha": core_sha, "local-root-rejected": True},
+    "agent-harness": {"tag": agent_tag, "peeled-sha": agent_sha, "exact": True},
+    "kanban": {"tag": kanban_tag, "peeled-sha": kanban_sha, "exact": True},
+    "fresh-database": {"marker": marker, "database": database, "source-database-imported": False},
+    "delegate": "pass",
+    "await": "pass",
+    "spend": "pass",
+    "live-workspace-touched": False,
+    "repository": os.path.realpath(repo),
+}
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump(summary, handle, indent=2)
+    handle.write("\n")
+PY
+
+preserve_required_evidence || die "required evidence preservation failed; inspect the diagnostics above"
+
+echo "agent-harness preparation verification: clean"
+echo "  MSR-06: $agent_tag@$agent_sha"
+echo "  core: $core_repository@$core_sha"
+echo "  target marker: $target_parent/.ms"
+echo "  evidence: $evidence_root"
