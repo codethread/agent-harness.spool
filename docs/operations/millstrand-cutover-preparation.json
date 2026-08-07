@@ -74,7 +74,22 @@
   "runtime": {
     "status-command": "MILL_BIN=<published-millstrand-bin> XDG_STATE_HOME=<isolated-state> mill weaver status --workspace <target-marker>",
     "pid-command": "ps -p <target-pid> -o pid=,ppid=,stat=,lstart=,command=",
-    "database-command": "sqlite3 <target-database> 'PRAGMA integrity_check;'"
+    "database-command": "sqlite3 <target-database> 'PRAGMA integrity_check;'",
+    "readiness-contract": {
+      "mill-status": {
+        "event": "the mill status command succeeds",
+        "deadline-env": "MILL_READY_TIMEOUT_SECS",
+        "default-seconds": 30,
+        "poll-env": "MILL_READY_POLL_MS",
+        "default-milliseconds": 50
+      },
+      "agent-await": {
+        "event": "strand agent await reports one done run",
+        "deadline-env": "AGENT_AWAIT_TIMEOUT_SECS",
+        "default-seconds": 30
+      },
+      "contract": "Deadlines are positive integer seconds; readiness polling is a positive integer millisecond interval. A deadline failure includes the command and evidence log path and fails the preparation gate."
+    }
   },
   "rollback": {
     "owner": "MSR-15",
@@ -89,6 +104,11 @@
       "command": "bin/identity-check > target/millstrand-cutover-preparation/identity-check.txt",
       "result": "pass",
       "artifact": "target/millstrand-cutover-preparation/identity-check.txt"
+    },
+    {
+      "command": "bin/validate-consumer-preparation docs/operations/millstrand-cutover-preparation.json",
+      "result": "pass",
+      "artifact": "target/millstrand-cutover-preparation/manifest-validation.json"
     },
     {
       "command": "bin/verify-millstrand-preparation",
@@ -113,8 +133,10 @@
   },
   "artifacts": [
     "docs/operations/millstrand-cutover-preparation.json",
+    "bin/validate-consumer-preparation",
     "bin/verify-millstrand-preparation",
     "target/millstrand-cutover-preparation/identity-check.txt",
+    "target/millstrand-cutover-preparation/manifest-validation.json",
     "target/millstrand-cutover-preparation/activated-spools.edn"
   ]
 }

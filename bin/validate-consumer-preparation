@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Validate the closed MSR-14C consumer-preparation manifest contract."""
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+
+LIVE_MARKER = "/Users/ct/dev/projects/agent-harness.spool/.skein"
+LIVE_DATABASE = "/Users/ct/.local/state/skein/weavers/0245892212ec336f39b2496a53ed3269/data/skein.sqlite"
+TARGET_MARKER = "/Users/ct/dev/projects/agent-harness.spool/.millstrand"
+TARGET_HASH = hashlib.sha256(TARGET_MARKER.encode()).hexdigest()[:32]
+TARGET_DATABASE = (
+    "/Users/ct/.local/state/millstrand/weavers/"
+    f"{TARGET_HASH}/data/millstrand.sqlite"
+)
+EXPECTED_CARDS = {"MSR-04", "MSR-05", "MSR-06"}
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def fail(message):
+    raise SystemExit(f"consumer-preparation schema: {message}")
+
+
+def mapping(value, label):
+    if not isinstance(value, dict):
+        fail(f"{label} must be an object")
+    return value
+
+
+def string(value, label):
+    if not isinstance(value, str) or not value:
+        fail(f"{label} must be a non-empty string")
+    return value
+
+
+def exact(value, expected, label):
+    if value != expected:
+        fail(f"{label} must be {expected!r}")
+
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"cannot read JSON manifest {path}: {exc}")
+
+
+def validate(path):
+    doc = mapping(load(path), "manifest")
+    required = {
+        "schema", "card", "consumer", "repository", "disposition", "source",
+        "target", "staging", "release-inputs", "runtime", "rollback",
+        "verification", "verification-plan", "artifacts",
+    }
+    missing = sorted(required - set(doc))
+    unknown = sorted(set(doc) - required)
+    if missing:
+        fail(f"manifest is missing required fields: {', '.join(missing)}")
+    if unknown:
+        fail(f"manifest has unknown fields: {', '.join(unknown)}")
+
+    exact(doc["schema"], "devflow/consumer-preparation", "manifest schema")
+    exact(doc["card"], "MSR-14C", "manifest card")
+    exact(doc["consumer"], "agent-harness.spool", "manifest consumer")
+    exact(doc["repository"], "/Users/ct/dev/projects/agent-harness.spool", "manifest repository")
+    exact(doc["disposition"], "ready", "manifest disposition")
+
+    source = mapping(doc["source"], "manifest source")
+    for key in ("marker", "database", "weaver-id", "status-command", "weaver-status-command"):
+        string(source.get(key), f"manifest source.{key}")
+    mapping(source.get("active-pins"), "manifest source.active-pins")
+    exact(source["marker"], LIVE_MARKER, "manifest source marker")
+    exact(source["database"], LIVE_DATABASE, "manifest source database")
+    if not isinstance(source["observed-pid"], int) or source["observed-pid"] <= 0:
+        fail("manifest source observed-pid must be a positive integer")
+    pins = mapping(source["active-pins"], "manifest source active-pins")
+    for name, tag, sha in (("agent-harness", "v23", "2e689490d875bc66887b158f34382b97ade4df6b"),
+                           ("kanban", "v20", "398a1610d094c85ad9c6691dafd213aaa35d73de")):
+        pin = mapping(pins.get(name), f"manifest source.active-pins.{name}")
+        exact(pin.get("repository"), "codethread/agent-harness.spool" if name == "agent-harness" else "codethread/kanban.spool", f"source {name} repository")
+        exact(pin.get("tag"), tag, f"source {name} tag")
+        exact(pin.get("peeled-sha"), sha, f"source {name} peeled-sha")
+
+    target = mapping(doc["target"], "manifest target")
+    for key in ("marker", "database", "world-hash", "world-hash-algorithm", "activation", "database-policy"):
+        string(target.get(key), f"manifest target.{key}")
+    exact(target["marker"], TARGET_MARKER, "manifest target marker")
+    exact(target["world-hash"], TARGET_HASH, "manifest target world hash")
+    exact(target["database"], TARGET_DATABASE, "manifest target database")
+    if ".millstrand" not in target["world-hash-algorithm"]:
+        fail("manifest target must name the canonical .millstrand hash identity")
+    if target["database"] == source["database"]:
+        fail("source and target database paths must differ")
+
+    staging = mapping(doc["staging"], "manifest staging")
+    for key in ("root", "marker", "database", "evidence", "policy"):
+        string(staging.get(key), f"manifest staging.{key}")
+    if "staging" in target:
+        fail("disposable staging must be outside the final target metadata")
+    if staging["evidence"] != "target/millstrand-cutover-preparation/":
+        fail("manifest staging evidence must remain in the checked-in evidence directory")
+
+    release_inputs = doc["release-inputs"]
+    if not isinstance(release_inputs, list):
+        fail("release-inputs must be an array")
+    cards = []
+    for index, item in enumerate(release_inputs):
+        item = mapping(item, f"release-inputs[{index}]")
+        card = string(item.get("card"), f"release-inputs[{index}].card")
+        if card in cards:
+            fail(f"duplicate release input card before lookup: {card}")
+        cards.append(card)
+    unknown_cards = sorted(set(cards) - EXPECTED_CARDS)
+    if unknown_cards:
+        fail(f"unknown release input card before lookup: {', '.join(unknown_cards)}")
+    missing_cards = sorted(EXPECTED_CARDS - set(cards))
+    if missing_cards:
+        fail(f"manifest is missing release input {', '.join(missing_cards)}")
+    inputs = {item["card"]: item for item in release_inputs}
+
+    msr06 = inputs["MSR-06"]
+    expected06 = {
+        "repository": "codethread/agent-harness.spool",
+        "coordinate": "ct.spools/agent-run",
+        "tag": "v26",
+        "peeled-sha": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+        "landed-main-commit": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+    }
+    for key, value in expected06.items():
+        exact(msr06.get(key), value, f"MSR-06 {key}")
+
+    core = inputs["MSR-04"]
+    required_core = {"card", "repository", "coordinate", "ref-kind", "sha", "landed-main-commit", "land-run"}
+    if set(core) & {"tag", "peeled-sha"}:
+        fail("MSR-04 core input must not contain tag or peeled-sha")
+    if not required_core.issubset(core):
+        fail("MSR-04 core input is incomplete")
+    exact(core["repository"], "codethread/millstrand", "MSR-04 repository")
+    exact(core["coordinate"], "io.millstrand/millstrand", "MSR-04 coordinate")
+    exact(core["ref-kind"], "sha", "MSR-04 ref-kind")
+    for key in ("sha", "landed-main-commit"):
+        if not isinstance(core[key], str) or not SHA.fullmatch(core[key]):
+            fail(f"MSR-04 {key} must be a lowercase 40-hex SHA")
+    exact(core["sha"], core["landed-main-commit"], "MSR-04 SHA")
+
+    msr05 = inputs["MSR-05"]
+    expected05 = {
+        "repository": "codethread/kanban.spool",
+        "coordinate": "codethread/kanban",
+        "tag": "v24",
+        "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
+        "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+    }
+    for key, value in expected05.items():
+        exact(msr05.get(key), value, f"MSR-05 {key}")
+
+    runtime = mapping(doc["runtime"], "manifest runtime")
+    for key in ("status-command", "pid-command", "database-command"):
+        string(runtime.get(key), f"manifest runtime.{key}")
+    rollback = mapping(doc["rollback"], "manifest rollback")
+    for key in ("owner", "live-switch", "source-marker", "source-database", "restore-pins", "backup-policy"):
+        string(rollback.get(key), f"manifest rollback.{key}")
+    exact(rollback["live-switch"], "Do not stop, repoint, rename, restart, or activate the live .skein world in this preparation task.", "manifest rollback live-switch")
+    exact(rollback["source-marker"], source["marker"], "manifest rollback source-marker")
+    exact(rollback["source-database"], source["database"], "manifest rollback source-database")
+    for key in ("verification", "artifacts"):
+        if not isinstance(doc[key], list) or not doc[key]:
+            fail(f"manifest {key} must be a non-empty array")
+    verification_plan = mapping(doc["verification-plan"], "manifest verification-plan")
+    for key in ("transcripts", "expected"):
+        if key not in verification_plan:
+            fail(f"manifest verification-plan is missing {key}")
+    if not isinstance(verification_plan["expected"], list) or not verification_plan["expected"]:
+        fail("manifest verification-plan expected must be a non-empty array")
+
+    target_text = json.dumps(target, sort_keys=True)
+    for forbidden in (":local/root", ":override-deps", "v23", "v20"):
+        if forbidden in target_text:
+            fail(f"final target metadata contains forbidden release marker: {forbidden}")
+
+    return {
+        "core_repository": core["repository"],
+        "core_sha": core["sha"],
+        "agent_repository": msr06["repository"],
+        "agent_tag": msr06["tag"],
+        "agent_sha": msr06["peeled-sha"],
+        "kanban_repository": msr05["repository"],
+        "kanban_tag": msr05["tag"],
+        "kanban_sha": msr05["peeled-sha"],
+        "source_marker": source["marker"],
+        "source_database": source["database"],
+    }
+
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: validate-consumer-preparation MANIFEST.json")
+
+try:
+    result = validate(Path(sys.argv[1]))
+except KeyError as exc:
+    fail(f"manifest is missing required field: {exc.args[0]}")
+print(json.dumps(result, sort_keys=True))

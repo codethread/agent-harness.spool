@@ -15,6 +15,17 @@ need git
 need python3
 need clojure
 need mktemp
+need awk
+
+file_identity() {
+  local path=$1 identity
+  if identity=$(stat -c '%d:%i' "$path" 2>/dev/null); then
+    printf '%s\n' "$identity"
+  else
+    identity=$(stat -f '%d:%i' "$path") || return
+    printf '%s\n' "$identity"
+  fi
+}
 
 [[ -f "$manifest" ]] || die "missing preparation manifest: $manifest"
 mkdir -p "$evidence_root"
@@ -28,155 +39,157 @@ fi
 identity_sha=$(shasum -a 256 "$identity_transcript" | awk '{print $1}')
 printf '%s  %s\n' "$identity_sha" "$identity_transcript" >"$evidence_root/identity-check.sha256"
 
-release_values=$(python3 - "$manifest" <<'PY'
-import json
-import hashlib
-import re
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as handle:
-    doc = json.load(handle)
-
-if doc.get("schema") != "devflow/consumer-preparation":
-    raise SystemExit("manifest schema must be devflow/consumer-preparation")
-if doc.get("card") != "MSR-14C" or doc.get("consumer") != "agent-harness.spool":
-    raise SystemExit("manifest identity must be MSR-14C / agent-harness.spool")
-if doc.get("disposition") != "ready":
-    raise SystemExit("manifest disposition must be ready")
-
-inputs = {item.get("card"): item for item in doc.get("release-inputs", [])}
-for card in ("MSR-04", "MSR-05", "MSR-06"):
-    if card not in inputs:
-        raise SystemExit(f"manifest is missing release input {card}")
-
-msr06 = inputs["MSR-06"]
-expected06 = {
-    "repository": "codethread/agent-harness.spool",
-    "coordinate": "ct.spools/agent-run",
-    "tag": "v26",
-    "peeled-sha": "82f8df466e6caea74a93d994604d94ab6bf78b72",
-    "landed-main-commit": "82f8df466e6caea74a93d994604d94ab6bf78b72",
+release_values=$("$repo_root/bin/validate-consumer-preparation" "$manifest") || die "preparation manifest validation failed"
+json_value() {
+  python3 -c 'import json,sys; print(json.loads(sys.stdin.read())[sys.argv[1]])' "$1" <<<"$release_values"
 }
-if any(msr06.get(key) != value for key, value in expected06.items()):
-    raise SystemExit("MSR-06 does not match the authoritative v26 release input")
+core_repository=$(json_value core_repository)
+core_sha=$(json_value core_sha)
+agent_repository=$(json_value agent_repository)
+agent_tag=$(json_value agent_tag)
+agent_sha=$(json_value agent_sha)
+kanban_repository=$(json_value kanban_repository)
+kanban_tag=$(json_value kanban_tag)
+kanban_sha=$(json_value kanban_sha)
+source_marker=$(json_value source_marker)
+source_db=$(json_value source_database)
 
-core = inputs["MSR-04"]
-required_core = {
-    "card", "repository", "coordinate", "ref-kind", "sha",
-    "landed-main-commit", "land-run",
-}
-if set(core) & {"tag", "peeled-sha"}:
-    raise SystemExit("MSR-04 core input must not contain tag or peeled-sha")
-if not required_core.issubset(core):
-    raise SystemExit("MSR-04 core input is incomplete")
-if (core["repository"], core["coordinate"], core["ref-kind"]) != (
-    "codethread/millstrand", "io.millstrand/millstrand", "sha"
-):
-    raise SystemExit("MSR-04 core input has the wrong repository, coordinate, or ref-kind")
-for key in ("sha", "landed-main-commit"):
-    if not re.fullmatch(r"[0-9a-f]{40}", core[key]):
-        raise SystemExit(f"MSR-04 {key} must be a lowercase 40-hex SHA")
-if core["sha"] != core["landed-main-commit"]:
-    raise SystemExit("MSR-04 SHA must equal landed-main-commit")
-
-msr05 = inputs["MSR-05"]
-expected05 = {
-    "repository": "codethread/kanban.spool",
-    "coordinate": "codethread/kanban",
-    "tag": "v24",
-    "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
-    "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
-}
-if any(msr05.get(key) != value for key, value in expected05.items()):
-    raise SystemExit("MSR-05 does not match the authoritative v24 release input")
-
-source = doc.get("source", {})
-if source.get("marker") != "/Users/ct/dev/projects/agent-harness.spool/.skein":
-    raise SystemExit("manifest source marker is not the observed live marker")
-if source.get("database") == doc.get("target", {}).get("database"):
-    raise SystemExit("source and target database paths must differ")
-if source.get("observed-pid") != 73514:
-    raise SystemExit("manifest source PID must retain the observed live PID")
-
-target = doc.get("target", {})
-expected_target_marker = "/Users/ct/dev/projects/agent-harness.spool/.millstrand"
-expected_target_hash = hashlib.sha256(expected_target_marker.encode()).hexdigest()[:32]
-expected_target_database = (
-    "/Users/ct/.local/state/millstrand/weavers/"
-    f"{expected_target_hash}/data/millstrand.sqlite"
-)
-if target.get("marker") != expected_target_marker:
-    raise SystemExit("manifest target marker is not the future .millstrand target")
-if target.get("world-hash") != expected_target_hash:
-    raise SystemExit("manifest target world hash does not match the checked-in WorldHash algorithm")
-if target.get("database") != expected_target_database:
-    raise SystemExit("manifest target database does not match its marker-neutral world hash")
-if ".millstrand" not in target.get("world-hash-algorithm", ""):
-    raise SystemExit("manifest target must name the canonical .millstrand hash identity")
-if "staging" in target:
-    raise SystemExit("disposable staging must be outside the final target metadata")
-if not isinstance(doc.get("staging"), dict):
-    raise SystemExit("manifest must keep disposable staging/evidence in a separate field")
-target_text = json.dumps(target, sort_keys=True)
-for forbidden in (":local/root", ":override-deps", "v23", "v20"):
-    if forbidden in target_text:
-        raise SystemExit(f"final target metadata contains forbidden release marker: {forbidden}")
-
-print(core["repository"])
-print(core["sha"])
-print(msr06["repository"])
-print(msr06["tag"])
-print(msr06["peeled-sha"])
-print(msr05["repository"])
-print(msr05["tag"])
-print(msr05["peeled-sha"])
-print(source["database"])
-PY
-) || die "preparation manifest validation failed"
-
-core_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
-core_sha=$(printf '%s\n' "$release_values" | sed -n '2p')
-agent_repository=$(printf '%s\n' "$release_values" | sed -n '3p')
-agent_tag=$(printf '%s\n' "$release_values" | sed -n '4p')
-agent_sha=$(printf '%s\n' "$release_values" | sed -n '5p')
-kanban_repository=$(printf '%s\n' "$release_values" | sed -n '6p')
-kanban_tag=$(printf '%s\n' "$release_values" | sed -n '7p')
-kanban_sha=$(printf '%s\n' "$release_values" | sed -n '8p')
-source_db=$(printf '%s\n' "$release_values" | sed -n '9p')
+[[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
+[[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"
+source_marker_identity=$(file_identity "$source_marker")
+source_db_identity=$(file_identity "$source_db")
+printf '%s\n' "source-marker=$source_marker" "source-database=$source_db" \
+  "source-marker-identity=$source_marker_identity" "source-database-identity=$source_db_identity" \
+  >"$evidence_root/live-source.txt"
+printf '%s\n' "$release_values" >"$evidence_root/manifest-validation.json"
 
 for value in "$core_repository" "$agent_repository" "$kanban_repository"; do
   [[ "$value" != /* && "$value" != *"../"* ]] || die "release repository may not be a local root: $value"
 done
 
+# Readiness is command-driven: `mill status` is the readiness event and the
+# agent await command owns run completion. These bounded knobs are the public
+# contract; they avoid an unbounded or undocumented arbitrary wait.
+MILL_READY_TIMEOUT_SECS=${MILL_READY_TIMEOUT_SECS:-30}
+MILL_READY_POLL_MS=${MILL_READY_POLL_MS:-50}
+AGENT_AWAIT_TIMEOUT_SECS=${AGENT_AWAIT_TIMEOUT_SECS:-30}
+for name in MILL_READY_TIMEOUT_SECS MILL_READY_POLL_MS AGENT_AWAIT_TIMEOUT_SECS; do
+  value=${!name}
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer (got: $value)"
+done
+mill_ready_poll_seconds=$(awk -v ms="$MILL_READY_POLL_MS" 'BEGIN { printf "%.3f", ms / 1000 }')
+
 # Keep the disposable state path short enough for the Unix socket used by the
 # local mill. macOS may expose a long TMPDIR, which otherwise makes bind(2)
 # fail before the fixture can start.
 tmp_root=$(mktemp -d "/tmp/ah-cutover.XXXXXX")
-cleanup() {
-  local rc=$?
-  if [[ -n "${fixture_root:-}" && -d "$fixture_root" ]]; then
-    mkdir -p "$evidence_root"
-    cp "$fixture_root/summary.json" "$evidence_root/fixture-summary.json" 2>/dev/null || true
-  fi
-  if [[ "${weaver_active:-0}" == 1 && -n "${weaver_workspace:-}" && -n "${mill_bin:-}" ]]; then
-    XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="${core_root:-}" \
-      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
-    kill "$mill_pid" 2>/dev/null || true
-    wait "$mill_pid" 2>/dev/null || true
-  fi
-  rm -rf "$tmp_root"
-  trap - EXIT
-  exit "$rc"
-}
-trap cleanup EXIT
-
 state_root="$tmp_root/state"
 workspace_root="$tmp_root/workspace"
 fixture_root="$tmp_root/fixtures"
 mkdir -p "$state_root" "$workspace_root" "$fixture_root"
+
+preserve_required_evidence() {
+  local failed=0 source_file destination_file name
+  local -a fixture_evidence=(
+    "fresh-world.txt:fresh-world.txt"
+    "summary.json:fixture-summary.json"
+    "init-millstrand.txt:init-millstrand.txt"
+    "weaver-millstrand.log:weaver-millstrand.log"
+    "weaver-ms.log:weaver-ms.log"
+    "status-millstrand.json:status-millstrand.json"
+    "status-ms.json:status-ms.json"
+  )
+  for name in "${fixture_evidence[@]}"; do
+    source_file="$fixture_root/${name%%:*}"
+    destination_file="$evidence_root/${name##*:}"
+    if [[ ! -f "$source_file" ]]; then
+      echo "verify-millstrand-preparation: required evidence is missing: $source_file" >&2
+      failed=1
+    elif ! cp "$source_file" "$destination_file"; then
+      echo "verify-millstrand-preparation: failed to preserve evidence: $source_file -> $destination_file" >&2
+      failed=1
+    elif [[ ! -f "$destination_file" ]]; then
+      echo "verify-millstrand-preparation: preserved evidence is not present: $destination_file" >&2
+      failed=1
+    fi
+  done
+  if [[ -z "${weaver_workspace:-}" || ! -f "$weaver_workspace/spools.edn" ]]; then
+    echo "verify-millstrand-preparation: required evidence is missing: ${weaver_workspace:-<unstarted>}/spools.edn" >&2
+    failed=1
+  elif ! cp "$weaver_workspace/spools.edn" "$evidence_root/activated-spools.edn"; then
+    echo "verify-millstrand-preparation: failed to preserve activated spools evidence" >&2
+    failed=1
+  fi
+  for name in \
+    identity-check.txt identity-check.sha256 live-source.txt manifest-validation.json release-resolution.txt \
+    strand-millstrand.json delegate-millstrand.json await-millstrand.json spend-millstrand.json \
+    strand-ms.json delegate-ms.json await-ms.json spend-ms.json; do
+    if [[ ! -f "$evidence_root/$name" ]]; then
+      echo "verify-millstrand-preparation: required evidence is missing: $evidence_root/$name" >&2
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
+cleanup() {
+  local rc=$?
+  local cleanup_failed=0 cleanup_report wait_rc stop_output
+  cleanup_report="$evidence_root/cleanup-diagnostics.txt"
+  if ! : >"$cleanup_report"; then
+    echo "verify-millstrand-preparation: cannot create cleanup diagnostics: $cleanup_report" >&2
+    cleanup_failed=1
+  fi
+  report_cleanup_error() {
+    local message=$*
+    echo "verify-millstrand-preparation: cleanup: $message" >&2
+    printf '%s\n' "$message" >>"$cleanup_report" || true
+    cleanup_failed=1
+  }
+
+  if [[ -n "${fixture_root:-}" && -d "$fixture_root" ]]; then
+    if ! preserve_required_evidence; then
+      report_cleanup_error "required evidence preservation failed; inspect diagnostics and missing paths above"
+    fi
+  else
+    report_cleanup_error "fixture root is unavailable; required evidence cannot be preserved"
+  fi
+  if [[ "${weaver_active:-0}" == 1 && -n "${weaver_workspace:-}" && -n "${mill_bin:-}" ]]; then
+    if ! stop_output=$(XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="${core_root:-}" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" 2>&1); then
+      report_cleanup_error "weaver stop failed for $weaver_workspace: $stop_output"
+    else
+      printf 'weaver stop: %s\n' "$stop_output" >>"$cleanup_report" || true
+      weaver_active=0
+    fi
+  fi
+  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+    if ! kill "$mill_pid" 2>/dev/null; then
+      report_cleanup_error "failed to terminate disposable mill process PID $mill_pid"
+    else
+      wait_rc=0
+      wait "$mill_pid" 2>/dev/null || wait_rc=$?
+      printf 'mill process PID %s terminated with wait status %s\n' "$mill_pid" "$wait_rc" >>"$cleanup_report" || true
+      if kill -0 "$mill_pid" 2>/dev/null; then
+        report_cleanup_error "disposable mill process leaked: PID $mill_pid"
+      fi
+    fi
+  fi
+  if [[ -e "$tmp_root" ]]; then
+    if ! rm -rf "$tmp_root"; then
+      report_cleanup_error "failed to remove disposable root: $tmp_root"
+    elif [[ -e "$tmp_root" ]]; then
+      report_cleanup_error "disposable root remains after cleanup: $tmp_root"
+    fi
+  fi
+  if (( cleanup_failed != 0 && rc == 0 )); then
+    rc=1
+    echo "verify-millstrand-preparation: cleanup failed; diagnostics: $cleanup_report" >&2
+  fi
+  trap - EXIT
+  exit "$rc"
+}
+trap cleanup EXIT
 
 # Resolve each published identity into disposable source metadata. No local
 # root can satisfy these checks, and the checked-out object must be the exact
@@ -250,11 +263,11 @@ mill_log="$fixture_root/mill.log"
 mill_pid=""
 XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" start >"$mill_log" 2>&1 &
 mill_pid=$!
-deadline=$((SECONDS + 30))
+deadline=$((SECONDS + MILL_READY_TIMEOUT_SECS))
 until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
   kill -0 "$mill_pid" 2>/dev/null || die "disposable mill exited before readiness: $(sed -n '1,80p' "$mill_log")"
-  ((SECONDS < deadline)) || die "disposable mill did not become ready within 30s"
-  sleep 0.05
+  ((SECONDS < deadline)) || die "disposable mill did not become ready within ${MILL_READY_TIMEOUT_SECS}s; status command: $mill_bin status; log: $mill_log"
+  sleep "$mill_ready_poll_seconds"
 done
 
 XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" init --workspace "$target_marker" >"$fixture_root/init-millstrand.txt" 2>&1 || {
@@ -401,7 +414,7 @@ smoke_marker() {
   [[ -n "$task_id" ]] || die "$label smoke did not create a strand"
   delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
   delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
-  await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
+  await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs "$AGENT_AWAIT_TIMEOUT_SECS")
   python3 - "$await_result" "$label" <<'PY'
 import json
 import sys
@@ -438,9 +451,15 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     print(json.load(handle).get("database_path", ""))
 PY
 )
-[[ -n "$target_db" && "$target_db" != "$source_db" ]] || die "fresh target database is missing or points at source database"
-[[ ! -e "$source_db" || "$(stat -f '%i' "$source_db" 2>/dev/null || true)" != "$(stat -f '%i' "$target_db" 2>/dev/null || true)" ]] || die "target database aliases source database"
+[[ -n "$target_db" && -f "$target_db" ]] || die "fresh target database does not exist; exact reported path: ${target_db:-<missing>}"
+[[ "$target_db" != "$source_db" ]] || die "fresh target database points at source database: $target_db"
+[[ ! -e "$source_db" || "$(file_identity "$source_db")" != "$(file_identity "$target_db")" ]] || die "target database aliases source database"
 printf '%s\n' "target-marker=$target_parent/.ms" "target-database=$target_db" >"$fixture_root/fresh-world.txt"
+
+[[ -d "$source_marker" ]] || die "live source marker disappeared during preparation: $source_marker"
+[[ -f "$source_db" ]] || die "live source database disappeared during preparation: $source_db"
+[[ "$(file_identity "$source_marker")" == "$source_marker_identity" ]] || die "live source marker changed during preparation: $source_marker"
+[[ "$(file_identity "$source_db")" == "$source_db_identity" ]] || die "live source database changed during preparation: $source_db"
 
 python3 - "$fixture_root/spend-ms.json" <<'PY'
 import json
@@ -476,14 +495,7 @@ with open(out, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-cp "$fixture_root/fresh-world.txt" "$evidence_root/fresh-world.txt"
-cp "$fixture_root/summary.json" "$evidence_root/fixture-summary.json"
-cp "$fixture_root/init-millstrand.txt" "$evidence_root/init-millstrand.txt"
-cp "$fixture_root/weaver-millstrand.log" "$evidence_root/weaver-millstrand.log"
-cp "$fixture_root/weaver-ms.log" "$evidence_root/weaver-ms.log"
-cp "$fixture_root/status-millstrand.json" "$evidence_root/status-millstrand.json"
-cp "$fixture_root/status-ms.json" "$evidence_root/status-ms.json"
-cp "$weaver_workspace/spools.edn" "$evidence_root/activated-spools.edn"
+preserve_required_evidence || die "required evidence preservation failed; inspect the diagnostics above"
 
 echo "agent-harness preparation verification: clean"
 echo "  MSR-06: $agent_tag@$agent_sha"
