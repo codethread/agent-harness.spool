@@ -132,9 +132,6 @@ print(msr05["repository"])
 print(msr05["tag"])
 print(msr05["peeled-sha"])
 print(source["database"])
-print(target["marker"])
-print(target["database"])
-print(target["world-hash"])
 PY
 ) || die "preparation manifest validation failed"
 
@@ -147,9 +144,6 @@ kanban_repository=$(printf '%s\n' "$release_values" | sed -n '6p')
 kanban_tag=$(printf '%s\n' "$release_values" | sed -n '7p')
 kanban_sha=$(printf '%s\n' "$release_values" | sed -n '8p')
 source_db=$(printf '%s\n' "$release_values" | sed -n '9p')
-expected_target_marker=$(printf '%s\n' "$release_values" | sed -n '10p')
-expected_target_db=$(printf '%s\n' "$release_values" | sed -n '11p')
-expected_target_hash=$(printf '%s\n' "$release_values" | sed -n '12p')
 
 for value in "$core_repository" "$agent_repository" "$kanban_repository"; do
   [[ "$value" != /* && "$value" != *"../"* ]] || die "release repository may not be a local root: $value"
