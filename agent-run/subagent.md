@@ -27,8 +27,8 @@ source coordinate as well as the agent-run root:
 
 (def runtime (current/runtime))
 (runtime/module! runtime :workflow
-  {:ns 'millstrand.spools.workflow
-   :spools ['millstrand.spools/workflow]
+  {:ns 'millhouse.spools.workflow
+   :spools ['millhouse.spools/workflow]
    :required? true})
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
@@ -36,7 +36,7 @@ source coordinate as well as the agent-run root:
    :required? true})
 (runtime/module! runtime :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools ['ct.spools/agent-run millstrand.spools/workflow]
+   :spools ['ct.spools/agent-run millhouse.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 ```
@@ -87,7 +87,7 @@ uses `supersedes` edges; retry successors inherit the same `serves` target.
 ## Worked example
 
 ```clojure
-(require '[millstrand.spools.workflow :as workflow])
+(require '[millhouse.spools.workflow :as workflow])
 
 (def build-widget
   (workflow/workflow
@@ -162,6 +162,6 @@ runs parked on `gate/delivery-blocked`.
 
 ## See also
 
-- [`millstrand.spools.workflow`](../workflow.md) — workflow gates and runtime API.
+- [`millhouse.spools.workflow`](https://github.com/codethread/millhouse.spool/blob/8f386b09fb8e8506a3c38105dce8e8552142dbf8/spools/workflow/README.md) — workflow gates and runtime API.
 - [`ct.spools.agent-run`](../agent-run/README.md) — agent-run run lifecycle and harness registry.
 - ``test/ct/spools/subagent_test.clj`` — executable contract tests.

@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is]]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as treadle]
-            [millstrand.spools.workflow :as workflow]
+            [millhouse.spools.workflow :as workflow]
             [ct.spools.test-support :as test-support :refer [with-runtime]]
             [millstrand.core.db :as db]
             [millstrand.api.weaver.alpha :as weaver]
@@ -20,14 +20,14 @@
                                            :parse :raw
                                            :preamble? false
                                            :doc "Test harness that executes only the final prompt line."})
-      (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
+      (test-support/activate-spool! rt :workflow 'millhouse.spools.workflow
                                     :after [:agent-run])
       (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent)
       (f rt))))
 
 (defn- activate-treadle! [rt]
   (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
-  (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
+  (test-support/activate-spool! rt :workflow 'millhouse.spools.workflow
                                 :after [:agent-run])
   (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
                                 :after [:agent-run :workflow]))
@@ -45,9 +45,9 @@
             (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
                                           :after [:agent-run])]
         (is (= :partial (:status without-workflow)))
-        (is (= [:millstrand.spools.workflow/executor]
+        (is (= [:millhouse.spools.workflow/executor]
                (get-in without-workflow [:modules :subagent :error :data :kinds]))))
-      (test-support/activate-spool! rt :workflow 'millstrand.spools.workflow
+      (test-support/activate-spool! rt :workflow 'millhouse.spools.workflow
                                     :after [:agent-run])
       (let [with-workflow
             (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent

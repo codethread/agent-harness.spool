@@ -8,8 +8,8 @@
   with `strand workflow show feature-iteration`, not from this file.
 - Workflow definitions live in `.millstrand/config/workflows`, one file each, loaded
   and registered by `.millstrand/config/workflows.clj`.
-- Root `deps.edn` deliberately targets the sibling `../skein-src` checkout,
-  including its off-classpath `spools/workflow/src` root.
+- Root `deps.edn` deliberately targets Millstrand core from the sibling
+  `../skein-src` checkout and pins Workflow to its independent Millhouse root.
 - Never run `make install` while developing or testing this repository.
 - Kill spawned processes by exact PID only; never use pattern kills.
 - Shared-spool publishing, activation, override, and test conventions live in

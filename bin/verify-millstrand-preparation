@@ -53,6 +53,8 @@ kanban_tag=$(json_value kanban_tag)
 kanban_sha=$(json_value kanban_sha)
 source_marker=$(json_value source_marker)
 source_db=$(json_value source_database)
+millhouse_repository="codethread/millhouse.spool"
+millhouse_sha="8f386b09fb8e8506a3c38105dce8e8552142dbf8"
 
 [[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
 [[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"
@@ -210,6 +212,7 @@ printf '%s\n' \
   "git ls-remote https://github.com/$agent_repository.git refs/tags/$agent_tag^{} -> $agent_resolved" \
   "git ls-remote https://github.com/$kanban_repository.git refs/tags/$kanban_tag^{} -> $kanban_resolved" \
   "git checkout https://github.com/$core_repository.git $core_sha" \
+  "git dependency https://github.com/$millhouse_repository.git $millhouse_sha roots spools/workflow,spools/shell-executor" \
   >"$evidence_root/release-resolution.txt"
 
 core_url="https://github.com/${core_repository%.git}.git"
@@ -225,6 +228,7 @@ cp -R "$repo_root/." "$candidate_root/"
 chmod -R u+rwX "$candidate_root"
 cat >"$fixture_root/manifest.edn" <<EOF
 {:core {:repository "$core_repository" :coordinate "io.millstrand/millstrand" :sha "$core_sha"}
+ :millhouse {:repository "$millhouse_repository" :coordinate "millhouse.spools/workflow" :sha "$millhouse_sha"}
  :agent {:repository "$agent_repository" :tag "$agent_tag" :sha "$agent_sha"}
  :kanban {:repository "$kanban_repository" :tag "$kanban_tag" :sha "$kanban_sha"}}
 EOF
@@ -234,6 +238,9 @@ EOF
 # into this generated consumer metadata.
 cat >"$fixture_root/target-deps.edn" <<EOF
 {:deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git" :git/sha "$core_sha"}
+        millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                   :git/sha "$millhouse_sha"
+                                   :deps/root "spools/workflow"}
         codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}
         codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
 EOF
@@ -298,7 +305,11 @@ fi
 cp -R "$candidate_root/.millstrand/." "$target_marker/"
 cat >"$target_marker/spools.edn" <<EOF
 {:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
-          millstrand.spools/workflow {:millstrand/source-root "spools/workflow"}
+          millhouse/spools
+          {:git/url "https://github.com/codethread/millhouse.spool.git"
+           :git/sha "$millhouse_sha"
+           :roots {millhouse.spools/workflow "spools/workflow"
+                   millhouse.spools.executors/shell "spools/shell-executor"}}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
            :git/tag "$agent_tag"
@@ -317,11 +328,11 @@ cat >"$target_marker/spools.edn" <<EOF
                              :git/sha "$kanban_sha"
                              :roots {codethread/kanban "."}}}}
 EOF
-python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_tag" "$kanban_sha" <<'PY'
+python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_tag" "$kanban_sha" "$millhouse_repository" "$millhouse_sha" <<'PY'
 import pathlib
 import sys
 
-path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_tag, kanban_sha = sys.argv[1:]
+path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_tag, kanban_sha, millhouse_repository, millhouse_sha = sys.argv[1:]
 text = pathlib.Path(path).read_text(encoding="utf-8")
 for forbidden in (":local/root", ":override-deps", "v23", "v20"):
     if forbidden in text:
@@ -340,6 +351,17 @@ expected = {
 for coordinate, root in expected.items():
     if f"{coordinate} \"{root}\"" not in text:
         raise SystemExit(f"activated Agent Harness root map is missing {coordinate} -> {root}")
+millhouse = text.split("millhouse/spools", 1)[1].split("ct.spools/agent-run", 1)[0]
+for value in (
+    f':git/url "https://github.com/{millhouse_repository}.git"',
+    f':git/sha "{millhouse_sha}"',
+    'millhouse.spools/workflow "spools/workflow"',
+    'millhouse.spools.executors/shell "spools/shell-executor"',
+):
+    if value not in millhouse:
+        raise SystemExit(f"activated release spools are missing Millhouse identity {value}")
+if ":git/tag" in millhouse:
+    raise SystemExit("activated Millhouse approval must remain untagged")
 for value in (
     f':git/url "https://github.com/{agent_repository}.git"',
     f':git/tag "{agent_tag}"',
@@ -350,8 +372,8 @@ for value in (
 ):
     if value not in text:
         raise SystemExit(f"activated release spools are missing immutable pin {value}")
-if text.count(":roots") != 2:
-    raise SystemExit("activated release spools must contain exactly the Agent Harness and Kanban root maps")
+if text.count(":roots") != 3:
+    raise SystemExit("activated release spools must contain exactly the Millhouse, Agent Harness, and Kanban root maps")
 PY
 cat >"$target_marker/config/harnesses.clj" <<'EOF'
 (ns harnesses
@@ -472,15 +494,16 @@ if spend.get("totals", {}).get("tokens-total") != 4200:
     raise SystemExit(f"spend smoke token total mismatch: {spend}")
 PY
 
-python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$agent_tag" "$agent_sha" "$kanban_tag" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
+python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$millhouse_sha" "$agent_tag" "$agent_sha" "$kanban_tag" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
 import json
 import os
 import sys
 
-out, repo, core_sha, agent_tag, agent_sha, kanban_tag, kanban_sha, marker, database = sys.argv[1:]
+out, repo, core_sha, millhouse_sha, agent_tag, agent_sha, kanban_tag, kanban_sha, marker, database = sys.argv[1:]
 summary = {
     "identity-check": "pass",
     "core": {"repository": "codethread/millstrand", "sha": core_sha, "local-root-rejected": True},
+    "workflow": {"repository": "codethread/millhouse.spool", "sha": millhouse_sha, "untagged": True},
     "agent-harness": {"tag": agent_tag, "peeled-sha": agent_sha, "exact": True},
     "kanban": {"tag": kanban_tag, "peeled-sha": kanban_sha, "exact": True},
     "fresh-database": {"marker": marker, "database": database, "source-database-imported": False},
@@ -500,5 +523,6 @@ preserve_required_evidence || die "required evidence preservation failed; inspec
 echo "agent-harness preparation verification: clean"
 echo "  MSR-06: $agent_tag@$agent_sha"
 echo "  core: $core_repository@$core_sha"
+echo "  workflow: $millhouse_repository@$millhouse_sha"
 echo "  target marker: $target_parent/.ms"
 echo "  evidence: $evidence_root"

@@ -10,19 +10,20 @@
                  {:file "config/module_adapters.clj"
                   :after [:millstrand/spools-batteries]})
 
-(runtime/module! runtime :millstrand/spools-workflow
-                 {:ns 'millstrand.spools.workflow
-                  :spools ['millstrand.spools/workflow]
+(runtime/module! runtime :millhouse/spools-workflow
+                 {:ns 'millhouse.spools.workflow
+                  :spools ['millhouse.spools/workflow]
                   :required? true})
-(runtime/module! runtime :millstrand/spools-workflow-cli
-                 {:ns 'millstrand.spools.workflow.cli
-                  :spools ['millstrand.spools/workflow]
-                  :after [:millstrand/spools-workflow]
+(runtime/module! runtime :millhouse/spools-workflow-cli
+                 {:ns 'millhouse.spools.workflow.cli
+                  :spools ['millhouse.spools/workflow]
+                  :after [:millhouse/spools-workflow]
                   :required? true})
-(runtime/module! runtime :millstrand/spools-shell
-                 {:ns 'millstrand.spools.executors.shell
-                  :spools ['millstrand.spools/workflow]
-                  :after [:millstrand/spools-workflow]
+(runtime/module! runtime :millhouse/spools-shell
+                 {:ns 'millhouse.spools.executors.shell
+                  :spools ['millhouse.spools.executors/shell
+                           'millhouse.spools/workflow]
+                  :after [:millhouse/spools-workflow]
                   :required? true})
 
 (runtime/module! runtime :millstrand/spools-agent-run
@@ -86,14 +87,14 @@
 
 (runtime/module! runtime :workflows
                  {:file "config/workflows.clj"
-                  :spools ['millstrand.spools/workflow]
-                  :after [:millstrand/spools-workflow]
+                  :spools ['millhouse.spools/workflow]
+                  :after [:millhouse/spools-workflow]
                   :required? true})
 
 (runtime/module! runtime :millstrand/spools-subagent
                  {:ns 'ct.spools.executors.subagent
-                  :spools ['ct.spools/agent-run 'millstrand.spools/workflow]
-                  :after [:millstrand/spools-agent-run :millstrand/spools-workflow
+                  :spools ['ct.spools/agent-run 'millhouse.spools/workflow]
+                  :after [:millstrand/spools-agent-run :millhouse/spools-workflow
                           :harnesses :workflows]
                   :required? true})
 

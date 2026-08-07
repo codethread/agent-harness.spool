@@ -15,7 +15,7 @@ composition live here and in the contract. This cookbook never restates a fn sig
 attribute table — it links to them.
 
 The subagent executor sits between two spools that know nothing of each other: the [workflow
-engine](../workflow.md), which models a step it can't do itself as a `gate`, and the [agent-run
+engine](https://github.com/codethread/millhouse.spool/blob/8f386b09fb8e8506a3c38105dce8e8552142dbf8/spools/workflow/README.md), which models a step it can't do itself as a `gate`, and the [agent-run
 engine](../agent-run/README.md), which spawns agent runs but has no notion of workflows. The
 subagent executor is the only namespace that speaks both. Load order matters — **agent-run first,
 then the subagent executor** (its `reconcile` fails loudly otherwise and runs an initial gate scan) —
@@ -29,7 +29,7 @@ Every recipe has the same four parts:
 1. **Situation** — the shape of problem you're staring at.
 2. **Composition** — which primitives combine, and how.
 3. **Snippet** — a complete, runnable form (assume
-   `(require '[millstrand.spools.workflow :as workflow])`).
+   `(require '[millhouse.spools.workflow :as workflow])`).
 4. **Why this shape** — the reasoning: why these primitives, what the attribute conventions buy you,
    and what the alternative would cost.
 
@@ -53,7 +53,7 @@ succeeds — completes the gate through `workflow/complete!`. The step after the
 normally.
 
 ```clojure
-(require '[millstrand.spools.workflow :as workflow])
+(require '[millhouse.spools.workflow :as workflow])
 
 (def build-widget
   (workflow/workflow
@@ -108,7 +108,7 @@ the subagent executor derives one from `workflow/instruction`, then `description
 the gate rather than spawning a broken run.
 
 ```clojure
-(require '[millstrand.spools.workflow :as workflow])
+(require '[millhouse.spools.workflow :as workflow])
 
 ;; explicit prompt, pinned harness and worktree, bounded recovery
 (workflow/gate :implement "Implement widget" :subagent
@@ -127,7 +127,7 @@ the gate rather than spawning a broken run.
 
 - **The gate is a pure-data run request.** Handing the run its whole configuration as attributes
   keeps the subagent executor a translator with no policy: it reads the gate, builds a `spawn-run!`
-  call, and gets out of the way. The [fan-out recipe](../workflow.cookbook.md#recipe-fan-out-over-a-collection-with-a-chained-loop)
+  call, and gets out of the way. The [fan-out recipe](https://github.com/codethread/millhouse.spool/blob/8f386b09fb8e8506a3c38105dce8e8552142dbf8/spools/workflow/workflow.cookbook.md#recipe-fan-out-over-a-collection-with-a-chained-loop)
   in the workflow cookbook uses exactly this to compute per-task `agent-run/*` attributes from a
   loop item.
 - **Prompt derivation avoids saying the same thing twice.** A step that already carries a
@@ -216,7 +216,7 @@ with the run result, and only for a genuinely successful run. The subagent execu
 itself as the workflow executor for `:subagent`, which keeps `await!` quiet on a healthy gate.
 
 ```clojure
-(require '[millstrand.spools.workflow :as workflow])
+(require '[millhouse.spools.workflow :as workflow])
 
 ;; await! stays :waiting on a healthy subagent gate (the subagent executor is its executor),
 ;; and surfaces :stalled — with the spawn error — only when the gate is genuinely stuck.
@@ -252,7 +252,7 @@ Honest source: `blank-result-gate-fails-loudly-stays-discoverable-and-recovers` 
   vocabulary, delivery, failure, and recovery.
 - [`executors/subagent.api.md`](./subagent.api.md) — generated signatures and docstrings for every
   public fn referenced above.
-- [`workflow.cookbook.md`](../workflow.cookbook.md) — the gate and fan-out recipes that author the
+- [`workflow.cookbook.md`](https://github.com/codethread/millhouse.spool/blob/8f386b09fb8e8506a3c38105dce8e8552142dbf8/spools/workflow/workflow.cookbook.md) — the gate and fan-out recipes that author the
   `:subagent` gates the subagent executor fulfills.
 - [`agent-run.cookbook.md`](../agent-run.cookbook.md) — the run engine the subagent executor spawns
   onto: harnesses, readiness, and crash recovery.

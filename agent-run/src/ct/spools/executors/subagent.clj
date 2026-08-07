@@ -3,12 +3,12 @@
 
   The subagent executor watches workflow runs for ready `:subagent` gates, spawns
   an agent-run run for each gate, and delivers successful run results by
-  completing the gate through `millstrand.spools.workflow/complete!`. It intentionally
+  completing the gate through `millhouse.spools.workflow/complete!`. It intentionally
   adds no CLI surface and keeps workflow and agent-run decoupled: this namespace
   is the only adapter that knows both vocabularies."
   (:require [clojure.string :as str]
             [ct.spools.agent-run :as agent-run]
-            [millstrand.spools.workflow :as workflow]
+            [millhouse.spools.workflow :as workflow]
             [millstrand.api.spool.alpha :refer [fail! attr-get]]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.weaver.alpha :as weaver]
@@ -128,7 +128,7 @@
 (defn task-gate
   "Build a task-aware workflow subagent gate.
 
-  Accepts the same keyword options as `millstrand.spools.workflow/gate`, after `id`
+  Accepts the same keyword options as `millhouse.spools.workflow/gate`, after `id`
   and `title`, and always emits `gate/completion-policy status-implemented`.
   Use raw `workflow/gate` for generic run-completion semantics."
   [id title & options]
