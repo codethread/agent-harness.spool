@@ -245,8 +245,8 @@ fi
 # The two marker names exercise the cutover boundary independently; no marker
 # is created beside the live .skein directory.
 mill_bin=${MILL_BIN:-}
-if [[ -z "$mill_bin" && -x "$repo_root/../millstrand/bin/mill" ]]; then
-  mill_bin="$repo_root/../millstrand/bin/mill"
+if [[ -z "$mill_bin" && -x "$repo_root/../skein-src/bin/mill" ]]; then
+  mill_bin="$repo_root/../skein-src/bin/mill"
 fi
 if [[ -z "$mill_bin" ]]; then
   mill_bin=$(command -v mill || true)

@@ -8,12 +8,12 @@
           ct.spools/agent-cli {:local/root "../agent-cli"}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
-           :git/sha "2e689490d875bc66887b158f34382b97ade4df6b"
-           :git/tag "v23"
+           :git/sha "82f8df466e6caea74a93d994604d94ab6bf78b72"
+           :git/tag "v26"
            :roots {ct.spools/agent-run "agent-run"
                    ct.spools/delegation "delegation"
                    ct.spools/bench "bench"}}
           codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
-                             :git/sha "398a1610d094c85ad9c6691dafd213aaa35d73de"
-                             :git/tag "v20"
+                             :git/sha "87f61bc2750e7026f3650235907db25f19b1536e"
+                             :git/tag "v24"
                              :roots {codethread/kanban "."}}}}
