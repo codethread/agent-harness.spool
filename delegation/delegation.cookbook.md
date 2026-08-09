@@ -145,7 +145,7 @@ strand agent review <target> --roster change-review \
 # => {"target":"<target>","reviewers":["<r1>","<r2>",...],"synthesizer":"<syn>"}
 
 # A one-off pass the roster doesn't cover — two ad hoc reviewers, one synthesis.
-strand agent review <target> --seats 2 --harness claude,review-gpt --synthesize \
+strand agent review <target> --seats 2 --harness reviewer-harness-a,reviewer-harness-b --synthesize \
   --cwd /path/to/worktree --commit-range main..HEAD
 ```
 
@@ -157,11 +157,7 @@ strand agent review <target> --seats 2 --harness claude,review-gpt --synthesize 
   override a policy. That's what makes the roster file a *reviewable* artifact:
   changing who reviews a change is a diff to one document
   (a consuming workspace's trusted roster declaration), not scattered flags.
-- **Single-concern beats generalist, and routing is by waste-type.** Each roster
-  entry hunts one defect class with a per-concern call budget; `grunt` (sonnet)
-  is the default read-through seat, `explore` (haiku) is reserved for trivially
-  greppable single-file concerns, and the synthesizer is a cross-vendor GPT seat
-  so sign-off never comes from the model family that authored the work.
+- **Single-concern beats generalist, and routing is by waste-type.** Each roster entry hunts one defect class with a per-concern call budget; choose a read-through harness for targeted reads, a single-file harness for trivially greppable concerns, and an independent synthesis harness when your review policy calls for it. The names here are hypothetical consumer-owned aliases; run `strand agent harnesses` for live workspace names before using them.
 - **Reviewers never gate delegation.** Reviewer and synthesizer runs carry no
   `serves` edge. They hang under the target but never trip its `delegate` guard,
   so you can review a task before *or* after delegating it.
@@ -181,19 +177,19 @@ Honest source: `review!` and `defroster!` in [`delegation.api.md`](./delegation.
 
 **Situation.** A hard call — an architecture choice, a contentious review — wants more than one frontier model weighing in, so no single vendor's blind spot decides it. The shell verbs seat *identical* agents; you need *different* harnesses per seat.
 
-**Composition.** Drop to trusted Clojure. `council!` (and the underlying `panel!`) take a `:seats` vector where each seat names its own harness, so one deliberation spans vendors. The CLI stays scalar-only on purpose — rich per-seat data doesn't ride the control surface.
+**Composition.** Drop to trusted Clojure. `council!` (and the underlying `panel!`) take a `:seats` vector where each seat names its own harness, so one deliberation can span vendors when the consumer configures it that way. The CLI stays scalar-only on purpose — rich per-seat data doesn't ride the control surface. Run `strand agent harnesses` to discover live names before replacing the role-neutral placeholders below.
 
 ```clojure
 (require '[ct.spools.delegation :as agents])
 
-;; A cross-vendor council: an Anthropic seat and two GPT seats deliberate over
-;; two rounds on a shared board, then a GPT synthesizer weighs the whole thing.
+;; A consumer-configured council: three distinct seats deliberate over two rounds
+;; on a shared board, then a consumer-selected synthesizer weighs the whole thing.
 (agents/council! "Should the parser own its own buffer pool?"
-                 {:seats [{:name "builder"  :harness :build}       ; opus
-                          {:name "skeptic"  :harness :review-gpt}  ; gpt, standing reviewer
-                          {:name "second"   :harness :hard-gpt}]   ; gpt, second frontier
+                 {:seats [{:name "builder"  :harness :producer-harness}
+                          {:name "skeptic"  :harness :skeptic-harness}
+                          {:name "second"   :harness :second-harness}]
                   :rounds 2
-                  :synthesizer :review-gpt
+                  :synthesizer :synthesis-harness
                   :cwd "/path/to/worktree"})
 ;; => {:blackboard "<board>" :turns [["<r1s1>" ...] ["<r2s1>" ...]] :synthesizer "<syn>"}
 ;; await the synthesizer run for the verdict; raw turns are notes on the board.
@@ -205,10 +201,7 @@ Honest source: `review!` and `defroster!` in [`delegation.api.md`](./delegation.
   `strand agent council --seats n --harness one` seats N *identical* agents;
   the moment seats need different harnesses it's structured data, and structured
   data does not ride argv (TEN-006). `:seats` is that seam.
-- **Cross-vendor seating is deliberate.** In this repo the extra seat and the
-  synthesizer come from a different model family, so sign-off does not rest on the
-  family that authored the work. It's the same discipline the reviewer roster
-  encodes with its `review-gpt` synthesizer, applied to live deliberation.
+- **Cross-vendor seating is an available policy.** When a consumer chooses harnesses from different model families, an independent synthesizer can keep sign-off from resting on the family that authored the work; the panel and roster shapes preserve that review concept without prescribing vendor routing.
 - **Rounds are barriers, not a poll loop.** Each turn row `depends-on` every
   seat's previous-turn run, so a round completes before the next opens and the
   deliberation structure is queryable straight from run attributes
@@ -222,7 +215,7 @@ Honest source: `review!` and `defroster!` in [`delegation.api.md`](./delegation.
   introduce or reshape that public outer-options map, so adding its spec is
   explicitly out of scope here.
 
-Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), and the same synthesizer-must-be-cross-vendor rule in the roster semantics described here and covered by ``test/ct/spools/delegation_test.clj``. Harnesses and seats are consumer-owned trusted configuration.
+Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), and the independent-synthesis review concept in the roster semantics described here and covered by ``test/ct/spools/delegation_test.clj``. Harnesses and seats are consumer-owned trusted configuration.
 
 ---
 
@@ -296,7 +289,7 @@ strand agent ps --for <task>    # carries the attach command to hand the user
   `--interactive`: live sessions are delegated one at a time so the human is
   paired with, not swamped by, a wall of terminals.
 
-Honest source: the interactive delegation model in [`delegation/README.md` §1 and §3](./delegation/README.md#delegation-verbs-the-task-contract-layer), and this repo's `strand hitl` coordinator convention (a tracking strand under the parent, an interactive `hitl-build` session, and the self-terminating record-outcome-then-close contract) documented in the root `CLAUDE.md`.
+Honest source: the interactive delegation model in [`delegation/README.md` §1 and §3](./delegation/README.md#delegation-verbs-the-task-contract-layer), and this repo's `strand hitl` coordinator convention (a tracking strand under the parent, an interactive backend session, and the self-terminating record-outcome-then-close contract) documented in the root `CLAUDE.md`.
 
 ---
 

@@ -47,7 +47,7 @@ The surface is deliberately built from words coding agents are already trained o
 - **delegate** — hand a ready task to an agent (`agent delegate`); **delegate the ready ones** fans a plan out (`agent delegate --ready`).
 - **retry** — recover a failed task by superseding its dead run and respawning (`agent retry`).
 - **status** — the coordinator dashboard (`agent status`): what's ready, running, failed, or awaiting your verification.
-- **harness / alias** — which agent tool runs the work (`worker`, `explore`, `build`, …).
+- **harness / alias** — which agent tool runs the work (use a consumer-owned name; run `strand agent harnesses` to see the live names in your workspace).
 - **worker contract** — this spool's task-workflow rules, delivered to serving runs when the workspace opts in (§5); the engine's own invariant core rides every run regardless.
 - **notes** — durable, storage-enforced write-once memory linked to any strand by the blessed `notes` relation.
 
@@ -279,15 +279,15 @@ A roster turns "who reviews a change in this workspace" into declarative, git-re
 (require '[ct.spools.delegation :as agents])
 
 (agents/defroster! :change-review
-  {:seats [{:name "test-sleeps" :harness :explore
+  {:seats [{:name "test-sleeps" :harness :single-file-harness
             :brief "Hunt for sleeps and arbitrary timeouts in tests..."
             :scope "test files and test helpers in the change"}
-           {:name "docs-drift" :harness :grunt
+           {:name "docs-drift" :harness :read-through-harness
             :brief "Check documentation and metadata coherence only..."}]
-   :synthesis {:harness :review-gpt}})
+   :synthesis {:harness :synthesis-harness}})
 ```
 
-Route reviewers by **waste-type, not call count**: `grunt` (sonnet) is the default for read-through seats — it does targeted git-diff and ranged reads rather than thrashing a whole namespace for a small window — while `explore` (haiku) is reserved for trivially greppable single-file concerns whose contract tells it to do one global diff sweep (haiku is ~0.25–0.3× sonnet's per-call cost, so a few extra greps there stay net-cheaper). Give each contract a per-concern **call budget** and, on lenses that overlap (fail-loudly / spec-shapes / correctness on the same defect), tell each to state its angle concisely; the synthesizer de-duplicates overlapping findings by root cause.
+Route reviewers by **waste-type, not call count**: use a read-through harness for targeted git-diff and ranged reads rather than thrashing a whole namespace for a small window, while a single-file harness is reserved for trivially greppable concerns whose contract tells it to do one global diff sweep; run `strand agent harnesses` before replacing these role-neutral placeholders with live consumer-owned names. Give each contract a per-concern **call budget** and, on lenses that overlap (fail-loudly / spec-shapes / correctness on the same defect), tell each to state its angle concisely; the synthesizer de-duplicates overlapping findings by root cause.
 
 Data shape, validated loudly at registration against the **`:ct.spools.delegation/roster`** clojure.spec (inspect it with `s/form`; the seam output below is likewise specced as `:ct.spools.delegation/review-specs`): a roster is the panel primitive's seat vector, so it speaks panel's seat vocabulary: each seat requires a unique `:name` (doubles as the run's review focus), a `:harness` (resolved against the agent-run registry at **review time**, not registration time, so roster files may load before config registers aliases), and a `:brief` — the reviewer's precise single-concern mandate, layered onto the workspace base review contract in the prompt. `:scope` is optional prompt-level confinement text. `:synthesis` optionally overrides the synthesis run's harness (default: first seat's). Unknown keys fail loudly to catch typos (closed key sets and name uniqueness are checked beyond the spec, which is structurally open).
 
@@ -298,8 +298,8 @@ Data shape, validated loudly at registration against the **`:ct.spools.delegatio
 ```clojure
 (agents/roster-review-specs :change-review {:target plan-id})
 ;; => {:roster :change-review :target "..." :pass "change-review-1a2b3c4d"
-;;     :reviewers [{:name "test-sleeps" :harness :explore :prompt "..." :attrs {...}} ...]
-;;     :synthesizer {:name "synthesis" :harness :review-gpt :prompt "..." :attrs {...}}}
+;;     :reviewers [{:name "test-sleeps" :harness :single-file-harness :prompt "..." :attrs {...}} ...]
+;;     :synthesizer {:name "synthesis" :harness :synthesis-harness :prompt "..." :attrs {...}}}
 ```
 
 The builder validates the assembled value against **`:ct.spools.delegation/review-specs`** and fails loudly with `:spec`, `:value`, and `:explain` data if its own output drifts.
@@ -320,8 +320,8 @@ Convene a fresh-blackboard **panel** (see [§6](#6-panels-presets-and-the-compos
 
 ```
 printf '%s' '{"feature":"<slug>","title":"...","body":"...?","tasks":[
-  {"key":"core","title":"...","body":"<full contract>","validation":["clojure -M:test"],"harness":"build"},
-  {"key":"docs","title":"...","body":"...","depends_on":["core"],"harness":"worker"}]}' \
+  {"key":"core","title":"...","body":"<full contract>","validation":["clojure -M:test"],"harness":"worker-harness"},
+  {"key":"docs","title":"...","body":"...","depends_on":["core"],"harness":"docs-harness"}]}' \
   | strand weave --pattern agent-plan
 ```
 → `{"plan":{"id","title"},"tasks":{"<your-key>":{"id","title"}}}`
@@ -393,7 +393,7 @@ Policy: sibling tasks own disjoint files; never two mutators in one file scope; 
 A panel is plain data, validated loudly against the **`:ct.spools.delegation/panel`** clojure.spec (closed key sets and seat-name uniqueness are checked beyond the structurally-open spec):
 
 ```clojure
-{:seats [{:name "skeptic" :harness :review-gpt :brief "…"
+{:seats [{:name "skeptic" :harness :reviewer-harness :brief "…"
           :scope? "…"                 ; optional prompt-level confinement
           :continuity? :fresh|:resume}] ; default :fresh
  :turns? {:rounds n}                   ; default {:rounds 1}
