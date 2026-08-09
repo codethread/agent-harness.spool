@@ -281,53 +281,94 @@ strand_cmd() {
 mill_cmd init --workspace "$weaver_workspace" >/dev/null
 [[ -d "$weaver_workspace" ]] || die "mill init did not create .millstrand"
 
-# Use the candidate's workspace modules in disposable paths. Core and Kanban
-# stay immutable: they are the SHA/tag-pinned checkouts resolved above.
+# Use the candidate's workspace modules in disposable paths. Project its
+# approved provider families rather than maintaining a second workspace config
+# here; only the agent-harness roots are overridden to the candidate under
+# test, while core, Millhouse, and Kanban keep their immutable release
+# identities explicit.
 candidate_coord="$candidate_root/.millstrand"
 cp -R "$candidate_coord/." "$weaver_workspace/"
 for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
   ln -s "$candidate_root/$root" "$workspace_root/$root"
 done
-cat >"$weaver_workspace/spools.edn" <<'EOF'
-{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
-          millhouse/spools
-          {:git/url "https://github.com/codethread/millhouse.spool.git"
-           :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
-           :roots {millhouse.spools/workflow "spools/workflow"
-                   millhouse.spools.executors/shell "spools/shell-executor"}}
-          ct.spools/harness-core {:local/root "../harness-core"}
-          ct.spools/claude-harness {:local/root "../claude-harness"}
-          ct.spools/codex-harness {:local/root "../codex-harness"}
-          ct.spools/pi-harness {:local/root "../pi-harness"}
-          ct.spools/cursor-harness {:local/root "../cursor-harness"}
-          ct.spools/agent-cli {:local/root "../agent-cli"}
-          ct.spools/agent-run {:local/root "../agent-run"}
-          ct.spools/delegation {:local/root "../delegation"}
-          ct.spools/bench {:local/root "../bench"}
-          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
-                             :git/tag "KANBAN_TAG"
-                             :git/sha "KANBAN_SHA"
-                             :roots {codethread/kanban "."}}}}
-EOF
-python3 - "$weaver_workspace/spools.edn" "$kanban_tag" "$kanban_sha" "$millhouse_sha" <<'PY'
+[[ -f "$candidate_coord/spools.edn" ]] || die "candidate workspace is missing spools.edn"
+clojure -Sdeps '{:deps {}}' -M -e '
+(require (quote [clojure.edn :as edn])
+         (quote [clojure.string :as string]))
+(let [[source-path target-path kanban-url kanban-tag kanban-sha millhouse-url millhouse-sha]
+      *command-line-args*
+      document (edn/read-string (slurp source-path))
+      providers (:spools document)
+      required-provider-names ["millhouse/spools" "codethread/spools"
+                               "codethread/kanban" "codethread/devflow"]
+      missing (remove #(contains? providers (symbol %)) required-provider-names)
+      local-roots {"ct.spools/harness-core" "harness-core"
+                   "ct.spools/claude-harness" "claude-harness"
+                   "ct.spools/codex-harness" "codex-harness"
+                   "ct.spools/pi-harness" "pi-harness"
+                   "ct.spools/cursor-harness" "cursor-harness"
+                   "ct.spools/agent-cli" "agent-cli"
+                   "ct.spools/agent-run" "agent-run"
+                   "ct.spools/delegation" "delegation"
+                   "ct.spools/bench" "bench"}
+      local-overrides (into {}
+                         (map (fn [[coordinate root]]
+                                [(symbol coordinate) {:local/root (str "../" root)}])
+                              local-roots))]
+  (when (seq missing)
+    (throw (ex-info (str "candidate workspace is missing approved provider families: "
+                         (string/join ", " missing)) {})))
+  (spit target-path
+        (pr-str
+         (assoc document :spools
+                (merge providers
+                       local-overrides
+                       {(symbol "millhouse/spools")
+                        (-> (get providers (symbol "millhouse/spools"))
+                            (assoc :git/url millhouse-url :git/sha millhouse-sha)
+                            (dissoc :git/tag))
+                        (symbol "codethread/kanban")
+                        (-> (get providers (symbol "codethread/kanban"))
+                            (assoc :git/url kanban-url
+                                   :git/tag kanban-tag
+                                   :git/sha kanban-sha))})))))
+' - "$candidate_coord/spools.edn" "$weaver_workspace/spools.edn" \
+  "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha"
+python3 - "$weaver_workspace/spools.edn" "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha" <<'PY'
 import pathlib
 import sys
 
-path, tag, sha, millhouse_sha = sys.argv[1:]
+path, kanban_url, kanban_tag, kanban_sha, millhouse_url, millhouse_sha = sys.argv[1:]
 text = pathlib.Path(path).read_text(encoding="utf-8")
-text = text.replace("KANBAN_TAG", tag).replace("KANBAN_SHA", sha)
 for value in (
-    'millhouse/spools',
-    ':git/url "https://github.com/codethread/millhouse.spool.git"',
-    f':git/sha "{millhouse_sha}"',
+    'codethread/spools',
     'millhouse.spools/workflow "spools/workflow"',
     'millhouse.spools.executors/shell "spools/shell-executor"',
+    f':git/url "{millhouse_url}"',
+    f':git/sha "{millhouse_sha}"',
+    f':git/url "{kanban_url}"',
+    f':git/tag "{kanban_tag}"',
+    f':git/sha "{kanban_sha}"',
 ):
     if value not in text:
-        raise SystemExit(f"disposable spools are missing Millhouse identity {value}")
-if ':git/tag' in text.split('millhouse/spools', 1)[1].split('ct.spools/harness-core', 1)[0]:
-    raise SystemExit("disposable Millhouse approval must remain untagged")
-pathlib.Path(path).write_text(text, encoding="utf-8")
+        raise SystemExit(f"projected disposable spools are missing {value}")
+if not ('codethread/agents "spools/agents"' in text or
+        'agents "spools/agents"' in text):
+    raise SystemExit("projected disposable spools are missing codethread agents root")
+if not ('codethread/devflow "."' in text or 'devflow "."' in text):
+    raise SystemExit("projected disposable spools are missing devflow root")
+if not ('codethread/devflow-kanban-adapter "kanban-adapter"' in text or
+        'devflow-kanban-adapter "kanban-adapter"' in text):
+    raise SystemExit("projected disposable spools are missing devflow Kanban adapter root")
+for root in (
+    'ct.spools/harness-core', 'ct.spools/claude-harness',
+    'ct.spools/codex-harness', 'ct.spools/pi-harness',
+    'ct.spools/cursor-harness', 'ct.spools/agent-cli',
+    'ct.spools/agent-run', 'ct.spools/delegation', 'ct.spools/bench',
+):
+    if (f'{root} {{:local/root "../' not in text and
+            f'{root} #:local{{:root "../' not in text):
+        raise SystemExit(f"projected disposable spools are missing local candidate root {root}")
 PY
 cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
 (ns harnesses
