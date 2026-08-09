@@ -173,7 +173,10 @@ strand agent review <target> --seats 2 --harness claude,review-gpt --synthesize 
   Prefer the merge-base, or another range whose changed files match the review
   surface you mean.
 
-Honest source: this repo's [`.millstrand/config/harnesses.clj`](../.millstrand/config/harnesses.clj) harness and seat configuration, and the review verb and roster semantics in [`delegation/README.md` §3](./delegation/README.md#reviewer-rosters). This repository ships no named reviewer roster.
+Honest source: the shared `ct.spools.codethread.agents` harness and seat
+configuration, and the review verb and roster semantics in
+[`delegation/README.md` §3](./delegation/README.md#reviewer-rosters). This
+repository ships no named reviewer roster.
 
 ---
 
@@ -222,7 +225,7 @@ Honest source: this repo's [`.millstrand/config/harnesses.clj`](../.millstrand/c
   introduce or reshape that public outer-options map, so adding its spec is
   explicitly out of scope here.
 
-Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), this repo's cross-vendor seats declared in [`.millstrand/config/harnesses.clj`](../.millstrand/config/harnesses.clj), and the same synthesizer-must-be-cross-vendor rule in the roster semantics described here.
+Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), the shared cross-vendor seats declared by `ct.spools.codethread.agents`, and the same synthesizer-must-be-cross-vendor rule in the roster semantics described here.
 
 ---
 

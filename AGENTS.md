@@ -16,8 +16,9 @@
   `../skein-src/docs/spools/writing-shared-spools.md`.
 - Working with users: claim a kanban card first; run `strand kanban prime`.
 - Delegating: run `strand prime agent`; use tracked agent runs, not
-  harness-native subagents. List seats with `strand agent harnesses`; routing
-  policy lives in `.millstrand/config/harnesses.clj`.
+  harness-native subagents. List seats with `strand agent harnesses`; shared
+  routing policy lives in `ct.spools.codethread.agents`, with this workspace's
+  delegation contracts in `.millstrand/config/delegation_contracts.clj`.
 - Recover runs with `strand list --query agent-failures` and
   `strand agent logs <run-id> --tail 80`.
 
