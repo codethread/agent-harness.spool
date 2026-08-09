@@ -4,6 +4,13 @@
            :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
            :roots {millhouse.spools/workflow "spools/workflow"
                    millhouse.spools.executors/shell "spools/shell-executor"}}
+          codethread/spools
+          {:git/url "https://github.com/codethread/codethread.spool.git"
+           :git/sha "d4c3ead266e1215de325e878b471710896c1e571"
+           :roots {codethread/agents "spools/agents"
+                   codethread/spool-bump "spools/spool-bump"
+                   codethread/devflow-setup "spools/devflow-setup"
+                   codethread/ralph "spools/ralph"}}
           ct.spools/harness-core {:local/root "../harness-core"}
           ct.spools/claude-harness {:local/root "../claude-harness"}
           ct.spools/codex-harness {:local/root "../codex-harness"}
@@ -12,12 +19,15 @@
           ct.spools/agent-cli {:local/root "../agent-cli"}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
-           :git/sha "82f8df466e6caea74a93d994604d94ab6bf78b72"
-           :git/tag "v26"
+           :git/sha "911bc4cb3364ce23516963761820ca0a55d01a39"
            :roots {ct.spools/agent-run "agent-run"
                    ct.spools/delegation "delegation"
                    ct.spools/bench "bench"}}
           codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
                              :git/sha "87f61bc2750e7026f3650235907db25f19b1536e"
                              :git/tag "v24"
-                             :roots {codethread/kanban "."}}}}
+                             :roots {codethread/kanban "."}}
+          codethread/devflow {:git/url "https://github.com/codethread/devflow.spool.git"
+                              :git/sha "528e0ba636e28032985f7f9706c8350e9f785d97"
+                              :roots {codethread/devflow "."
+                                      codethread/devflow-kanban-adapter "kanban-adapter"}}}}

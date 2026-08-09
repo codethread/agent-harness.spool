@@ -197,6 +197,21 @@ git -C "$core_root" checkout --quiet "$core_sha"
 [[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || \
   die "resolved core checkout does not match $core_sha"
 
+build_core_binary() {
+  local name=$1
+  local package=$2
+  local output="$core_root/bin/$name"
+  local build_id
+  need go
+  build_id=$(git -C "$core_root" rev-parse --short HEAD)
+  mkdir -p "$core_root/bin"
+  (cd "$core_root" && \
+    go build -ldflags "-X millstrand-strand-cli/internal/config.InstalledSource=$core_root -X millstrand-strand-cli/internal/config.BuildID=$build_id" \
+      -o "$output" "$package") || \
+    die "failed to build pinned core $name at $core_sha"
+  [[ -x "$output" ]] || die "pinned core build did not produce executable $output"
+}
+
 cat >"$consumer_root/deps.edn" <<EOF
 {:paths ["$candidate_root/agent-run/src"
          "$candidate_root/harness-core/src"
@@ -229,20 +244,17 @@ smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
   (println :agent-harness-consumer-loaded)
 ' 2>&1) || die "clean consumer load failed: $smoke"
 
-if [[ -n "${MILL_BIN:-}" ]]; then
-  mill_bin="$MILL_BIN"
-elif [[ "$mode" == "pre-tag" && -x "$source_root/../skein-src/bin/mill" ]]; then
-  # A source checkout next to Millstrand is the deterministic development
-  # binary; it must speak the same protocol as the SHA-pinned core checkout.
-  mill_bin="$source_root/../skein-src/bin/mill"
-else
-  mill_bin=$(command -v mill || true)
+mill_bin=${MILL_BIN:-}
+if [[ -z "$mill_bin" ]]; then
+  build_core_binary mill ./cli/cmd/mill
+  mill_bin="$core_root/bin/mill"
 fi
 [[ -n "$mill_bin" && -x "$mill_bin" ]] || \
   die "missing mill executable; set MILL_BIN to the published Millstrand mill"
-strand_bin=${STRAND_BIN:-$(dirname "$mill_bin")/strand}
-if [[ ! -x "$strand_bin" ]]; then
-  strand_bin=$(command -v strand || true)
+strand_bin=${STRAND_BIN:-}
+if [[ -z "$strand_bin" ]]; then
+  build_core_binary strand ./cli/cmd/strand
+  strand_bin="$core_root/bin/strand"
 fi
 [[ -n "$strand_bin" && -x "$strand_bin" ]] || \
   die "missing strand executable; set STRAND_BIN to the published Millstrand strand"
@@ -281,64 +293,37 @@ strand_cmd() {
 mill_cmd init --workspace "$weaver_workspace" >/dev/null
 [[ -d "$weaver_workspace" ]] || die "mill init did not create .millstrand"
 
-# Use the candidate's workspace modules in disposable paths. Core and Kanban
-# stay immutable: they are the SHA/tag-pinned checkouts resolved above.
+# Use the candidate's workspace modules in disposable paths. Project its
+# approved provider families rather than maintaining a second workspace config
+# here; only the agent-harness roots are overridden to the candidate under
+# test, while core, Millhouse, and Kanban keep their immutable release
+# identities explicit.
 candidate_coord="$candidate_root/.millstrand"
 cp -R "$candidate_coord/." "$weaver_workspace/"
 for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
   ln -s "$candidate_root/$root" "$workspace_root/$root"
 done
-cat >"$weaver_workspace/spools.edn" <<'EOF'
-{:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
-          millhouse/spools
-          {:git/url "https://github.com/codethread/millhouse.spool.git"
-           :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
-           :roots {millhouse.spools/workflow "spools/workflow"
-                   millhouse.spools.executors/shell "spools/shell-executor"}}
-          ct.spools/harness-core {:local/root "../harness-core"}
-          ct.spools/claude-harness {:local/root "../claude-harness"}
-          ct.spools/codex-harness {:local/root "../codex-harness"}
-          ct.spools/pi-harness {:local/root "../pi-harness"}
-          ct.spools/cursor-harness {:local/root "../cursor-harness"}
-          ct.spools/agent-cli {:local/root "../agent-cli"}
-          ct.spools/agent-run {:local/root "../agent-run"}
-          ct.spools/delegation {:local/root "../delegation"}
-          ct.spools/bench {:local/root "../bench"}
-          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
-                             :git/tag "KANBAN_TAG"
-                             :git/sha "KANBAN_SHA"
-                             :roots {codethread/kanban "."}}}}
-EOF
-python3 - "$weaver_workspace/spools.edn" "$kanban_tag" "$kanban_sha" "$millhouse_sha" <<'PY'
-import pathlib
-import sys
+cat >"$weaver_workspace/init.local.clj" <<'EOF'
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
 
-path, tag, sha, millhouse_sha = sys.argv[1:]
-text = pathlib.Path(path).read_text(encoding="utf-8")
-text = text.replace("KANBAN_TAG", tag).replace("KANBAN_SHA", sha)
-for value in (
-    'millhouse/spools',
-    ':git/url "https://github.com/codethread/millhouse.spool.git"',
-    f':git/sha "{millhouse_sha}"',
-    'millhouse.spools/workflow "spools/workflow"',
-    'millhouse.spools.executors/shell "spools/shell-executor"',
-):
-    if value not in text:
-        raise SystemExit(f"disposable spools are missing Millhouse identity {value}")
-if ':git/tag' in text.split('millhouse/spools', 1)[1].split('ct.spools/harness-core', 1)[0]:
-    raise SystemExit("disposable Millhouse approval must remain untagged")
-pathlib.Path(path).write_text(text, encoding="utf-8")
-PY
+(def runtime (current/runtime))
+
+(runtime/module! runtime :release-harnesses
+                 {:file "config/harnesses.clj"
+                  :spools ['ct.spools/delegation 'ct.spools/agent-run]
+                  :after [:millstrand/spools-agent-run :millstrand/spools-delegation]
+                  :required? true})
+EOF
 cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
 (ns harnesses
+  "Disposable release smoke harness and its candidate contracts."
   (:require [millstrand.api.current.alpha :as current]
             [millstrand.api.lifecycle.alpha :as lifecycle]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.delegation :as agents]))
 
-;; Fixed JSONL output drives the real parser, cost-rate derivation, and spend
-;; reducer without invoking a provider binary.
-(shuttle/defharnesses ^:private smoke-harnesses
+(shuttle/defharnesses smoke-harnesses
   "Disposable release smoke harnesses."
   {:release-smoke {:argv ["sh" "-c"
                           "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
@@ -346,26 +331,104 @@ cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
                    :preamble? false
                    :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
 
-(defn open-harnesses!
+(defn open-release-harnesses!
   [{:keys [runtime]}]
   (current/with-runtime runtime
     (shuttle/set-default-review-contract! agents/review-contract)
     (shuttle/set-default-task-contract! agents/worker-contract))
-  {:opened :harnesses})
+  {:opened :release-harnesses})
 
-(defn close-harnesses!
+(defn close-release-harnesses!
   [{:keys [runtime]}]
   (current/with-runtime runtime
     (shuttle/set-default-review-contract! nil)
     (shuttle/set-default-task-contract! nil))
-  {:closed :harnesses})
+  {:closed :release-harnesses})
 
-(lifecycle/defresource harnesses-runtime
+(lifecycle/defresource release-harnesses-runtime
   "Own the disposable release smoke contracts."
-  {:open 'harnesses/open-harnesses!
-   :close 'harnesses/close-harnesses!})
+  {:open 'harnesses/open-release-harnesses!
+   :close 'harnesses/close-release-harnesses!})
 EOF
+[[ -f "$candidate_coord/spools.edn" ]] || die "candidate workspace is missing spools.edn"
+clojure -Sdeps '{:deps {}}' -M -e '
+(require (quote [clojure.edn :as edn])
+         (quote [clojure.string :as string]))
+(let [[source-path target-path kanban-url kanban-tag kanban-sha millhouse-url millhouse-sha]
+      *command-line-args*
+      document (edn/read-string (slurp source-path))
+      providers (:spools document)
+      required-provider-names ["millhouse/spools" "codethread/spools"
+                               "codethread/kanban" "codethread/devflow"]
+      missing (remove #(contains? providers (symbol %)) required-provider-names)
+      local-roots {"ct.spools/harness-core" "harness-core"
+                   "ct.spools/claude-harness" "claude-harness"
+                   "ct.spools/codex-harness" "codex-harness"
+                   "ct.spools/pi-harness" "pi-harness"
+                   "ct.spools/cursor-harness" "cursor-harness"
+                   "ct.spools/agent-cli" "agent-cli"
+                   "ct.spools/agent-run" "agent-run"
+                   "ct.spools/delegation" "delegation"
+                   "ct.spools/bench" "bench"}
+      local-overrides (into {}
+                         (map (fn [[coordinate root]]
+                                [(symbol coordinate) {:local/root (str "../" root)}])
+                              local-roots))]
+  (when (seq missing)
+    (throw (ex-info (str "candidate workspace is missing approved provider families: "
+                         (string/join ", " missing)) {})))
+  (spit target-path
+        (pr-str
+         (assoc document :spools
+                (merge providers
+                       local-overrides
+                       {(symbol "millhouse/spools")
+                        (-> (get providers (symbol "millhouse/spools"))
+                            (assoc :git/url millhouse-url :git/sha millhouse-sha)
+                            (dissoc :git/tag))
+                        (symbol "codethread/kanban")
+                        (-> (get providers (symbol "codethread/kanban"))
+                            (assoc :git/url kanban-url
+                                   :git/tag kanban-tag
+                                   :git/sha kanban-sha))})))))
+' - "$candidate_coord/spools.edn" "$weaver_workspace/spools.edn" \
+  "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha"
+python3 - "$weaver_workspace/spools.edn" "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha" <<'PY'
+import pathlib
+import sys
 
+path, kanban_url, kanban_tag, kanban_sha, millhouse_url, millhouse_sha = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+for value in (
+    'codethread/spools',
+    'millhouse.spools/workflow "spools/workflow"',
+    'millhouse.spools.executors/shell "spools/shell-executor"',
+    f':git/url "{millhouse_url}"',
+    f':git/sha "{millhouse_sha}"',
+    f':git/url "{kanban_url}"',
+    f':git/tag "{kanban_tag}"',
+    f':git/sha "{kanban_sha}"',
+):
+    if value not in text:
+        raise SystemExit(f"projected disposable spools are missing {value}")
+if not ('codethread/agents "spools/agents"' in text or
+        'agents "spools/agents"' in text):
+    raise SystemExit("projected disposable spools are missing codethread agents root")
+if not ('codethread/devflow "."' in text or 'devflow "."' in text):
+    raise SystemExit("projected disposable spools are missing devflow root")
+if not ('codethread/devflow-kanban-adapter "kanban-adapter"' in text or
+        'devflow-kanban-adapter "kanban-adapter"' in text):
+    raise SystemExit("projected disposable spools are missing devflow Kanban adapter root")
+for root in (
+    'ct.spools/harness-core', 'ct.spools/claude-harness',
+    'ct.spools/codex-harness', 'ct.spools/pi-harness',
+    'ct.spools/cursor-harness', 'ct.spools/agent-cli',
+    'ct.spools/agent-run', 'ct.spools/delegation', 'ct.spools/bench',
+):
+    if (f'{root} {{:local/root "../' not in text and
+            f'{root} #:local{{:root "../' not in text):
+        raise SystemExit(f"projected disposable spools are missing local candidate root {root}")
+PY
 mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
 weaver_active=1
 status_before=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
