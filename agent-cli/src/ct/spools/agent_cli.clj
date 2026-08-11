@@ -1,5 +1,6 @@
 (ns ct.spools.agent-cli
   "CLI and execution layer for provider-neutral harness runs."
+  (:refer-clojure :exclude [agent])
   (:require [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
