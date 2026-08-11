@@ -40,6 +40,10 @@
     {:paths ["src"]
      :deps {'io.millstrand/millstrand {:local/root millstrand-root}
             'ct.spools/agent-run {:local/root agent-run-root}
+            'millhouse.spools/workflow
+            {:git/url "https://github.com/codethread/millhouse.spool.git"
+             :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
+             :deps/root "spools/workflow"}
             'clj-kondo/clj-kondo {:mvn/version clj-kondo-version}}
      :aliases {:lint {:main-opts ["-m" "clj-kondo.main"]}}}))
 
@@ -47,12 +51,19 @@
   (str
    "(ns example.consumer\n"
    "  \"Consumer source covering agent-run declaration macros.\"\n"
-   "  (:require [ct.spools.agent-run :as agent-run]))\n"
+   "  (:require [ct.spools.agent-run :as agent-run]\n"
+   "            [millhouse.spools.workflow :as workflow]))\n"
    "\n"
    "(agent-run/defharnesses harnesses \"Harnesses.\"\n"
    "  {:sh {:argv [\"sh\"]}})\n"
    "(agent-run/defaliases aliases \"Aliases.\"\n"
-   "  {:fast {:alias-of :sh}})\n"))
+   "  {:fast {:alias-of :sh}})\n"
+   "(workflow/defexecutor consumer\n"
+   "  \"Return a stall diagnostic.\"\n"
+   "  {}\n"
+   "  [gate]\n"
+   "  {:gate gate})\n"
+   "(consumer-stalled? {:id :gate})\n"))
 
 (defn- run-consumer-command!
   "Run one command in the temporary consumer and return its output and exit."
@@ -97,6 +108,12 @@
           (is (zero? lint-exit) lint-output)
           (is (.isFile imported-config))
           (is (str/includes? (slurp imported-config) "defharnesses"))
-          (is (str/includes? (slurp imported-config) "defaliases"))))
+          (is (str/includes? (slurp imported-config) "defaliases"))
+          (let [workflow-config (io/file root
+                                         ".clj-kondo/imports/millhouse.spools/workflow/config.edn")]
+            (is (.isFile workflow-config))
+            (is (str/includes? (slurp workflow-config) "defexecutor"))
+            (is (str/includes? (slurp workflow-config)
+                               "hooks.millhouse.spools.workflow/defexecutor")))))
       (finally
         (delete-tree! root)))))

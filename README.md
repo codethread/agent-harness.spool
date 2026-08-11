@@ -54,7 +54,7 @@ or a pinned nested root:
 {:spools
  {millhouse.spools/workflow
   {:git/url "https://github.com/codethread/millhouse.spool.git"
-   :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+   :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
    :deps/root "spools/workflow"}}}
 ```
 
