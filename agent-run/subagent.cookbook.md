@@ -15,7 +15,7 @@ composition live here and in the contract. This cookbook never restates a fn sig
 attribute table — it links to them.
 
 The subagent executor sits between two spools that know nothing of each other: the [workflow
-engine](https://github.com/codethread/millhouse.spool/blob/5581f0aef638a1744521fe95282de5a969a999fd/spools/workflow/README.md), which models a step it can't do itself as a `gate`, and the [agent-run
+engine](https://github.com/codethread/millhouse.spool/blob/d1affd4065fcf69b81c0191944791475108d7bea/spools/workflow/README.md), which models a step it can't do itself as a `gate`, and the [agent-run
 engine](../agent-run/README.md), which spawns agent runs but has no notion of workflows. The
 subagent executor is the only namespace that speaks both. Load order matters — **agent-run first,
 then the subagent executor** (its `reconcile` fails loudly otherwise and runs an initial gate scan) —
@@ -127,7 +127,7 @@ the gate rather than spawning a broken run.
 
 - **The gate is a pure-data run request.** Handing the run its whole configuration as attributes
   keeps the subagent executor a translator with no policy: it reads the gate, builds a `spawn-run!`
-  call, and gets out of the way. The [fan-out recipe](https://github.com/codethread/millhouse.spool/blob/5581f0aef638a1744521fe95282de5a969a999fd/spools/workflow/workflow.cookbook.md#recipe-fan-out-over-a-collection-with-a-chained-loop)
+  call, and gets out of the way. The [fan-out recipe](https://github.com/codethread/millhouse.spool/blob/d1affd4065fcf69b81c0191944791475108d7bea/spools/workflow/workflow.cookbook.md#recipe-fan-out-over-a-collection-with-a-chained-loop)
   in the workflow cookbook uses exactly this to compute per-task `agent-run/*` attributes from a
   loop item.
 - **Prompt derivation avoids saying the same thing twice.** A step that already carries a
@@ -252,7 +252,7 @@ Honest source: `blank-result-gate-fails-loudly-stays-discoverable-and-recovers` 
   vocabulary, delivery, failure, and recovery.
 - [`executors/subagent.api.md`](./subagent.api.md) — generated signatures and docstrings for every
   public fn referenced above.
-- [`workflow.cookbook.md`](https://github.com/codethread/millhouse.spool/blob/5581f0aef638a1744521fe95282de5a969a999fd/spools/workflow/workflow.cookbook.md) — the gate and fan-out recipes that author the
+- [`workflow.cookbook.md`](https://github.com/codethread/millhouse.spool/blob/d1affd4065fcf69b81c0191944791475108d7bea/spools/workflow/workflow.cookbook.md) — the gate and fan-out recipes that author the
   `:subagent` gates the subagent executor fulfills.
 - [`agent-run.cookbook.md`](../agent-run.cookbook.md) — the run engine the subagent executor spawns
   onto: harnesses, readiness, and crash recovery.

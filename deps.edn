@@ -18,7 +18,7 @@
          :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                       millhouse.spools/workflow
                       {:git/url "https://github.com/codethread/millhouse.spool.git"
-                       :git/sha "5581f0aef638a1744521fe95282de5a969a999fd"
+                       :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
                        :deps/root "spools/workflow"}
                       clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
@@ -48,7 +48,7 @@
                      :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                                   millhouse.spools/workflow
                                   {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                   :git/sha "5581f0aef638a1744521fe95282de5a969a999fd"
+                                   :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
                                    :deps/root "spools/workflow"}
                                   clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                      :main-opts ["-m" "quality.conventions-check"]}
@@ -65,6 +65,6 @@
                   :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                                millhouse.spools/workflow
                                {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                :git/sha "5581f0aef638a1744521fe95282de5a969a999fd"
+                                :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
                                 :deps/root "spools/workflow"}}
                   :main-opts ["-m" "quality.reflect-check"]}}}

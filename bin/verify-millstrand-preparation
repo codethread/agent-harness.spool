@@ -54,7 +54,7 @@ kanban_sha=$(json_value kanban_sha)
 source_marker=$(json_value source_marker)
 source_db=$(json_value source_database)
 millhouse_repository="codethread/millhouse.spool"
-millhouse_sha="5581f0aef638a1744521fe95282de5a969a999fd"
+millhouse_sha="d1affd4065fcf69b81c0191944791475108d7bea"
 
 [[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
 [[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"

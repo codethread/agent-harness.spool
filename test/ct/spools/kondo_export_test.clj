@@ -42,7 +42,7 @@
             'ct.spools/agent-run {:local/root agent-run-root}
             'millhouse.spools/workflow
             {:git/url "https://github.com/codethread/millhouse.spool.git"
-             :git/sha "5581f0aef638a1744521fe95282de5a969a999fd"
+             :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
              :deps/root "spools/workflow"}
             'clj-kondo/clj-kondo {:mvn/version clj-kondo-version}}
      :aliases {:lint {:main-opts ["-m" "clj-kondo.main"]}}}))
