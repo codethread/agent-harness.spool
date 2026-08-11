@@ -4,5 +4,6 @@ deps.edn	.*skein-src.*	Local development resolves Millstrand from the canonical 
 AGENTS.md	.*skein-src.*	Contributor instructions name the canonical sibling checkout used for local development.
 README.md	.*skein-src.*	The local test-suite instructions name the canonical sibling checkout.
 bin/compat-alarm	.*skein-src.*	The local compatibility alarm tests against the canonical sibling checkout.
+test/ct/spools/kondo_export_test.clj	.*skein-src.*	The local consumer Kondo export proof resolves Millstrand from the canonical sibling checkout.
 bin/verify-millstrand-preparation	.*	Disposable cutover verification names the live source marker and isolated Skein-compatible fixture paths without activating them.
 bin/validate-consumer-preparation	.*	The reusable MSR-14C manifest validator enforces the recorded live source marker and rollback boundary.
