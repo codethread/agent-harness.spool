@@ -162,6 +162,6 @@ runs parked on `gate/delivery-blocked`.
 
 ## See also
 
-- [`millhouse.spools.workflow`](https://github.com/codethread/millhouse.spool/blob/3dcf93cf511c3a4412ee62ede92bd077f4ca6000/spools/workflow/README.md) — workflow gates and runtime API.
+- [`millhouse.spools.workflow`](https://github.com/codethread/millhouse.spool/blob/5581f0aef638a1744521fe95282de5a969a999fd/spools/workflow/README.md) — workflow gates and runtime API.
 - [`ct.spools.agent-run`](../agent-run/README.md) — agent-run run lifecycle and harness registry.
 - ``test/ct/spools/subagent_test.clj`` — executable contract tests.
