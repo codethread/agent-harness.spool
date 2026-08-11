@@ -1,6 +1,3 @@
-{:lint-as
- {millhouse.spools.workflow/defexecutor clojure.core/defn}
- :linters
+{:linters
  {:unresolved-var
-  {:exclude [millstrand.api.runtime.alpha/collect-kind!
-             millhouse.spools.workflow/defexecutor]}}}
+  {:exclude [millstrand.api.runtime.alpha/collect-kind!]}}}

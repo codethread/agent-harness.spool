@@ -1,7 +1,7 @@
 {:spools {millstrand.spools/batteries {:millstrand/source-root "spools/batteries"}
           millhouse/spools
           {:git/url "https://github.com/codethread/millhouse.spool.git"
-           :git/sha "8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+           :git/sha "3dcf93cf511c3a4412ee62ede92bd077f4ca6000"
            :roots {millhouse.spools/workflow "spools/workflow"
                    millhouse.spools.executors/shell "spools/shell-executor"}}
           codethread/spools

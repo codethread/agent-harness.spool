@@ -132,7 +132,7 @@ core_url="https://github.com/${core_repository%.git}.git"
 kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
-millhouse_sha="8f386b09fb8e8506a3c38105dce8e8552142dbf8"
+millhouse_sha="3dcf93cf511c3a4412ee62ede92bd077f4ca6000"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
 if [[ "$mode" == "pre-tag" ]]; then
