@@ -169,6 +169,11 @@ if [[ "$mode" == "pre-tag" ]]; then
   # uncommitted candidate changes, and keep read-only source roots viable.
   mkdir -p "$tmp_root/agent-harness"
   cp -R "$source_root/." "$tmp_root/agent-harness/"
+  # Do not inherit developer-owned Millstrand overlays into the disposable
+  # candidate. Leave init.local.clj alone: the release workspace writes its
+  # intentional generated version below after projecting candidate spools.
+  rm -f "$tmp_root/agent-harness/.millstrand/config.local.json" \
+        "$tmp_root/agent-harness/.millstrand/spools.local.edn"
   chmod -R u+rwX "$tmp_root/agent-harness"
   candidate_root="$tmp_root/agent-harness"
 fi
