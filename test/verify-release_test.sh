@@ -39,6 +39,16 @@ for required in \
   fi
 done
 
+if ! grep -Fq 'rm -f "$tmp_root/agent-harness/.millstrand/config.local.json" \' "$verify_release" || \
+   ! grep -Fq '"$tmp_root/agent-harness/.millstrand/spools.local.edn"' "$verify_release"; then
+  echo "verify-release overlay probe failed; source-root local overlays are copied into the candidate" >&2
+  exit 1
+fi
+if grep -Fq 'rm -f "$tmp_root/agent-harness/.millstrand/init.local.clj"' "$verify_release"; then
+  echo "verify-release overlay probe failed; generated init.local.clj is removed" >&2
+  exit 1
+fi
+
 if grep -Fq 'cat >"$weaver_workspace/spools.edn"' "$verify_release"; then
   echo "verify-release projection probe failed; workspace spools are still hard-coded" >&2
   exit 1
