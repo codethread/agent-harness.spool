@@ -596,6 +596,12 @@
   (selected-definition-vars! alias-kind namespace symbols options
                              validate-alias-def! alias-declaration-key "alias"))
 
+(defn- bang-selection-options [form args]
+  (when (< 1 (count args))
+    (fail! (str form " accepts at most one selection options map")
+           {:form form :options args}))
+  (or (first args) {}))
+
 (defmacro defharnesses
   "Define an inert complete harness-tool declaration map.
 
@@ -616,13 +622,17 @@
     `(select-harnesses! '~(ns-name *ns*) '~(vec symbols) ~options)))
 
 (defmacro defharnesses!
-  "Define and select a complete harness-tool declaration map."
-  [form-name doc definitions]
-  `(do
-     (def ~form-name ~doc ~definitions)
-     (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
-     (select-harnesses! '~(ns-name *ns*) '[~form-name] {})
-     (var ~form-name)))
+  "Define and select a complete harness-tool declaration map.
+
+  An optional selection options map supports the same `:override?` policy as
+  `use-harnesses!`."
+  [form-name doc definitions & args]
+  (let [options (bang-selection-options 'defharnesses! args)]
+    `(do
+       (def ~form-name ~doc ~definitions)
+       (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
+       (select-harnesses! '~(ns-name *ns*) '[~form-name] ~options)
+       (var ~form-name))))
 
 (defmacro defaliases
   "Define an inert complete harness-seat declaration map.
@@ -644,13 +654,17 @@
     `(select-aliases! '~(ns-name *ns*) '~(vec symbols) ~options)))
 
 (defmacro defaliases!
-  "Define and select a complete harness-seat declaration map."
-  [form-name doc definitions]
-  `(do
-     (def ~form-name ~doc ~definitions)
-     (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
-     (select-aliases! '~(ns-name *ns*) '[~form-name] {})
-     (var ~form-name)))
+  "Define and select a complete harness-seat declaration map.
+
+  An optional selection options map supports the same `:override?` policy as
+  `use-aliases!`."
+  [form-name doc definitions & args]
+  (let [options (bang-selection-options 'defaliases! args)]
+    `(do
+       (def ~form-name ~doc ~definitions)
+       (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
+       (select-aliases! '~(ns-name *ns*) '[~form-name] ~options)
+       (var ~form-name))))
 
 (defn- effective-definitions [kind-id]
   (registry/effective (registry-handle) kind-id))

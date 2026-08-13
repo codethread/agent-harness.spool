@@ -206,10 +206,16 @@
   (testing "standalone selection returns Vars and publishes their entries"
     (let [{:keys [return contribution]}
           (collect-authoring-forms
-           #(eval '(shuttle/use-harnesses! authoring-harnesses)))]
-      (is (= [(ns-resolve test-source-ns 'authoring-harnesses)] return))
+           #(eval '(shuttle/use-harnesses! authoring-harnesses
+                                           authoring-harnesses-override)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-harnesses)
+              (ns-resolve test-source-ns 'authoring-harnesses-override)]
+             return))
       (is (= {:argv ["sh"]}
              (get-in contribution [shuttle/harness-kind :entries :authoring-sh])))
+      (is (= {:argv ["second"]}
+             (get-in contribution [shuttle/harness-kind :entries
+                                   :authoring-duplicate])))
       (is (not (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
                           :authoring-sh)))))
 
@@ -233,6 +239,17 @@
                                    :authoring-duplicate])))
       (is (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
                      :authoring-duplicate))))
+
+  (testing "bang definition forwards explicit override intent"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses! authoring-bang-override
+                     "A selected override value."
+                     {:authoring-bang-duplicate {:argv ["bang"]}}
+                     {:override? true})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-override) return))
+      (is (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                     :authoring-bang-duplicate))))
 
   (testing "wrong-family and malformed selections fail loudly"
     (assert-authoring-error #"not an inert harness declaration"
@@ -261,10 +278,14 @@
   (testing "standalone selection returns Vars and publishes aliases"
     (let [{:keys [return contribution]}
           (collect-authoring-forms
-           #(eval '(shuttle/use-aliases! authoring-aliases)))]
-      (is (= [(ns-resolve test-source-ns 'authoring-aliases)] return))
+           #(eval '(shuttle/use-aliases! authoring-aliases
+                                         authoring-aliases-override)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-aliases)
+              (ns-resolve test-source-ns 'authoring-aliases-override)]
+             return))
       (is (= {:alias-of :authoring-sh}
-             (get-in contribution [shuttle/alias-kind :entries :authoring-fast])))))
+             (get-in contribution [shuttle/alias-kind :entries :authoring-fast])))
+      (is (empty? (get-in contribution [shuttle/alias-kind :overrides] #{})))))
 
   (testing "bang definition returns its Var and publishes an alias"
     (let [{:keys [return contribution]}
@@ -287,6 +308,17 @@
                                    :authoring-fast])))
       (is (contains? (get-in contribution [shuttle/alias-kind :overrides] #{})
                      :authoring-fast))))
+
+  (testing "bang definition forwards explicit override intent"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases! authoring-bang-alias-override
+                     "A selected alias override value."
+                     {:authoring-bang-alias-duplicate {:alias-of :authoring-sh}}
+                     {:override? true})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-alias-override) return))
+      (is (contains? (get-in contribution [shuttle/alias-kind :overrides] #{})
+                     :authoring-bang-alias-duplicate))))
 
   (testing "wrong-family and malformed selections fail loudly"
     (assert-authoring-error #"not an inert alias declaration"
