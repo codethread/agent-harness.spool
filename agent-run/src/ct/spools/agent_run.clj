@@ -2914,7 +2914,7 @@
     (events/unregister-handler! runtime :agent-run/engine)
     {:retained-in-flight (vec (sort (in-flight-run-ids)))}))
 
-(lifecycle/defresource agent-run-engine
+(lifecycle/defresource! agent-run-engine
   "Own the agent-run event engine for the module lifetime."
   {:open 'ct.spools.agent-run/open-agent-run!
    :close 'ct.spools.agent-run/close-agent-run!})

@@ -46,6 +46,73 @@
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (f rt))))
 
+(deftest production-authoring-declarations-publish-in-disposable-weaver
+  (let [harness-core-root (test-alpha/spool-checkout-root
+                           "ct/spools/harness_core.clj")
+        agent-cli-root (test-alpha/spool-checkout-root
+                        "ct/spools/agent_cli.clj")
+        agent-run-root (test-alpha/spool-checkout-root
+                        "ct/spools/agent_run.clj")
+        delegation-root (test-alpha/spool-checkout-root
+                         "ct/spools/delegation.clj")]
+    (test-alpha/with-weaver-world
+      [ctx {:storage :sqlite-memory
+            :spools-edn
+            {:spools
+             {'ct.spools/harness-core {:local/root (.getCanonicalPath harness-core-root)}
+              'ct.spools/agent-cli {:local/root (.getCanonicalPath agent-cli-root)}
+              'ct.spools/agent-run {:local/root (.getCanonicalPath agent-run-root)}
+              'ct.spools/delegation {:local/root (.getCanonicalPath delegation-root)}}}
+            :init
+            "(require '[millstrand.api.current.alpha :as current]
+                       '[millstrand.api.runtime.alpha :as runtime])
+             (def rt (current/runtime))
+             (runtime/module! rt :harness-core
+               {:ns 'ct.spools.harness-core
+                :spools ['ct.spools/harness-core]
+                :required? true})
+             (runtime/module! rt :agent-cli
+               {:ns 'ct.spools.agent-cli
+                :spools ['ct.spools/agent-cli 'ct.spools/harness-core]
+                :after [:harness-core]
+                :required? true})
+             (runtime/module! rt :agent-run
+               {:ns 'ct.spools.agent-run
+                :spools ['ct.spools/agent-run]
+                :required? true})
+             (runtime/module! rt :delegation
+               {:ns 'ct.spools.delegation
+                :spools ['ct.spools/delegation 'ct.spools/agent-run]
+                :after [:agent-run]
+                :required? true})"}]
+      (let [{:keys [ops queries patterns bins lifecycles]}
+            (test-alpha/repl!
+             ctx
+             '(do
+                (require '[millstrand.api.current.alpha :as current]
+                         '[millstrand.api.graph.alpha :as graph]
+                         '[millstrand.api.patterns.alpha :as patterns]
+                         '[millstrand.api.runtime.alpha :as runtime]
+                         '[millstrand.api.weaver.alpha :as weaver])
+                (let [rt (current/runtime)]
+                  {:ops (mapv :name (weaver/ops rt))
+                   :queries (set (keys (graph/queries rt)))
+                   :patterns (set (map :name (patterns/patterns rt)))
+                   :bins (set (map :name (:bins (weaver/op! rt 'bins ["list"]))))
+                   :lifecycles (:lifecycle/outcomes (runtime/status rt))})))]
+        (is (contains? (set ops) "harness"))
+        (is (contains? (set ops) "agent"))
+        (is (contains? queries "agent-failures"))
+        (is (contains? patterns "agent-plan"))
+        (is (contains? bins "agent"))
+        (doseq [[module effect]
+                [[:harness-core :harness-core-runtime]
+                 [:agent-cli :agent-cli-runtime]
+                 [:agent-run :agent-run-engine]
+                 [:delegation :delegation-runtime]]]
+          (is (= {:status :applied :kind :resource}
+                 (get-in lifecycles [module effect]))))))))
+
 (defn- attr-namespace-declaration [rt name]
   (->> (vocab/declarations rt {:kind :attr-namespace})
        (filter #(= name (:name %)))

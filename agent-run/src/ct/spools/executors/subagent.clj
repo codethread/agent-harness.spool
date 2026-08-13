@@ -307,12 +307,12 @@
   [gate]
   (gate-stalled? gate))
 
-(millstrand/defquery stalled-subagent-gates
+(millstrand/defquery! stalled-subagent-gates
   "Select ready subagent gates with no serving run."
   {}
   stalled-gates-query)
 
-(millstrand/defquery blocked-deliveries
+(millstrand/defquery! blocked-deliveries
   "Select closed gates whose delivery remains blocked."
   {}
   [:and [:= :state "closed"]
@@ -359,7 +359,7 @@
   (events/unregister-handler! runtime :subagent/engine)
   {:closed :subagent})
 
-(lifecycle/defresource subagent-engine
+(lifecycle/defresource! subagent-engine
   "Own the subagent executor event engine for the module lifetime."
   {:open 'ct.spools.executors.subagent/open-subagent!
    :close 'ct.spools.executors.subagent/close-subagent!})

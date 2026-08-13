@@ -190,7 +190,7 @@
          :error (str "Claude JSON parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(lifecycle/defresource claude-harness-runtime
+(lifecycle/defresource! claude-harness-runtime
   "Own the Claude harness registration for the module lifetime."
   {:open 'ct.spools.claude-harness/open-claude-harness!
    :close 'ct.spools.claude-harness/close-claude-harness!})

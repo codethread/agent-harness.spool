@@ -204,7 +204,7 @@
          :error (str "Cursor JSON parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(lifecycle/defresource cursor-harness-runtime
+(lifecycle/defresource! cursor-harness-runtime
   "Own the Cursor harness registration for the module lifetime."
   {:open 'ct.spools.cursor-harness/open-cursor-harness!
    :close 'ct.spools.cursor-harness/close-cursor-harness!})

@@ -231,7 +231,7 @@
          :error (str "Codex JSONL parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(lifecycle/defresource codex-harness-runtime
+(lifecycle/defresource! codex-harness-runtime
   "Own the Codex harness registration for the module lifetime."
   {:open 'ct.spools.codex-harness/open-codex-harness!
    :close 'ct.spools.codex-harness/close-codex-harness!})

@@ -64,7 +64,7 @@
             plan (first (filter #(= "agent-plan" (:name %))
                                 (patterns/patterns rt)))]
         (is (= {:name "agent"
-                :fn 'ct.spools.delegation/agent-op
+                :fn 'ct.spools.delegation/agent
                 :stream? false
                 :provenance 'ct.spools.delegation}
                (select-keys agent [:name :fn :stream? :provenance])))

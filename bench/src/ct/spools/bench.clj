@@ -1445,9 +1445,7 @@
   [s]
   (into [] (comp (map str/trim) (remove str/blank?)) (str/split s #",")))
 
-(declare bench-op)
-
-(millstrand/defop bench
+(millstrand/defop! bench
   "Dispatch parsed `strand bench ...` subcommands to the engine functions.
 
   Each verb is a thin JSON wrapper: the parser routes on `:subcommand` and
@@ -1472,6 +1470,14 @@
     "harnesses" (harnesses runtime)
     "gc" (gc! runtime (select-keys args [:run]))
     "about" (about)))
+
+(defn bench-op
+  "Dispatch a bench operation through the selected `bench` handler.
+
+  Preserve the original public Clojure entry point while `defop!` defines the
+  exact operation name as its selected handler Var."
+  [ctx]
+  (bench ctx))
 
 ;; ---------------------------------------------------------------------------
 ;; Engine detection + reconciliation + install
@@ -1550,7 +1556,7 @@
                         :entry-spec ::registered-extractor
                         :binding-moment :run})
 
-(millstrand/defquery bench-runs
+(millstrand/defquery! bench-runs
   "Select active benchmark run roots."
   {}
   [:and [:= :state "active"]
@@ -1583,7 +1589,7 @@
   [_context]
   {:closed :bench})
 
-(lifecycle/defresource bench-runtime
+(lifecycle/defresource! bench-runtime
   "Own bench's module-lifetime initialization and reconciliation."
   {:open 'ct.spools.bench/open-bench!
    :close 'ct.spools.bench/close-bench!})

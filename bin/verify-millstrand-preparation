@@ -403,7 +403,7 @@ cat >"$target_marker/config/harnesses.clj" <<'EOF'
     (shuttle/set-default-task-contract! nil))
   {:closed :harnesses})
 
-(lifecycle/defresource harnesses-runtime
+(lifecycle/defresource! harnesses-runtime
   "Own the disposable preparation smoke harness."
   {:open 'harnesses/open-harnesses!
    :close 'harnesses/close-harnesses!})

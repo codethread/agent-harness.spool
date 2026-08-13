@@ -221,7 +221,7 @@
          :error (str "Pi JSONL parse failed: " (ex-message e)
                      (when-let [output (clipped stdout)] (str "\n" output)))}))))
 
-(lifecycle/defresource pi-harness-runtime
+(lifecycle/defresource! pi-harness-runtime
   "Own the Pi harness registration for the module lifetime."
   {:open 'ct.spools.pi-harness/open-pi-harness!
    :close 'ct.spools.pi-harness/close-pi-harness!})
