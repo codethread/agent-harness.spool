@@ -13,7 +13,6 @@
                        "agent-cli/src"
                        "delegation/src"
                        "bench/src"
-                       "../skein-src/test"
                        "scripts"]
          :extra-deps {io.millstrand/millstrand {:local/root "../skein-src"}
                       millhouse.spools/workflow
