@@ -1,3 +1,5 @@
-{:linters
+{:config-paths ["imports/io.millstrand/millstrand"
+                "imports/millhouse.spools/workflow"]
+ :linters
  {:unresolved-var
   {:exclude [millstrand.api.runtime.alpha/collect-kind!]}}}

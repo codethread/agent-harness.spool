@@ -1,1 +1,8 @@
-{:copy-kondo-configs? false}
+{:project-specs [{:project-path "deps.edn"
+                  :classpath-cmd ["clojure" "-Srepro" "-A:test" "-Spath"]}]
+ :source-aliases #{:test}
+ :source-paths ["agent-run/src" "harness-core/src" "claude-harness/src"
+                "codex-harness/src" "pi-harness/src" "cursor-harness/src"
+                "agent-cli/src" "delegation/src" "bench/src"
+                ".millstrand/config" ".millstrand/config/workflows" "test"]
+ :copy-kondo-configs? false}
