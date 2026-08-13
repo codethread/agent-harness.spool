@@ -46,6 +46,48 @@
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (f rt))))
 
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defharnesses authoring-harnesses
+  "Harness declarations used to exercise selectable authoring."
+  {:authoring-sh {:argv ["sh"]}
+   :authoring-duplicate {:argv ["first"]}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defharnesses authoring-harnesses-override
+  "An overlapping harness declaration with explicit selection override."
+  {:authoring-duplicate {:argv ["second"]}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defaliases authoring-aliases
+  "Alias declarations used to exercise selectable authoring."
+  {:authoring-fast {:alias-of :authoring-sh}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defaliases authoring-aliases-override
+  "An overlapping alias declaration with explicit selection override."
+  {:authoring-fast {:alias-of :authoring-sh}})
+
+(defn- collect-authoring-forms
+  "Collect a test namespace's authoring forms as one owner-complete result."
+  [thunk]
+  (test-alpha/collect-module-forms :test/agent-run-authoring
+                                   'ct.spools.agent-run-test
+                                   thunk))
+
+(def ^:private test-source-ns
+  (the-ns 'ct.spools.agent-run-test))
+
+(defn- assert-authoring-error
+  "Assert that an authoring form throws an actionable ExceptionInfo."
+  [message form]
+  (let [error (try
+                (collect-authoring-forms #(eval form))
+                nil
+                (catch Throwable throwable
+                  throwable))]
+    (is (instance? clojure.lang.ExceptionInfo error))
+    (is (re-find message (ex-message error)))))
+
 (deftest production-authoring-declarations-publish-in-disposable-weaver
   (let [harness-core-root (test-alpha/spool-checkout-root
                            "ct/spools/harness_core.clj")
@@ -148,6 +190,124 @@
         (testing "refreshing the same owner is idempotent"
           (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
           (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
+
+(deftest selectable-harness-authoring-is-inert-selectable-and-returning
+  (testing "an inert definition returns its Var without collecting"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses authoring-inert-return
+                     "An inert return value."
+                     {:authoring-inert {:argv ["true"]}})))]
+      (is (var? return))
+      (is (= (ns-resolve test-source-ns 'authoring-inert-return) return))
+      (is (= {:authoring-inert {:argv ["true"]}} @return))
+      (is (empty? contribution))))
+
+  (testing "standalone selection returns Vars and publishes their entries"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-harnesses! authoring-harnesses)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-harnesses)] return))
+      (is (= {:argv ["sh"]}
+             (get-in contribution [shuttle/harness-kind :entries :authoring-sh])))
+      (is (not (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                          :authoring-sh)))))
+
+  (testing "bang definition returns its Var and publishes it"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses! authoring-bang-return
+                     "A selected return value."
+                     {:authoring-bang {:argv ["echo"]}})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-return) return))
+      (is (= {:argv ["echo"]}
+             (get-in contribution [shuttle/harness-kind :entries :authoring-bang])))))
+
+  (testing "duplicate entries are last-write-wins and retain override intent"
+    (let [{:keys [contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-harnesses! {:override? true}
+                                           authoring-harnesses authoring-harnesses-override)))]
+      (is (= {:argv ["second"]}
+             (get-in contribution [shuttle/harness-kind :entries
+                                   :authoring-duplicate])))
+      (is (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                     :authoring-duplicate))))
+
+  (testing "wrong-family and malformed selections fail loudly"
+    (assert-authoring-error #"not an inert harness declaration"
+                            '(shuttle/use-harnesses! authoring-aliases))
+    (assert-authoring-error #"requires one or more harness Vars"
+                            '(shuttle/use-harnesses!))
+    (assert-authoring-error #"accepts only harness Var symbols"
+                            '(shuttle/use-harnesses!
+                              (identity authoring-harnesses)))
+    (assert-authoring-error #"options are invalid"
+                            '(shuttle/use-harnesses! {:override? :yes}
+                                                     authoring-harnesses))))
+
+(deftest selectable-alias-authoring-is-inert-selectable-and-returning
+  (testing "an inert alias definition returns its Var without collecting"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases authoring-inert-alias-return
+                     "An inert alias return value."
+                     {:authoring-inert-alias {:alias-of :authoring-sh}})))]
+      (is (var? return))
+      (is (= (ns-resolve test-source-ns 'authoring-inert-alias-return) return))
+      (is (= {:authoring-inert-alias {:alias-of :authoring-sh}} @return))
+      (is (empty? contribution))))
+
+  (testing "standalone selection returns Vars and publishes aliases"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-aliases! authoring-aliases)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-aliases)] return))
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries :authoring-fast])))))
+
+  (testing "bang definition returns its Var and publishes an alias"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases! authoring-bang-alias-return
+                     "A selected alias return value."
+                     {:authoring-bang-alias {:alias-of :authoring-sh}})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-alias-return) return))
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries
+                                   :authoring-bang-alias])))))
+
+  (testing "duplicate aliases are last-write-wins and retain override intent"
+    (let [{:keys [contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-aliases! {:override? true}
+                                         authoring-aliases authoring-aliases-override)))]
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries
+                                   :authoring-fast])))
+      (is (contains? (get-in contribution [shuttle/alias-kind :overrides] #{})
+                     :authoring-fast))))
+
+  (testing "wrong-family and malformed selections fail loudly"
+    (assert-authoring-error #"not an inert alias declaration"
+                            '(shuttle/use-aliases! authoring-harnesses))
+    (assert-authoring-error #"requires one or more alias Vars"
+                            '(shuttle/use-aliases!))
+    (assert-authoring-error #"accepts only alias Var symbols"
+                            '(shuttle/use-aliases!
+                              (identity authoring-aliases)))
+    (assert-authoring-error #"options are invalid"
+                            '(shuttle/use-aliases! {:override? :yes}
+                                                   authoring-aliases))))
+
+(deftest workspace-workflow-selection-returns-the-defined-var
+  (let [selected (load-file ".millstrand/config/workflows.clj")
+        workflow-var (ns-resolve 'workflows.feature-iteration 'feature-iteration)]
+    (is (= [workflow-var] selected))
+    (is (var? workflow-var))
+    (is (string? (:doc (meta workflow-var))))
+    (is (= "feature-iteration"
+           (get-in @workflow-var [:attributes "workflow/family"])))))
 
 (deftest harness-registry-validates-and-resolves-aliases
   (with-shuttle
