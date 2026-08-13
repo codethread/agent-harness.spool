@@ -23,7 +23,7 @@
     (shuttle/set-default-task-contract! nil))
   {:closed :delegation-contracts})
 
-(lifecycle/defresource delegation-contracts-runtime
+(lifecycle/defresource! delegation-contracts-runtime
   "Own the workspace's default delegation contracts for the module lifetime."
   {:open 'delegation-contracts/open-delegation-contracts!
    :close 'delegation-contracts/close-delegation-contracts!})

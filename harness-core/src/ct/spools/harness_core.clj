@@ -473,7 +473,7 @@
            {:id (:id run) :expected phase :actual (attr-get run :harness/phase)}))
   run)
 
-(lifecycle/defresource harness-core-runtime
+(lifecycle/defresource! harness-core-runtime
   "Own the provider-neutral harness registry for the module lifetime."
   {:open 'ct.spools.harness-core/open-harness-core!
    :close 'ct.spools.harness-core/close-harness-core!})

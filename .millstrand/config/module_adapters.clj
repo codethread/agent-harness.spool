@@ -22,7 +22,7 @@
    runtime 'millstrand.spools.batteries)
   {:closed :help-transform})
 
-(lifecycle/defresource help-transform-runtime
+(lifecycle/defresource! help-transform-runtime
   "Own the selected help renderer for the module lifetime."
   {:open 'module-adapters/open-help-transform!
    :close 'module-adapters/close-help-transform!})

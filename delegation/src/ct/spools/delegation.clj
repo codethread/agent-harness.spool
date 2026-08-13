@@ -2171,9 +2171,7 @@
                              :else [v])))
                        positional-keys))))
 
-(declare agent-op)
-
-(millstrand/defop agent
+(millstrand/defop! agent
   "Dispatch parsed `strand agent` subcommands using the first path segment."
   {:arg-spec agent-arg-spec
    :returns agent-returns
@@ -2207,6 +2205,14 @@
       "delegate" (op-delegate (parsed->legacy-argv args [:task-id]))
       "retry" (op-retry (parsed->legacy-argv args [:id]))
       "status" (op-status (parsed->legacy-argv args [:root-id])))))
+
+(defn agent-op
+  "Dispatch an agent operation through the selected `agent` handler.
+
+  Preserve the original public Clojure entry point while `defop!` defines the
+  exact operation name as its selected handler Var."
+  [ctx]
+  (agent ctx))
 
 ;; agent-plan pattern
 (s/def ::non-blank-string non-blank?)
@@ -2250,7 +2256,7 @@
 (defn- ref-symbol
   [k]
   (symbol k))
-(millstrand/defpattern agent-plan
+(millstrand/defpattern! agent-plan
   "Create a feature strand plus task/review children for agent work.
 
   The plan root is marked `kind \"agent-plan\"`; each child carries `kind`
@@ -2296,7 +2302,7 @@
                         :entry-spec ::roster
                         :binding-moment :fanout})
 
-(millstrand/defquery agent-failures
+(millstrand/defquery! agent-failures
   "Select active agent runs that failed or exhausted their retry budget."
   {}
   [:and [:= :state "active"]
@@ -2336,7 +2342,7 @@
   [_context]
   {:closed :delegation})
 
-(lifecycle/defresource delegation-runtime
+(lifecycle/defresource! delegation-runtime
   "Own delegation's module-lifetime vocabulary setup."
   {:open 'ct.spools.delegation/open-delegation!
    :close 'ct.spools.delegation/close-delegation!})

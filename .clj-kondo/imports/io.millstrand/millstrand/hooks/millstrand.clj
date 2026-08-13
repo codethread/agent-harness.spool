@@ -88,23 +88,7 @@
 (defn defop
   "Analyze a Millstrand `defop` call."
   [context]
-  (let [[node children] (hook-children :defop context 5 false)
-        [form-node name-node docstring-node opts-node argv-node & body] children
-        name (symbol-name :defop name-node)
-        handler-node (with-meta
-                       (api/token-node (symbol (str name "-op")))
-                       (meta name-node))
-        defn-node (api/list-node
-                   (list* (api/token-node 'defn)
-                          handler-node docstring-node argv-node body))
-        used (api/list-node
-              (list (api/token-node 'do)
-                    (api/list-node
-                     (list (api/token-node 'identity) form-node))
-                    (api/list-node
-                     (list (api/token-node 'identity) opts-node))
-                    defn-node))]
-    {:node (with-meta used (meta node))}))
+  (defn-hook context))
 
 (defn defquery
   "Analyze a Millstrand `defquery` call."

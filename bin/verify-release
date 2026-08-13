@@ -350,7 +350,7 @@ cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
     (shuttle/set-default-task-contract! nil))
   {:closed :release-harnesses})
 
-(lifecycle/defresource release-harnesses-runtime
+(lifecycle/defresource! release-harnesses-runtime
   "Own the disposable release smoke contracts."
   {:open 'harnesses/open-release-harnesses!
    :close 'harnesses/close-release-harnesses!})

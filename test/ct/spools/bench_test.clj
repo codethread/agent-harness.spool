@@ -179,7 +179,7 @@ esac
     (fn [rt _config-dir]
       (let [entry (weaver/resolve-op rt 'bench)]
         (is (= {:name "bench"
-                :fn 'ct.spools.bench/bench-op
+                :fn 'ct.spools.bench/bench
                 :stream? false
                 :provenance 'ct.spools.bench}
                (select-keys entry [:name :fn :stream? :provenance])))

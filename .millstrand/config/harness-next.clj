@@ -19,7 +19,7 @@
   [_context]
   {:closed :harness-next})
 
-(lifecycle/defresource harness-next-runtime
+(lifecycle/defresource! harness-next-runtime
   "Own the workspace's next-harness aliases for the module lifetime."
   {:open 'harness-next/open-harness-next!
    :close 'harness-next/close-harness-next!})

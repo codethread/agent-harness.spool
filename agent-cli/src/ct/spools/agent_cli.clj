@@ -378,7 +378,7 @@
     "list" {:doc "List registered concrete harnesses and aliases."
             :hook-class :read :deadline-class :standard}}})
 
-(millstrand/defop harness
+(millstrand/defop! harness
   "Dispatch parsed `strand harness` subcommands.
 
   Run, retry, and resume may schedule asynchronous headless work. `await`
@@ -400,15 +400,23 @@
      "list" (harness/harnesses runtime))
    "harness op produced an invalid result"))
 
+(defn harness-op
+  "Dispatch a parsed harness operation through the selected `harness` handler.
+
+  Preserve the original public Clojure entry point while `defop!` defines the
+  exact operation name as its selected handler Var."
+  [ctx]
+  (harness ctx))
+
 (s/fdef harness-op
   :args (s/cat :ctx ::op-context)
   :ret ::op-result)
 
-(millstrand/defbin agent
+(millstrand/defbin! agent
   "Open a coding agent in the caller's terminal as a tracked interactive run."
   {:executable [:root "bin/agent"]})
 
-(lifecycle/defresource agent-cli-runtime
+(lifecycle/defresource! agent-cli-runtime
   "Own the harness CLI event handler for the module lifetime."
   {:open 'ct.spools.agent-cli/open-agent-cli!
    :close 'ct.spools.agent-cli/close-agent-cli!})
