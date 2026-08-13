@@ -530,30 +530,126 @@
 (s/def ::registered-harness-def valid-harness-def?)
 (s/def ::registered-alias-def valid-alias-def?)
 
-(defmacro defharnesses
-  "Define and collect a complete harness-tool declaration map.
+(def ^:private harness-declaration-key ::harness-declaration)
+(def ^:private alias-declaration-key ::alias-declaration)
 
-  Each map entry is contributed to agent-run's harness kind while its enclosing
-  module source is collected. Removing an entry or the form removes that
-  module owner's partition entry on the next refresh."
+(defn- validate-selection-options! [options form]
+  (when-not (and (map? options)
+                 (every? #{:override?} (keys options))
+                 (or (not (contains? options :override?))
+                     (boolean? (:override? options))))
+    (fail! "Harness authoring selection options are invalid"
+           {:form form :options options :allowed #{:override?}}))
+  options)
+
+(defn- selected-definition-vars!
+  [kind namespace symbols options validator declaration-key label]
+  (when (empty? symbols)
+    (fail! (str "Authoring selection requires one or more " label " Vars")
+           {:namespace namespace :symbols symbols}))
+  (when-let [value (first (remove symbol? symbols))]
+    (fail! (str "Authoring selection accepts only " label " Var symbols")
+           {:namespace namespace :symbols symbols :value value}))
+  (let [options (validate-selection-options! options symbols)
+        vars (mapv (fn [symbol]
+                     (or (ns-resolve namespace symbol)
+                         (fail! "Authoring selection Var does not resolve"
+                                {:namespace namespace :symbol symbol})))
+                   symbols)]
+    (doseq [target vars]
+      (when-not (var? target)
+        (fail! "Authoring selection did not resolve to a Var"
+               {:namespace namespace :symbols symbols :value target}))
+      (when-not (true? (get (meta target) declaration-key))
+        (fail! (str "Selected Var is not an inert " label " declaration")
+               {:namespace namespace :symbols symbols :value target}))
+      (when-not (map? @target)
+        (fail! (str "Selected " label " declaration Var must contain a map")
+               {:namespace namespace :symbols symbols :value @target})))
+    (doseq [target vars
+            [key definition] @target]
+      (validator key definition)
+      (runtime/collect-entry! kind key definition options))
+    vars))
+
+(defn select-harnesses!
+  "Select harness declaration Vars for the current module.
+
+  `namespace` and `symbols` identify one or more inert `defharnesses` Vars;
+  each map entry is collected with the same optional `:override?` selection
+  policy. Omitting a selection on a later module refresh removes that owner's
+  entries, while an inert definition remains available for another module to
+  select."
+  [namespace symbols options]
+  (selected-definition-vars! harness-kind namespace symbols options
+                             validate-harness-def! harness-declaration-key
+                             "harness"))
+
+(defn select-aliases!
+  "Select alias declaration Vars for the current module.
+
+  `namespace` and `symbols` identify one or more inert `defaliases` Vars;
+  each map entry is collected with the same optional `:override?` selection
+  policy. The selection is owner-complete, so removing it retracts the
+  owner's aliases on the next refresh."
+  [namespace symbols options]
+  (selected-definition-vars! alias-kind namespace symbols options
+                             validate-alias-def! alias-declaration-key "alias"))
+
+(defmacro defharnesses
+  "Define an inert complete harness-tool declaration map.
+
+  Select the Var with `use-harnesses!`, or use `defharnesses!` to define and
+  select it in one form."
   [form-name doc definitions]
   `(do
      (def ~form-name ~doc ~definitions)
-     (doseq [[key# definition#] ~form-name]
-       (runtime/collect-entry! harness-kind key# definition#))
+     (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
+     (var ~form-name)))
+
+(defmacro use-harnesses!
+  "Select one or more inert harness declaration Vars."
+  [& args]
+  (let [[options symbols] (if (map? (first args))
+                            [(first args) (next args)]
+                            [{} args])]
+    `(select-harnesses! '~(ns-name *ns*) '~(vec symbols) ~options)))
+
+(defmacro defharnesses!
+  "Define and select a complete harness-tool declaration map."
+  [form-name doc definitions]
+  `(do
+     (def ~form-name ~doc ~definitions)
+     (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
+     (select-harnesses! '~(ns-name *ns*) '[~form-name] {})
      (var ~form-name)))
 
 (defmacro defaliases
-  "Define and collect a complete harness-seat declaration map.
+  "Define an inert complete harness-seat declaration map.
 
-  Each map entry is contributed to agent-run's alias kind while its enclosing
-  module source is collected. Removing an entry or the form removes that
-  module owner's partition entry on the next refresh."
+  Select the Var with `use-aliases!`, or use `defaliases!` to define and select
+  it in one form."
   [form-name doc definitions]
   `(do
      (def ~form-name ~doc ~definitions)
-     (doseq [[key# definition#] ~form-name]
-       (runtime/collect-entry! alias-kind key# definition#))
+     (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
+     (var ~form-name)))
+
+(defmacro use-aliases!
+  "Select one or more inert alias declaration Vars."
+  [& args]
+  (let [[options symbols] (if (map? (first args))
+                            [(first args) (next args)]
+                            [{} args])]
+    `(select-aliases! '~(ns-name *ns*) '~(vec symbols) ~options)))
+
+(defmacro defaliases!
+  "Define and select a complete harness-seat declaration map."
+  [form-name doc definitions]
+  `(do
+     (def ~form-name ~doc ~definitions)
+     (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
+     (select-aliases! '~(ns-name *ns*) '[~form-name] {})
      (var ~form-name)))
 
 (defn- effective-definitions [kind-id]

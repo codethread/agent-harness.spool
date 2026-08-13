@@ -132,7 +132,7 @@ core_url="https://github.com/${core_repository%.git}.git"
 kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
-millhouse_sha="d1affd4065fcf69b81c0191944791475108d7bea"
+millhouse_sha="b0ac2268685e53510df01dcd0cc533b8fd40a25d"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
 if [[ "$mode" == "pre-tag" ]]; then
@@ -328,7 +328,7 @@ cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
             [ct.spools.agent-run :as shuttle]
             [ct.spools.delegation :as agents]))
 
-(shuttle/defharnesses smoke-harnesses
+(shuttle/defharnesses! smoke-harnesses
   "Disposable release smoke harnesses."
   {:release-smoke {:argv ["sh" "-c"
                           "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
