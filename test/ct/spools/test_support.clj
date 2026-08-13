@@ -8,9 +8,17 @@
             [clojure.test :as t]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.weaver.alpha :as weaver]
-            [millstrand.core.db-test :as db-test]
             [millstrand.core.weaver.config :as weaver-config]
             [millstrand.core.weaver.runtime :as weaver-runtime]))
+
+(defn temp-db-file []
+  (let [file (java.io.File/createTempFile "millstrand-db-test" ".sqlite")]
+    (.delete file)
+    (.getAbsolutePath file)))
+
+(defn delete-sqlite-family! [db-file]
+  (doseq [suffix ["" "-journal" "-wal" "-shm"]]
+    (.delete (java.io.File. (str db-file suffix)))))
 
 (defn activate-spool!
   "Declare and publish one spool module for a test runtime.
@@ -108,7 +116,7 @@
   ([f] (with-runtime {} f))
   ([opts f]
    (let [{:keys [publish?] :or {publish? false}} opts
-         db-file (db-test/temp-db-file)
+         db-file (temp-db-file)
          config-dir (temp-config-dir (select-keys opts [:prefix :nest-millstrand?]))]
      (try
        (let [rt (weaver-runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))
@@ -118,7 +126,7 @@
            (finally
              (weaver-runtime/stop! rt))))
        (finally
-         (db-test/delete-sqlite-family! db-file)
+         (delete-sqlite-family! db-file)
          ;; Runtime-added local roots are retained for the process lifetime by tools.deps.
          ;; Keep temp config dirs so later add-libs calls do not see stale basis entries.
          nil)))))
