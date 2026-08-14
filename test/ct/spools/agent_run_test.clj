@@ -2404,25 +2404,31 @@
             _ (shuttle/set-fanout-ceiling! 2)
             gates (mapv #(gate-run! dir %) (range 5))
             by-id (into {} (map (juxt :id identity)) gates)]
-        (settle! rt)
-        (await-in-flight-count 2)
-        ;; drain one at a time, releasing a currently-running run each pass; a
-        ;; released run leaves in-flight and never returns (it is done, not
-        ;; pending), so five passes retire all five runs.
-        (dotimes [_ 5]
-          (let [in-flight (shuttle/in-flight-run-ids)]
-            (is (<= (count in-flight) 2) "width never exceeds the ceiling")
-            (let [victim (first (filter by-id in-flight))]
-              (release-gate! (by-id victim))
-              (test-support/poll-until
-               #(not (contains? (shuttle/in-flight-run-ids) victim))
-               {:on-timeout #(throw (ex-info "released run never left in-flight"
-                                             {:victim victim}))})
-              (settle! rt))))
-        (is (<= (count (shuttle/in-flight-run-ids)) 2))
-        (doseq [g gates]
-          (is (= "done" (get-in (weaver/show rt (:id g)) [:attributes :agent-run/phase]))
-              "every gated run completes as the window drains"))))))
+        (try
+          (settle! rt)
+          (await-in-flight-count 2)
+          ;; drain one at a time, releasing a currently-running run each pass; a
+          ;; released run leaves in-flight and never returns (it is done, not
+          ;; pending), so five passes retire all five runs.
+          (dotimes [_ 5]
+            (let [in-flight (shuttle/in-flight-run-ids)]
+              (is (<= (count in-flight) 2) "width never exceeds the ceiling")
+              (let [victim (first (filter by-id in-flight))]
+                (release-gate! (by-id victim))
+                (test-support/poll-until
+                 #(not (contains? (shuttle/in-flight-run-ids) victim))
+                 {:on-timeout #(throw (ex-info "released run never left in-flight"
+                                               {:victim victim}))})
+                (settle! rt))))
+          (is (<= (count (shuttle/in-flight-run-ids)) 2))
+          ;; finish-run! drops the run from in-flight before persisting its done
+          ;; phase, so wait for the durable terminal state before reading it.
+          (doseq [g gates]
+            (let [terminal (await-phase rt (:id g) #{"done" "failed"})]
+              (is (= "done" (get-in terminal [:attributes :agent-run/phase]))
+                  "every gated run completes as the window drains")))
+          (finally
+            (drain-gated! rt gates nil)))))))
 
 (deftest window-group-cap-tightens-below-the-ceiling
   ;; V1 case 3a: ceiling 4 but a fanout-cap 2 group admits only 2 (min(W, K)).
