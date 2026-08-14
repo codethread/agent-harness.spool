@@ -94,6 +94,21 @@ published-name change and ships as a new release (**v8**), not an accretion:
   That red is the correct signal that the change ships under a new release rather
   than being papered over — it must not be silenced before the v8 tag.
 
+## Compatibility: selectable harness authoring
+
+The agent-run authoring contract now makes `defharnesses` and `defaliases`
+inert declarations. Existing consumers that relied on source evaluation to
+publish those entries must add `use-harnesses!`/`use-aliases!`, or adopt the
+define-and-select `defharnesses!`/`defaliases!` forms. Selection is
+owner-complete: omitting a selection on refresh retracts that owner's prior
+entries, while the inert declaration remains reusable by another owner.
+
+Selection accepts only the optional `{:override? boolean}` map. Unknown keys,
+non-boolean values, and an explicitly supplied `nil` fail loudly; omission is
+the no-options case. See
+[`agent-run/README.md`](./agent-run/README.md#21-selectable-harness-and-alias-declarations)
+for the migration example and full contract.
+
 ## Activation
 
 After approving the coordinates needed by the workspace, activate them from

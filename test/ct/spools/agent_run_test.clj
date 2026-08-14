@@ -88,6 +88,15 @@
     (is (instance? clojure.lang.ExceptionInfo error))
     (is (re-find message (ex-message error)))))
 
+(defn- authoring-error
+  "Return the ExceptionInfo raised by an invalid authoring form."
+  [form]
+  (try
+    (collect-authoring-forms #(eval form))
+    nil
+    (catch Throwable throwable
+      throwable)))
+
 (deftest production-authoring-declarations-publish-in-disposable-weaver
   (let [harness-core-root (test-alpha/spool-checkout-root
                            "ct/spools/harness_core.clj")
@@ -261,7 +270,33 @@
                               (identity authoring-harnesses)))
     (assert-authoring-error #"options are invalid"
                             '(shuttle/use-harnesses! {:override? :yes}
-                                                     authoring-harnesses))))
+                                                     authoring-harnesses))
+    (let [error (authoring-error
+                 '(shuttle/defharnesses! authoring-nil-options
+                    "An explicit nil options value is invalid."
+                    {:authoring-nil-options {:argv ["true"]}}
+                    nil))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))
+    (let [error (authoring-error
+                 '(shuttle/use-harnesses! nil authoring-harnesses))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error))))))
+
+  (testing "bundle authoring consults the op-argv shape spec"
+    (let [error (authoring-error
+                 '(shuttle/defharnesses! authoring-invalid-capture
+                    "An invalid capture shape."
+                    {:authoring-invalid-capture
+                     {:argv ["true"] :capture ["cat" 42]}}))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (re-find #"does not conform to ::harness-def"
+                   (ex-message error)))
+      (is (= :ct.spools.agent-run/harness-def
+             (get-in (ex-data error)
+                     [:explain :clojure.spec.alpha/spec]))))))
 
 (deftest selectable-alias-authoring-is-inert-selectable-and-returning
   (testing "an inert alias definition returns its Var without collecting"
@@ -330,7 +365,20 @@
                               (identity authoring-aliases)))
     (assert-authoring-error #"options are invalid"
                             '(shuttle/use-aliases! {:override? :yes}
-                                                   authoring-aliases))))
+                                                   authoring-aliases))
+    (let [error (authoring-error
+                 '(shuttle/defaliases! authoring-nil-options-alias
+                    "An explicit nil options value is invalid."
+                    {:authoring-nil-options-alias {:alias-of :authoring-sh}}
+                    nil))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))
+    (let [error (authoring-error
+                 '(shuttle/use-aliases! nil authoring-aliases))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))))
 
 (deftest workspace-workflow-selection-returns-the-defined-var
   (let [selected (load-file ".millstrand/config/workflows.clj")
