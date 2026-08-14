@@ -40,19 +40,13 @@ Agent-run is shipped as an approved-local-root spool example under `spools/agent
    :required? true})
 ```
 
-The declaration names a source target and world policy only. Agent-run collects
-backend declarations from source; harness and alias declarations are collected
-only when a source explicitly selects them. The `agent-run-engine` lifecycle
-resource owns event dispatch, vocabulary, and crash recovery.
+The declaration names a source target and world policy only. Agent-run collects backend declarations from source; harness and alias declarations are collected only when a source explicitly selects them. The `agent-run-engine` lifecycle resource owns event dispatch, vocabulary, and crash recovery.
 
 Applied reconciliation registers the default harnesses and backends, a graph-mutation event handler, and runs crash reconciliation with a first scan. Harnesses, backends, live in-flight process ownership, deferred-recovery scheduling, preamble extensions, and default review contract text are runtime-local weaver-lifetime state, isolated from other runtimes in the same JVM. The deferred-recovery scheduler is owned by runtime spool state and is shut down during runtime stop before storage closes. This state is registered with a declared shape **version** (`millstrand.api.runtime.alpha/spool-state`, SPEC-004.C95): spool state survives `reload!`, so after a deploy that adds a new state key a reload deliberately reinits through a migrate hook that carries the durable registries and in-flight tracking over onto fresh executors, rather than silently reusing a preserved map missing the new executor keys (which previously turned scan!'s launch into `(.execute nil ..)` and parked every new run forever). The executor and scheduler accessors fail loudly when their spool-state entry is missing rather than parking runs on a nil executor (TEN-003). The shape is currently **v4**, which added the `:fanout-ceiling` cap the `claim!` window consults: a preserved v3 map lacks the key, so a post-upgrade reload reinits through the migrate hook and lets the default seed it rather than reusing a ceiling-less map. It does **not** register any CLI operations. Load the [delegation spool](../delegation/README.md) after agent-run for the `strand agent` surface, and the companion [subagent executor](../executors/subagent.md) to fulfill workflow `:subagent` gates with agent-run runs.
 
 ### 2.1 Selectable harness and alias declarations
 
-Source-owned harness and alias bundles use three forms. The inert forms define
-ordinary Vars and return those Vars without publishing anything. The `use-*`
-forms select one or more inert Vars, and the bang forms define and select in one
-expression:
+Source-owned harness and alias bundles use three forms. The inert forms define ordinary Vars and return those Vars without publishing anything. The `use-*` forms select one or more inert Vars, and the bang forms define and select in one expression:
 
 ```clojure
 (agent-run/defharnesses tools
@@ -71,24 +65,11 @@ expression:
   {:override? true})
 ```
 
-The supported selector surface is `defharnesses`/`defaliases`,
-`use-harnesses!`/`use-aliases!`, and their bang forms. The lower-level public
-`select-harnesses!` and `select-aliases!` functions are available when a caller
-already has an explicit namespace and symbol vector (as the macros do). They
-apply the same validation and owner-complete publication rules.
+The supported selector surface is `defharnesses`/`defaliases`, `use-harnesses!`/`use-aliases!`, and their bang forms. The lower-level public `select-harnesses!` and `select-aliases!` functions are available when a caller already has an explicit namespace and symbol vector (as the macros do). They apply the same validation and owner-complete publication rules.
 
-Selection is owner-complete: on the next module refresh, an omitted selection
-retracts that module owner's previously selected entries, while an inert Var
-remains available for another module to select. An empty selection is invalid,
-as are non-Var symbols, wrong declaration families, unresolved Vars, and
-malformed definition maps. The only selection option is `:override?`, whose
-value must be boolean; unknown options and an explicit `nil` options value fail
-loudly with the failing value and allowed key in exception data. Omit the
-options argument when no override is intended.
+Selection is owner-complete: on the next module refresh, an omitted selection retracts that module owner's previously selected entries, while an inert Var remains available for another module to select. An empty selection is invalid, as are non-Var symbols, wrong declaration families, unresolved Vars, and malformed definition maps. The only selection option is `:override?`, whose value must be boolean; unknown options and an explicit `nil` options value fail loudly with the failing value and allowed key in exception data. Omit the options argument when no override is intended.
 
-Migration from the old forms is mechanical: keep the declaration, then add its
-matching `use-*` form, or change it to the bang form when definition and
-selection should stay together.
+Migration from the old forms is mechanical: keep the declaration, then add its matching `use-*` form, or change it to the bang form when definition and selection should stay together.
 
 ```clojure
 ;; Before: evaluating this published the entry.
