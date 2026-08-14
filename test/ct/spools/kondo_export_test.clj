@@ -42,7 +42,7 @@
             'ct.spools/agent-run {:local/root agent-run-root}
             'millhouse.spools/workflow
             {:git/url "https://github.com/codethread/millhouse.spool.git"
-             :git/sha "d1affd4065fcf69b81c0191944791475108d7bea"
+             :git/sha "b0ac2268685e53510df01dcd0cc533b8fd40a25d"
              :deps/root "spools/workflow"}
             'clj-kondo/clj-kondo {:mvn/version clj-kondo-version}}
      :aliases {:lint {:main-opts ["-m" "clj-kondo.main"]}}}))
@@ -58,6 +58,8 @@
    "  {:sh {:argv [\"sh\"]}})\n"
    "(agent-run/defaliases aliases \"Aliases.\"\n"
    "  {:fast {:alias-of :sh}})\n"
+   "(agent-run/use-harnesses! harnesses)\n"
+   "(agent-run/use-aliases! aliases)\n"
    "(workflow/defexecutor consumer\n"
    "  \"Return a stall diagnostic.\"\n"
    "  {}\n"
@@ -108,7 +110,11 @@
           (is (zero? lint-exit) lint-output)
           (is (.isFile imported-config))
           (is (str/includes? (slurp imported-config) "defharnesses"))
+          (is (str/includes? (slurp imported-config) "defharnesses!"))
           (is (str/includes? (slurp imported-config) "defaliases"))
+          (is (str/includes? (slurp imported-config) "defaliases!"))
+          (is (str/includes? (slurp imported-config) "use-harnesses!"))
+          (is (str/includes? (slurp imported-config) "use-aliases!"))
           (let [workflow-config (io/file root
                                          ".clj-kondo/imports/millhouse.spools/workflow/config.edn")]
             (is (.isFile workflow-config))

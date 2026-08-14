@@ -301,7 +301,7 @@
       {:gate (:id gate) :run (:id run) :phase (attr run :agent-run/phase)
        :error (attr run :agent-run/error)})))
 
-(workflow/defexecutor subagent
+(workflow/defexecutor! subagent
   "Return a stall diagnostic for a workflow gate whose current run failed."
   {}
   [gate]

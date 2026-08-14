@@ -55,8 +55,8 @@
       "repository": "codethread/millstrand",
       "coordinate": "io.millstrand/millstrand",
       "ref-kind": "sha",
-      "sha": "fb6c9057d594bfa4b5ea8531b9774b5e9a23a4b4",
-      "landed-main-commit": "fb6c9057d594bfa4b5ea8531b9774b5e9a23a4b4",
+      "sha": "3bbe5dc15359975a8e8203ef47b3a7514177e75b",
+      "landed-main-commit": "3bbe5dc15359975a8e8203ef47b3a7514177e75b",
       "land-run": "land-bxwq0-sha-20260806",
       "verification": ["make build", "published verifier evidence on MSR-04 card"]
     },

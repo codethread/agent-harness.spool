@@ -46,6 +46,57 @@
       (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
       (f rt))))
 
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defharnesses authoring-harnesses
+  "Harness declarations used to exercise selectable authoring."
+  {:authoring-sh {:argv ["sh"]}
+   :authoring-duplicate {:argv ["first"]}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defharnesses authoring-harnesses-override
+  "An overlapping harness declaration with explicit selection override."
+  {:authoring-duplicate {:argv ["second"]}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defaliases authoring-aliases
+  "Alias declarations used to exercise selectable authoring."
+  {:authoring-fast {:alias-of :authoring-sh}})
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(shuttle/defaliases authoring-aliases-override
+  "An overlapping alias declaration with explicit selection override."
+  {:authoring-fast {:alias-of :authoring-sh}})
+
+(defn- collect-authoring-forms
+  "Collect a test namespace's authoring forms as one owner-complete result."
+  [thunk]
+  (test-alpha/collect-module-forms :test/agent-run-authoring
+                                   'ct.spools.agent-run-test
+                                   thunk))
+
+(def ^:private test-source-ns
+  (the-ns 'ct.spools.agent-run-test))
+
+(defn- assert-authoring-error
+  "Assert that an authoring form throws an actionable ExceptionInfo."
+  [message form]
+  (let [error (try
+                (collect-authoring-forms #(eval form))
+                nil
+                (catch Throwable throwable
+                  throwable))]
+    (is (instance? clojure.lang.ExceptionInfo error))
+    (is (re-find message (ex-message error)))))
+
+(defn- authoring-error
+  "Return the ExceptionInfo raised by an invalid authoring form."
+  [form]
+  (try
+    (collect-authoring-forms #(eval form))
+    nil
+    (catch Throwable throwable
+      throwable)))
+
 (deftest production-authoring-declarations-publish-in-disposable-weaver
   (let [harness-core-root (test-alpha/spool-checkout-root
                            "ct/spools/harness_core.clj")
@@ -148,6 +199,195 @@
         (testing "refreshing the same owner is idempotent"
           (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
           (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
+
+(deftest selectable-harness-authoring-is-inert-selectable-and-returning
+  (testing "an inert definition returns its Var without collecting"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses authoring-inert-return
+                     "An inert return value."
+                     {:authoring-inert {:argv ["true"]}})))]
+      (is (var? return))
+      (is (= (ns-resolve test-source-ns 'authoring-inert-return) return))
+      (is (= {:authoring-inert {:argv ["true"]}} @return))
+      (is (empty? contribution))))
+
+  (testing "standalone selection returns Vars and publishes their entries"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-harnesses! authoring-harnesses
+                                           authoring-harnesses-override)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-harnesses)
+              (ns-resolve test-source-ns 'authoring-harnesses-override)]
+             return))
+      (is (= {:argv ["sh"]}
+             (get-in contribution [shuttle/harness-kind :entries :authoring-sh])))
+      (is (= {:argv ["second"]}
+             (get-in contribution [shuttle/harness-kind :entries
+                                   :authoring-duplicate])))
+      (is (not (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                          :authoring-sh)))))
+
+  (testing "bang definition returns its Var and publishes it"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses! authoring-bang-return
+                     "A selected return value."
+                     {:authoring-bang {:argv ["echo"]}})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-return) return))
+      (is (= {:argv ["echo"]}
+             (get-in contribution [shuttle/harness-kind :entries :authoring-bang])))))
+
+  (testing "duplicate entries are last-write-wins and retain override intent"
+    (let [{:keys [contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-harnesses! {:override? true}
+                                           authoring-harnesses authoring-harnesses-override)))]
+      (is (= {:argv ["second"]}
+             (get-in contribution [shuttle/harness-kind :entries
+                                   :authoring-duplicate])))
+      (is (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                     :authoring-duplicate))))
+
+  (testing "bang definition forwards explicit override intent"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defharnesses! authoring-bang-override
+                     "A selected override value."
+                     {:authoring-bang-duplicate {:argv ["bang"]}}
+                     {:override? true})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-override) return))
+      (is (contains? (get-in contribution [shuttle/harness-kind :overrides] #{})
+                     :authoring-bang-duplicate))))
+
+  (testing "wrong-family and malformed selections fail loudly"
+    (assert-authoring-error #"not an inert harness declaration"
+                            '(shuttle/use-harnesses! authoring-aliases))
+    (assert-authoring-error #"requires one or more harness Vars"
+                            '(shuttle/use-harnesses!))
+    (assert-authoring-error #"accepts only harness Var symbols"
+                            '(shuttle/use-harnesses!
+                              (identity authoring-harnesses)))
+    (assert-authoring-error #"options are invalid"
+                            '(shuttle/use-harnesses! {:override? :yes}
+                                                     authoring-harnesses))
+    (let [error (authoring-error
+                 '(shuttle/defharnesses! authoring-nil-options
+                    "An explicit nil options value is invalid."
+                    {:authoring-nil-options {:argv ["true"]}}
+                    nil))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))
+    (let [error (authoring-error
+                 '(shuttle/use-harnesses! nil authoring-harnesses))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error))))))
+
+  (testing "bundle authoring consults the op-argv shape spec"
+    (let [error (authoring-error
+                 '(shuttle/defharnesses! authoring-invalid-capture
+                    "An invalid capture shape."
+                    {:authoring-invalid-capture
+                     {:argv ["true"] :capture ["cat" 42]}}))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (re-find #"does not conform to ::harness-def"
+                   (ex-message error)))
+      (is (= :ct.spools.agent-run/harness-def
+             (get-in (ex-data error)
+                     [:explain :clojure.spec.alpha/spec]))))))
+
+(deftest selectable-alias-authoring-is-inert-selectable-and-returning
+  (testing "an inert alias definition returns its Var without collecting"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases authoring-inert-alias-return
+                     "An inert alias return value."
+                     {:authoring-inert-alias {:alias-of :authoring-sh}})))]
+      (is (var? return))
+      (is (= (ns-resolve test-source-ns 'authoring-inert-alias-return) return))
+      (is (= {:authoring-inert-alias {:alias-of :authoring-sh}} @return))
+      (is (empty? contribution))))
+
+  (testing "standalone selection returns Vars and publishes aliases"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-aliases! authoring-aliases
+                                         authoring-aliases-override)))]
+      (is (= [(ns-resolve test-source-ns 'authoring-aliases)
+              (ns-resolve test-source-ns 'authoring-aliases-override)]
+             return))
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries :authoring-fast])))
+      (is (empty? (get-in contribution [shuttle/alias-kind :overrides] #{})))))
+
+  (testing "bang definition returns its Var and publishes an alias"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases! authoring-bang-alias-return
+                     "A selected alias return value."
+                     {:authoring-bang-alias {:alias-of :authoring-sh}})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-alias-return) return))
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries
+                                   :authoring-bang-alias])))))
+
+  (testing "duplicate aliases are last-write-wins and retain override intent"
+    (let [{:keys [contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/use-aliases! {:override? true}
+                                         authoring-aliases authoring-aliases-override)))]
+      (is (= {:alias-of :authoring-sh}
+             (get-in contribution [shuttle/alias-kind :entries
+                                   :authoring-fast])))
+      (is (contains? (get-in contribution [shuttle/alias-kind :overrides] #{})
+                     :authoring-fast))))
+
+  (testing "bang definition forwards explicit override intent"
+    (let [{:keys [return contribution]}
+          (collect-authoring-forms
+           #(eval '(shuttle/defaliases! authoring-bang-alias-override
+                     "A selected alias override value."
+                     {:authoring-bang-alias-duplicate {:alias-of :authoring-sh}}
+                     {:override? true})))]
+      (is (= (ns-resolve test-source-ns 'authoring-bang-alias-override) return))
+      (is (contains? (get-in contribution [shuttle/alias-kind :overrides] #{})
+                     :authoring-bang-alias-duplicate))))
+
+  (testing "wrong-family and malformed selections fail loudly"
+    (assert-authoring-error #"not an inert alias declaration"
+                            '(shuttle/use-aliases! authoring-harnesses))
+    (assert-authoring-error #"requires one or more alias Vars"
+                            '(shuttle/use-aliases!))
+    (assert-authoring-error #"accepts only alias Var symbols"
+                            '(shuttle/use-aliases!
+                              (identity authoring-aliases)))
+    (assert-authoring-error #"options are invalid"
+                            '(shuttle/use-aliases! {:override? :yes}
+                                                   authoring-aliases))
+    (let [error (authoring-error
+                 '(shuttle/defaliases! authoring-nil-options-alias
+                    "An explicit nil options value is invalid."
+                    {:authoring-nil-options-alias {:alias-of :authoring-sh}}
+                    nil))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))
+    (let [error (authoring-error
+                 '(shuttle/use-aliases! nil authoring-aliases))]
+      (is (instance? clojure.lang.ExceptionInfo error))
+      (is (nil? (:options (ex-data error))))
+      (is (= #{:override?} (:allowed (ex-data error)))))))
+
+(deftest workspace-workflow-selection-returns-the-defined-var
+  (let [selected (load-file ".millstrand/config/workflows.clj")
+        workflow-var (ns-resolve 'workflows.feature-iteration 'feature-iteration)]
+    (is (= [workflow-var] selected))
+    (is (var? workflow-var))
+    (is (string? (:doc (meta workflow-var))))
+    (is (= "feature-iteration"
+           (get-in @workflow-var [:attributes "workflow/family"])))))
 
 (deftest harness-registry-validates-and-resolves-aliases
   (with-shuttle
@@ -2164,25 +2404,31 @@
             _ (shuttle/set-fanout-ceiling! 2)
             gates (mapv #(gate-run! dir %) (range 5))
             by-id (into {} (map (juxt :id identity)) gates)]
-        (settle! rt)
-        (await-in-flight-count 2)
-        ;; drain one at a time, releasing a currently-running run each pass; a
-        ;; released run leaves in-flight and never returns (it is done, not
-        ;; pending), so five passes retire all five runs.
-        (dotimes [_ 5]
-          (let [in-flight (shuttle/in-flight-run-ids)]
-            (is (<= (count in-flight) 2) "width never exceeds the ceiling")
-            (let [victim (first (filter by-id in-flight))]
-              (release-gate! (by-id victim))
-              (test-support/poll-until
-               #(not (contains? (shuttle/in-flight-run-ids) victim))
-               {:on-timeout #(throw (ex-info "released run never left in-flight"
-                                             {:victim victim}))})
-              (settle! rt))))
-        (is (<= (count (shuttle/in-flight-run-ids)) 2))
-        (doseq [g gates]
-          (is (= "done" (get-in (weaver/show rt (:id g)) [:attributes :agent-run/phase]))
-              "every gated run completes as the window drains"))))))
+        (try
+          (settle! rt)
+          (await-in-flight-count 2)
+          ;; drain one at a time, releasing a currently-running run each pass; a
+          ;; released run leaves in-flight and never returns (it is done, not
+          ;; pending), so five passes retire all five runs.
+          (dotimes [_ 5]
+            (let [in-flight (shuttle/in-flight-run-ids)]
+              (is (<= (count in-flight) 2) "width never exceeds the ceiling")
+              (let [victim (first (filter by-id in-flight))]
+                (release-gate! (by-id victim))
+                (test-support/poll-until
+                 #(not (contains? (shuttle/in-flight-run-ids) victim))
+                 {:on-timeout #(throw (ex-info "released run never left in-flight"
+                                               {:victim victim}))})
+                (settle! rt))))
+          (is (<= (count (shuttle/in-flight-run-ids)) 2))
+          ;; finish-run! drops the run from in-flight before persisting its done
+          ;; phase, so wait for the durable terminal state before reading it.
+          (doseq [g gates]
+            (let [terminal (await-phase rt (:id g) #{"done" "failed"})]
+              (is (= "done" (get-in terminal [:attributes :agent-run/phase]))
+                  "every gated run completes as the window drains")))
+          (finally
+            (drain-gated! rt gates nil)))))))
 
 (deftest window-group-cap-tightens-below-the-ceiling
   ;; V1 case 3a: ceiling 4 but a fanout-cap 2 group admits only 2 (min(W, K)).

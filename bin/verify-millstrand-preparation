@@ -54,7 +54,7 @@ kanban_sha=$(json_value kanban_sha)
 source_marker=$(json_value source_marker)
 source_db=$(json_value source_database)
 millhouse_repository="codethread/millhouse.spool"
-millhouse_sha="d1affd4065fcf69b81c0191944791475108d7bea"
+millhouse_sha="b0ac2268685e53510df01dcd0cc533b8fd40a25d"
 
 [[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
 [[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"
@@ -382,7 +382,7 @@ cat >"$target_marker/config/harnesses.clj" <<'EOF'
             [ct.spools.agent-run :as shuttle]
             [ct.spools.delegation :as agents]))
 
-(shuttle/defharnesses ^:private smoke-harnesses
+(shuttle/defharnesses! ^:private smoke-harnesses
   "Disposable preparation smoke harness."
   {:release-smoke
    {:argv ["sh" "-c"

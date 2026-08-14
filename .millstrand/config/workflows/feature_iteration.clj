@@ -116,21 +116,14 @@
   (`\"branch\"` or `\"patch\"`, default `\"branch\"`) and `diff-base` (default
   `\"main\"`). Start and drive it through `strand workflow`.")
 
-(def feature-iteration
-  "The FEATURE ITERATION static workflow definition; `contract-doc` is the
-  contract it advertises.
-
-  Building the value rather than using `defworkflow` keeps this namespace inert:
-  it registers nothing on load, and `.millstrand/config/workflows.clj` is the one
-  place that binds it to the name `:feature-iteration`."
-  (workflow/static-definition
-   contract-doc
+(workflow/defworkflow feature-iteration
+  contract-doc
    {:entrypoints #{:start}
     :param-spec ::params
     :defaults {:diff-mode "branch"
                :diff-base "main"
                :revision false}}
-   (workflow/workflow
+  (workflow/workflow
     (fn [{:keys [brief]}] (str "Feature iteration: " (first (str/split-lines brief))))
     {:attributes {"workflow/family" "feature-iteration"}}
 
@@ -211,4 +204,4 @@
                            :input {:spec ::iterate-input
                                    :doc (str "Supply `brief`: the user's feedback, stated as"
                                              " what the next round should achieve.")}
-                           :revise {:params {:revision true}}}]))))
+                           :revise {:params {:revision true}}}])))

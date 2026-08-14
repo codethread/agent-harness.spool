@@ -74,6 +74,60 @@ Userland spool that spawns coding agents in user-chosen harnesses.
   `ct.spools.delegation`, register CLI operations over this engine.
 
 
+## Selectable harness and alias authoring
+
+The declaration macros below are the source-owned authoring surface. The inert
+forms define Vars without publishing them; the `use-*` forms select inert Vars;
+the bang forms define and select in one expression. Selection is owner-complete
+and accepts only the optional `{:override? boolean}` map. Omission, including an
+owner's removed selection on refresh, has distinct semantics from an explicit
+`nil` options value: omission retracts that owner's entries, while explicit
+`nil` fails validation with actionable exception data.
+
+### `defharnesses`
+
+```clojure
+(defharnesses form-name doc definitions)
+```
+
+Define an inert complete harness-tool declaration map and return its Var.
+
+### `use-harnesses!`
+
+```clojure
+(use-harnesses! symbols)
+(use-harnesses! options symbols)
+```
+
+Select one or more inert harness declaration Vars for the current module.
+
+### `defharnesses!`
+
+```clojure
+(defharnesses! form-name doc definitions)
+(defharnesses! form-name doc definitions options)
+```
+
+Define and select a complete harness-tool declaration map.
+
+### `defaliases`, `use-aliases!`, and `defaliases!`
+
+The alias forms have the same inert, select, and define-and-select contract as
+the harness forms. Alias declarations use `:alias-of`; `:override?` is the only
+selection option.
+
+### `select-harnesses!` and `select-aliases!`
+
+```clojure
+(select-harnesses! namespace symbols options)
+(select-aliases! namespace symbols options)
+```
+
+Select explicit Var symbols from a namespace. These lower-level public
+operations are the expansion target of the `use-*` and bang forms and are
+available when a caller already has the namespace and symbol vector.
+
+
 
 
 ## <a name="ct.spools.agent-run/*runtime*">`*runtime*`</a>

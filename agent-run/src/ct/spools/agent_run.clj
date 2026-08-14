@@ -381,9 +381,10 @@
 ;; `register-harness!`/`register-alias!` and by the migrate split's exactly-one-shape
 ;; classification. Mutual exclusivity rides on the required keys — a harness
 ;; needs `:argv`, an alias needs `:alias-of`, and the closed key sets forbid a
-;; valid registration carrying both. `:capture`/`:resume` are intentionally left
-;; open here; their splice semantics need the dedicated validators a spec cannot
-;; express.
+;; valid registration carrying both. `:resume` remains open here because its
+;; dedicated validator reports the closed placeholder vocabulary. `:capture`
+;; carries the expressible argv token/vector shape here; its allowed-input and
+;; handle rules remain in the dedicated validator below.
 (s/def :ct.spools.agent-run.harness/argv (s/coll-of string? :kind vector? :min-count 1))
 (s/def :ct.spools.agent-run.harness/parse parse-strategies)
 (s/def :ct.spools.agent-run.harness/prompt-via prompt-via-strategies)
@@ -391,6 +392,13 @@
 (s/def :ct.spools.agent-run.harness/env map?)
 (s/def :ct.spools.agent-run.harness/cwd string?)
 (s/def :ct.spools.agent-run.harness/doc string?)
+(s/def :ct.spools.agent-run.harness/op-token
+  (s/or :literal string? :input keyword?))
+(s/def :ct.spools.agent-run.harness/op-argv
+  (s/coll-of :ct.spools.agent-run.harness/op-token
+             :kind vector? :min-count 1))
+(s/def :ct.spools.agent-run.harness/capture
+  :ct.spools.agent-run.harness/op-argv)
 ;; A closed map of at least one cost-rate-key -> non-negative USD-per-1M rate; a
 ;; typo'd key fails the key predicate rather than silently going unpriced.
 (s/def :ct.spools.agent-run.harness/cost-rates
@@ -403,6 +411,7 @@
                    :ct.spools.agent-run.harness/env
                    :ct.spools.agent-run.harness/cwd
                    :ct.spools.agent-run.harness/doc
+                   :ct.spools.agent-run.harness/capture
                    :ct.spools.agent-run.harness/cost-rates]))
 
 (s/def :ct.spools.agent-run.alias/alias-of
@@ -473,10 +482,11 @@
   the handle is its output, not its input. `owner` is the registering backend
   or harness name, used in failure data."
   [owner op argv]
-  (when-not (and (vector? argv) (seq argv)
-                 (every? #(or (string? %) (keyword? %)) argv))
-    (fail! "Op argv must be a non-empty vector of strings and keywords"
-           {:owner owner :op op :argv argv}))
+  (when-not (s/valid? :ct.spools.agent-run.harness/op-argv argv)
+    (fail! "Op argv must conform to the non-empty string/keyword vector spec"
+           {:owner owner :op op :argv argv
+            :spec :ct.spools.agent-run.harness/op-argv
+            :explain (s/explain-data :ct.spools.agent-run.harness/op-argv argv)}))
   (doseq [token argv :when (keyword? token)]
     (cond
       (= "handle" (namespace token))
@@ -530,31 +540,157 @@
 (s/def ::registered-harness-def valid-harness-def?)
 (s/def ::registered-alias-def valid-alias-def?)
 
-(defmacro defharnesses
-  "Define and collect a complete harness-tool declaration map.
+(def ^:private harness-declaration-key ::harness-declaration)
+(def ^:private alias-declaration-key ::alias-declaration)
 
-  Each map entry is contributed to agent-run's harness kind while its enclosing
-  module source is collected. Removing an entry or the form removes that
-  module owner's partition entry on the next refresh."
+(s/def :ct.spools.agent-run.harness/selection-options
+  (s/map-of #{:override?} boolean?))
+
+(defn- validate-selection-options! [options form]
+  (when-not (s/valid? :ct.spools.agent-run.harness/selection-options options)
+    (fail! "Harness authoring selection options are invalid"
+           {:form form :options options :allowed #{:override?}
+            :spec :ct.spools.agent-run.harness/selection-options
+            :explain (s/explain-data
+                      :ct.spools.agent-run.harness/selection-options options)}))
+  options)
+
+(defn- selection-vars!
+  [namespace symbols label]
+  (when (empty? symbols)
+    (fail! (str "Authoring selection requires one or more " label " Vars")
+           {:namespace namespace :symbols symbols}))
+  (when-let [value (first (remove symbol? symbols))]
+    (fail! (str "Authoring selection accepts only " label " Var symbols")
+           {:namespace namespace :symbols symbols :value value}))
+  (mapv (fn [symbol]
+          (or (ns-resolve namespace symbol)
+              (fail! "Authoring selection Var does not resolve"
+                     {:namespace namespace :symbol symbol})))
+        symbols))
+
+(defn- validate-selected-definition-vars!
+  [vars namespace symbols declaration-key label]
+  (doseq [target vars]
+    (when-not (var? target)
+      (fail! "Authoring selection did not resolve to a Var"
+             {:namespace namespace :symbols symbols :value target}))
+    (when-not (true? (get (meta target) declaration-key))
+      (fail! (str "Selected Var is not an inert " label " declaration")
+             {:namespace namespace :symbols symbols :value target}))
+    (when-not (map? @target)
+      (fail! (str "Selected " label " declaration Var must contain a map")
+             {:namespace namespace :symbols symbols :value @target})))
+  vars)
+
+(defn- collect-selected-definition-vars!
+  [kind vars validator options]
+  (doseq [target vars
+          [key definition] @target]
+    (validator key definition)
+    (runtime/collect-entry! kind key definition options))
+  vars)
+
+(defn select-harnesses!
+  "Select harness declaration Vars for the current module.
+
+  `namespace` and `symbols` identify one or more inert `defharnesses` Vars;
+  each map entry is collected with the same optional `:override?` selection
+  policy. Omitting a selection on a later module refresh removes that owner's
+  entries, while an inert definition remains available for another module to
+  select."
+  [namespace symbols options]
+  (let [vars (selection-vars! namespace symbols "harness")
+        options (validate-selection-options! options symbols)]
+    (validate-selected-definition-vars! vars namespace symbols
+                                        harness-declaration-key "harness")
+    (collect-selected-definition-vars! harness-kind vars
+                                       validate-harness-def! options)))
+
+(defn select-aliases!
+  "Select alias declaration Vars for the current module.
+
+  `namespace` and `symbols` identify one or more inert `defaliases` Vars;
+  each map entry is collected with the same optional `:override?` selection
+  policy. The selection is owner-complete, so removing it retracts the
+  owner's aliases on the next refresh."
+  [namespace symbols options]
+  (let [vars (selection-vars! namespace symbols "alias")
+        options (validate-selection-options! options symbols)]
+    (validate-selected-definition-vars! vars namespace symbols
+                                        alias-declaration-key "alias")
+    (collect-selected-definition-vars! alias-kind vars
+                                       validate-alias-def! options)))
+
+(defn- bang-selection-options [form args]
+  (when (< 1 (count args))
+    (fail! (str form " accepts at most one selection options map")
+           {:form form :options args}))
+  (if (seq args) (first args) {}))
+
+(defmacro defharnesses
+  "Define an inert complete harness-tool declaration map.
+
+  Select the Var with `use-harnesses!`, or use `defharnesses!` to define and
+  select it in one form."
   [form-name doc definitions]
   `(do
      (def ~form-name ~doc ~definitions)
-     (doseq [[key# definition#] ~form-name]
-       (runtime/collect-entry! harness-kind key# definition#))
+     (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
      (var ~form-name)))
+
+(defmacro use-harnesses!
+  "Select one or more inert harness declaration Vars."
+  [& args]
+  (let [[options symbols] (if (or (map? (first args)) (nil? (first args)))
+                            [(first args) (next args)]
+                            [{} args])]
+    `(select-harnesses! '~(ns-name *ns*) '~(vec symbols) ~options)))
+
+(defmacro defharnesses!
+  "Define and select a complete harness-tool declaration map.
+
+  An optional selection options map supports the same `:override?` policy as
+  `use-harnesses!`."
+  [form-name doc definitions & args]
+  (let [options (bang-selection-options 'defharnesses! args)]
+    `(do
+       (def ~form-name ~doc ~definitions)
+       (alter-meta! (var ~form-name) assoc ~harness-declaration-key true)
+       (select-harnesses! '~(ns-name *ns*) '[~form-name] ~options)
+       (var ~form-name))))
 
 (defmacro defaliases
-  "Define and collect a complete harness-seat declaration map.
+  "Define an inert complete harness-seat declaration map.
 
-  Each map entry is contributed to agent-run's alias kind while its enclosing
-  module source is collected. Removing an entry or the form removes that
-  module owner's partition entry on the next refresh."
+  Select the Var with `use-aliases!`, or use `defaliases!` to define and select
+  it in one form."
   [form-name doc definitions]
   `(do
      (def ~form-name ~doc ~definitions)
-     (doseq [[key# definition#] ~form-name]
-       (runtime/collect-entry! alias-kind key# definition#))
+     (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
      (var ~form-name)))
+
+(defmacro use-aliases!
+  "Select one or more inert alias declaration Vars."
+  [& args]
+  (let [[options symbols] (if (or (map? (first args)) (nil? (first args)))
+                            [(first args) (next args)]
+                            [{} args])]
+    `(select-aliases! '~(ns-name *ns*) '~(vec symbols) ~options)))
+
+(defmacro defaliases!
+  "Define and select a complete harness-seat declaration map.
+
+  An optional selection options map supports the same `:override?` policy as
+  `use-aliases!`."
+  [form-name doc definitions & args]
+  (let [options (bang-selection-options 'defaliases! args)]
+    `(do
+       (def ~form-name ~doc ~definitions)
+       (alter-meta! (var ~form-name) assoc ~alias-declaration-key true)
+       (select-aliases! '~(ns-name *ns*) '[~form-name] ~options)
+       (var ~form-name))))
 
 (defn- effective-definitions [kind-id]
   (registry/effective (registry-handle) kind-id))
