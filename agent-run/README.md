@@ -63,7 +63,7 @@ expression:
   {:worker-seat {:alias-of :worker}})
 
 (agent-run/use-harnesses! tools)
-(agent-run/use-aliases! seats {:override? true})
+(agent-run/use-aliases! {:override? true} seats)
 
 (agent-run/defharnesses! local-tools
   "A tool selected immediately."
