@@ -30,4 +30,5 @@
           codethread/devflow {:git/url "https://github.com/codethread/devflow.spool.git"
                               :git/sha "528e0ba636e28032985f7f9706c8350e9f785d97"
                               :roots {codethread/devflow "."
-                                      codethread/devflow-kanban-adapter "kanban-adapter"}}}}
+                                      codethread/devflow-kanban-adapter "kanban-adapter"}}
+          codethread/config {:local/root "../../codethread.spool/spools/config"}}}
