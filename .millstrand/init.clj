@@ -6,8 +6,9 @@
 (runtime/module! runtime :millstrand/spools-batteries
                  {:ns 'millstrand.spools.batteries
                   :spools ['millstrand.spools/batteries]})
-(runtime/module! runtime :module-adapters
-                 {:file "config/module_adapters.clj"
+(runtime/module! runtime :codethread/config
+                 {:ns 'ct.spools.codethread.config
+                  :spools ['codethread/config 'millstrand.spools/batteries]
                   :after [:millstrand/spools-batteries]})
 
 (runtime/module! runtime :millhouse/spools-workflow
