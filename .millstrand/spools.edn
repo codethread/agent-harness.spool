@@ -37,3 +37,4 @@
    ct.spools/bench "bench"}},
  ct.spools/claude-harness {:local/root "../claude-harness"},
  ct.spools/codex-harness {:local/root "../codex-harness"}}}
+
