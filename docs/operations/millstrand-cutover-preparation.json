@@ -18,9 +18,9 @@
         "peeled-sha": "2e689490d875bc66887b158f34382b97ade4df6b"
       },
       "kanban": {
-        "repository": "codethread/kanban.spool",
-        "tag": "v20",
-        "peeled-sha": "398a1610d094c85ad9c6691dafd213aaa35d73de"
+        "repository": "codethread/millhouse.spool",
+        "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+        "coordinate": "millhouse.spools/kanban"
       }
     }
   },
@@ -62,13 +62,13 @@
     },
     {
       "card": "MSR-05",
-      "repository": "codethread/kanban.spool",
-      "coordinate": "codethread/kanban",
-      "tag": "v24",
-      "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
-      "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+      "repository": "codethread/millhouse.spool",
+      "coordinate": "millhouse.spools/kanban",
+      "ref-kind": "sha",
+      "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+      "landed-main-commit": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
       "land-run": "land-hqtjg-20260806-1709",
-      "verification": ["published v24 verifier evidence on MSR-05 card"]
+      "verification": ["millhouse kanban root at spools/kanban on pinned millhouse SHA"]
     }
   ],
   "runtime": {

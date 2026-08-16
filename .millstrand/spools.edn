@@ -4,11 +4,6 @@
   :roots
   {codethread/config "spools/config",
    codethread/ralph "spools/ralph"}},
- codethread/kanban
- {:git/url "https://github.com/codethread/kanban.spool.git",
-  :git/sha "87f61bc2750e7026f3650235907db25f19b1536e",
-  :git/tag "v24",
-  :roots {codethread/kanban "."}},
  millstrand.spools/batteries
  {:millstrand/source-root "spools/batteries"},
  ct.spools/cursor-harness {:local/root "../cursor-harness"},
@@ -26,7 +21,8 @@
   :roots
   {millhouse.spools/workflow "spools/workflow",
    millhouse.spools/millstrand-workflows "spools/millstrand-workflows",
-   millhouse.spools.executors/shell "spools/shell-executor"}},
+   millhouse.spools.executors/shell "spools/shell-executor",
+   millhouse.spools/kanban "spools/kanban"}},
  ct.spools/pi-harness {:local/root "../pi-harness"},
  ct.spools/agent-run
  {:git/url "https://github.com/codethread/agent-harness.spool.git",

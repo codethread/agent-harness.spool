@@ -49,7 +49,6 @@ agent_repository=$(json_value agent_repository)
 agent_tag=$(json_value agent_tag)
 agent_sha=$(json_value agent_sha)
 kanban_repository=$(json_value kanban_repository)
-kanban_tag=$(json_value kanban_tag)
 kanban_sha=$(json_value kanban_sha)
 source_marker=$(json_value source_marker)
 source_db=$(json_value source_database)
@@ -206,13 +205,12 @@ resolve_remote() {
 }
 
 agent_resolved=$(resolve_remote "$agent_repository" "$agent_tag" "$agent_sha")
-kanban_resolved=$(resolve_remote "$kanban_repository" "$kanban_tag" "$kanban_sha")
-[[ "$agent_resolved" == "$agent_sha" && "$kanban_resolved" == "$kanban_sha" ]] || die "published release resolution mismatch"
+[[ "$agent_resolved" == "$agent_sha" && "$kanban_sha" == "$millhouse_sha" ]] || die "published release resolution mismatch"
 printf '%s\n' \
   "git ls-remote https://github.com/$agent_repository.git refs/tags/$agent_tag^{} -> $agent_resolved" \
-  "git ls-remote https://github.com/$kanban_repository.git refs/tags/$kanban_tag^{} -> $kanban_resolved" \
+  "millhouse kanban root pinned at $kanban_repository@$kanban_sha (spools/kanban)" \
   "git checkout https://github.com/$core_repository.git $core_sha" \
-  "git dependency https://github.com/$millhouse_repository.git $millhouse_sha roots spools/workflow,spools/shell-executor" \
+  "git dependency https://github.com/$millhouse_repository.git $millhouse_sha roots spools/workflow,spools/shell-executor,spools/kanban" \
   >"$evidence_root/release-resolution.txt"
 
 core_url="https://github.com/${core_repository%.git}.git"
@@ -230,7 +228,7 @@ cat >"$fixture_root/manifest.edn" <<EOF
 {:core {:repository "$core_repository" :coordinate "io.millstrand/millstrand" :sha "$core_sha"}
  :millhouse {:repository "$millhouse_repository" :coordinate "millhouse.spools/workflow" :sha "$millhouse_sha"}
  :agent {:repository "$agent_repository" :tag "$agent_tag" :sha "$agent_sha"}
- :kanban {:repository "$kanban_repository" :tag "$kanban_tag" :sha "$kanban_sha"}}
+ :kanban {:repository "$kanban_repository" :coordinate "millhouse.spools/kanban" :sha "$kanban_sha"}}
 EOF
 
 # Release-resolution metadata is the only source of pins for this target. The
@@ -241,8 +239,10 @@ cat >"$fixture_root/target-deps.edn" <<EOF
         millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git"
                                    :git/sha "$millhouse_sha"
                                    :deps/root "spools/workflow"}
-        codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}
-        codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+        millhouse.spools/kanban {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                 :git/sha "$millhouse_sha"
+                                 :deps/root "spools/kanban"}
+        codethread/agent-run {:git/url "https://github.com/codethread/agent-harness.spool.git" :git/tag "$agent_tag" :git/sha "$agent_sha"}}}
 EOF
 if rg -n ':local/root|:override-deps|:millstrand/source-root|v23|v20|/Users/|/tmp/|/private/' "$fixture_root/target-deps.edn" >/dev/null; then
   die "generated consumer metadata contains a local root, override, old pin, or absolute source override"
@@ -309,7 +309,8 @@ cat >"$target_marker/spools.edn" <<EOF
           {:git/url "https://github.com/codethread/millhouse.spool.git"
            :git/sha "$millhouse_sha"
            :roots {millhouse.spools/workflow "spools/workflow"
-                   millhouse.spools.executors/shell "spools/shell-executor"}}
+                   millhouse.spools.executors/shell "spools/shell-executor"
+                   millhouse.spools/kanban "spools/kanban"}}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
            :git/tag "$agent_tag"
@@ -322,17 +323,13 @@ cat >"$target_marker/spools.edn" <<EOF
                    ct.spools/cursor-harness "cursor-harness"
                    ct.spools/agent-cli "agent-cli"
                    ct.spools/delegation "delegation"
-                   ct.spools/bench "bench"}}
-          codethread/kanban {:git/url "https://github.com/codethread/kanban.spool.git"
-                             :git/tag "$kanban_tag"
-                             :git/sha "$kanban_sha"
-                             :roots {codethread/kanban "."}}}}
+                   ct.spools/bench "bench"}}}}
 EOF
-python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_tag" "$kanban_sha" "$millhouse_repository" "$millhouse_sha" <<'PY'
+python3 - "$target_marker/spools.edn" "$agent_repository" "$agent_tag" "$agent_sha" "$kanban_repository" "$kanban_sha" "$millhouse_repository" "$millhouse_sha" <<'PY'
 import pathlib
 import sys
 
-path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_tag, kanban_sha, millhouse_repository, millhouse_sha = sys.argv[1:]
+path, agent_repository, agent_tag, agent_sha, kanban_repository, kanban_sha, millhouse_repository, millhouse_sha = sys.argv[1:]
 text = pathlib.Path(path).read_text(encoding="utf-8")
 for forbidden in (":local/root", ":override-deps", "v23", "v20"):
     if forbidden in text:
@@ -357,23 +354,23 @@ for value in (
     f':git/sha "{millhouse_sha}"',
     'millhouse.spools/workflow "spools/workflow"',
     'millhouse.spools.executors/shell "spools/shell-executor"',
+    'millhouse.spools/kanban "spools/kanban"',
 ):
     if value not in millhouse:
         raise SystemExit(f"activated release spools are missing Millhouse identity {value}")
+if kanban_repository != millhouse_repository or kanban_sha != millhouse_sha:
+    raise SystemExit("activated Kanban pin must match the Millhouse family SHA")
 if ":git/tag" in millhouse:
     raise SystemExit("activated Millhouse approval must remain untagged")
 for value in (
     f':git/url "https://github.com/{agent_repository}.git"',
     f':git/tag "{agent_tag}"',
     f':git/sha "{agent_sha}"',
-    f':git/url "https://github.com/{kanban_repository}.git"',
-    f':git/tag "{kanban_tag}"',
-    f':git/sha "{kanban_sha}"',
 ):
     if value not in text:
         raise SystemExit(f"activated release spools are missing immutable pin {value}")
-if text.count(":roots") != 3:
-    raise SystemExit("activated release spools must contain exactly the Millhouse, Agent Harness, and Kanban root maps")
+if text.count(":roots") != 2:
+    raise SystemExit("activated release spools must contain exactly the Millhouse and Agent Harness root maps")
 PY
 cat >"$target_marker/config/harnesses.clj" <<'EOF'
 (ns harnesses
@@ -494,18 +491,18 @@ if spend.get("totals", {}).get("tokens-total") != 4200:
     raise SystemExit(f"spend smoke token total mismatch: {spend}")
 PY
 
-python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$millhouse_sha" "$agent_tag" "$agent_sha" "$kanban_tag" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
+python3 - "$fixture_root/summary.json" "$repo_root" "$core_sha" "$millhouse_sha" "$agent_tag" "$agent_sha" "$kanban_sha" "$target_parent/.ms" "$target_db" <<'PY'
 import json
 import os
 import sys
 
-out, repo, core_sha, millhouse_sha, agent_tag, agent_sha, kanban_tag, kanban_sha, marker, database = sys.argv[1:]
+out, repo, core_sha, millhouse_sha, agent_tag, agent_sha, kanban_sha, marker, database = sys.argv[1:]
 summary = {
     "identity-check": "pass",
     "core": {"repository": "codethread/millstrand", "sha": core_sha, "local-root-rejected": True},
     "workflow": {"repository": "codethread/millhouse.spool", "sha": millhouse_sha, "untagged": True},
     "agent-harness": {"tag": agent_tag, "peeled-sha": agent_sha, "exact": True},
-    "kanban": {"tag": kanban_tag, "peeled-sha": kanban_sha, "exact": True},
+    "kanban": {"repository": "codethread/millhouse.spool", "coordinate": "millhouse.spools/kanban", "sha": kanban_sha, "exact": True},
     "fresh-database": {"marker": marker, "database": database, "source-database-imported": False},
     "delegate": "pass",
     "await": "pass",
