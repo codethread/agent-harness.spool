@@ -78,12 +78,15 @@ def validate(path):
     if not isinstance(source["observed-pid"], int) or source["observed-pid"] <= 0:
         fail("manifest source observed-pid must be a positive integer")
     pins = mapping(source["active-pins"], "manifest source active-pins")
-    for name, tag, sha in (("agent-harness", "v23", "2e689490d875bc66887b158f34382b97ade4df6b"),
-                           ("kanban", "v20", "398a1610d094c85ad9c6691dafd213aaa35d73de")):
+    for name, tag, sha in (("agent-harness", "v23", "2e689490d875bc66887b158f34382b97ade4df6b"),):
         pin = mapping(pins.get(name), f"manifest source.active-pins.{name}")
-        exact(pin.get("repository"), "codethread/agent-harness.spool" if name == "agent-harness" else "codethread/kanban.spool", f"source {name} repository")
+        exact(pin.get("repository"), "codethread/agent-harness.spool", f"source {name} repository")
         exact(pin.get("tag"), tag, f"source {name} tag")
         exact(pin.get("peeled-sha"), sha, f"source {name} peeled-sha")
+    kanban_pin = mapping(pins.get("kanban"), "manifest source.active-pins.kanban")
+    exact(kanban_pin.get("repository"), "codethread/millhouse.spool", "source kanban repository")
+    exact(kanban_pin.get("coordinate"), "millhouse.spools/kanban", "source kanban coordinate")
+    exact(kanban_pin.get("sha"), "b0ac2268685e53510df01dcd0cc533b8fd40a25d", "source kanban sha")
 
     target = mapping(doc["target"], "manifest target")
     for key in ("marker", "database", "world-hash", "world-hash-algorithm", "activation", "database-policy"):
@@ -148,12 +151,17 @@ def validate(path):
     exact(core["sha"], core["landed-main-commit"], "MSR-04 SHA")
 
     msr05 = inputs["MSR-05"]
+    required_kanban = {"card", "repository", "coordinate", "ref-kind", "sha", "landed-main-commit", "land-run"}
+    if set(msr05) & {"tag", "peeled-sha"}:
+        fail("MSR-05 kanban input must not contain tag or peeled-sha")
+    if not required_kanban.issubset(msr05):
+        fail("MSR-05 kanban input is incomplete")
     expected05 = {
-        "repository": "codethread/kanban.spool",
-        "coordinate": "codethread/kanban",
-        "tag": "v24",
-        "peeled-sha": "87f61bc2750e7026f3650235907db25f19b1536e",
-        "landed-main-commit": "87f61bc2750e7026f3650235907db25f19b1536e",
+        "repository": "codethread/millhouse.spool",
+        "coordinate": "millhouse.spools/kanban",
+        "ref-kind": "sha",
+        "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+        "landed-main-commit": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
     }
     for key, value in expected05.items():
         exact(msr05.get(key), value, f"MSR-05 {key}")
@@ -189,8 +197,7 @@ def validate(path):
         "agent_tag": msr06["tag"],
         "agent_sha": msr06["peeled-sha"],
         "kanban_repository": msr05["repository"],
-        "kanban_tag": msr05["tag"],
-        "kanban_sha": msr05["peeled-sha"],
+        "kanban_sha": msr05["sha"],
         "source_marker": source["marker"],
         "source_database": source["database"],
     }

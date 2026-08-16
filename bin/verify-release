@@ -228,10 +228,12 @@ cat >"$consumer_root/deps.edn" <<EOF
          "$candidate_root/delegation/src"
          "$candidate_root/bench/src"]
  :deps {$core_coordinate {:git/url "$core_url" :git/sha "$core_sha"}
-        $millhouse_coordinate {:git/url "$millhouse_url"
-                               :git/sha "$millhouse_sha"
-                               :deps/root "spools/workflow"}
-        $kanban_coordinate {:git/url "$kanban_url" :git/tag "$kanban_tag" :git/sha "$kanban_sha"}}}
+        millhouse.spools/workflow {:git/url "$millhouse_url"
+                                   :git/sha "$millhouse_sha"
+                                   :deps/root "spools/workflow"}
+        millhouse.spools/kanban {:git/url "$millhouse_url"
+                                 :git/sha "$millhouse_sha"
+                                 :deps/root "spools/kanban"}}}
 EOF
 if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
   die "generated consumer metadata contains a local/root or source-root override"
@@ -301,8 +303,8 @@ mill_cmd init --workspace "$weaver_workspace" >/dev/null
 # Use the candidate's workspace modules in disposable paths. Project its
 # approved provider families rather than maintaining a second workspace config
 # here; only the agent-harness roots are overridden to the candidate under
-# test, while core, Millhouse, and Kanban keep their immutable release
-# identities explicit.
+# test, while core and Millhouse keep their immutable release identities
+# explicit. Kanban lives under the Millhouse family at spools/kanban.
 candidate_coord="$candidate_root/.millstrand"
 cp -R "$candidate_coord/." "$weaver_workspace/"
 for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
@@ -359,12 +361,12 @@ EOF
 clojure -Sdeps '{:deps {}}' -M -e '
 (require (quote [clojure.edn :as edn])
          (quote [clojure.string :as string]))
-(let [[source-path target-path kanban-url kanban-tag kanban-sha millhouse-url millhouse-sha]
+(let [[source-path target-path millhouse-url millhouse-sha]
       *command-line-args*
       document (edn/read-string (slurp source-path))
       providers (:spools document)
       required-provider-names ["millhouse/spools" "codethread/spools"
-                               "codethread/kanban" "codethread/devflow"]
+                               "codethread/devflow"]
       missing (remove #(contains? providers (symbol %)) required-provider-names)
       local-roots {"ct.spools/harness-core" "harness-core"
                    "ct.spools/claude-harness" "claude-harness"
@@ -378,7 +380,10 @@ clojure -Sdeps '{:deps {}}' -M -e '
       local-overrides (into {}
                          (map (fn [[coordinate root]]
                                 [(symbol coordinate) {:local/root (str "../" root)}])
-                              local-roots))]
+                              local-roots))
+      millhouse-provider (get providers (symbol "millhouse/spools"))
+      millhouse-roots (merge (:roots millhouse-provider)
+                             {(symbol "millhouse.spools/kanban") "spools/kanban"})]
   (when (seq missing)
     (throw (ex-info (str "candidate workspace is missing approved provider families: "
                          (string/join ", " missing)) {})))
@@ -388,31 +393,24 @@ clojure -Sdeps '{:deps {}}' -M -e '
                 (merge providers
                        local-overrides
                        {(symbol "millhouse/spools")
-                        (-> (get providers (symbol "millhouse/spools"))
-                            (assoc :git/url millhouse-url :git/sha millhouse-sha)
-                            (dissoc :git/tag))
-                        (symbol "codethread/kanban")
-                        (-> (get providers (symbol "codethread/kanban"))
-                            (assoc :git/url kanban-url
-                                   :git/tag kanban-tag
-                                   :git/sha kanban-sha))})))))
+                        (-> millhouse-provider
+                            (assoc :git/url millhouse-url :git/sha millhouse-sha :roots millhouse-roots)
+                            (dissoc :git/tag))})))))
 ' - "$candidate_coord/spools.edn" "$weaver_workspace/spools.edn" \
-  "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha"
-python3 - "$weaver_workspace/spools.edn" "$kanban_url" "$kanban_tag" "$kanban_sha" "$millhouse_url" "$millhouse_sha" <<'PY'
+  "$millhouse_url" "$millhouse_sha"
+python3 - "$weaver_workspace/spools.edn" "$millhouse_url" "$millhouse_sha" <<'PY'
 import pathlib
 import sys
 
-path, kanban_url, kanban_tag, kanban_sha, millhouse_url, millhouse_sha = sys.argv[1:]
+path, millhouse_url, millhouse_sha = sys.argv[1:]
 text = pathlib.Path(path).read_text(encoding="utf-8")
 for value in (
     'codethread/spools',
     'millhouse.spools/workflow "spools/workflow"',
     'millhouse.spools.executors/shell "spools/shell-executor"',
+    'millhouse.spools/kanban "spools/kanban"',
     f':git/url "{millhouse_url}"',
     f':git/sha "{millhouse_sha}"',
-    f':git/url "{kanban_url}"',
-    f':git/tag "{kanban_tag}"',
-    f':git/sha "{kanban_sha}"',
 ):
     if value not in text:
         raise SystemExit(f"projected disposable spools are missing {value}")
@@ -601,5 +599,5 @@ echo "  mode: $mode"
 echo "  release: $release_ref"
 echo "  core: $core_repository@$core_sha"
 echo "  workflow: $millhouse_repository@$millhouse_sha"
-echo "  kanban: $kanban_repository@$kanban_tag ($kanban_sha)"
+echo "  workflow: $millhouse_repository@$millhouse_sha (includes kanban at spools/kanban)"
 echo "  evidence: $output_dir/$mode.json"
