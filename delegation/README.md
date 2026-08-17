@@ -91,7 +91,7 @@ Move work onto this surface whenever the result should be **durable, awaitable b
    :after [:agent-run]})
 ```
 
-Both declarations name a source target and world policy only. Delegation collects its operation, pattern, query, and roster kind from source. Its named lifecycle resource owns vocabulary and glossary setup.
+Both declarations name a source target and world policy only. Delegation collects its operation, pattern, query, and roster kind from source. Its named lifecycle resource owns glossary setup.
 
 Declarative publication registers:
 

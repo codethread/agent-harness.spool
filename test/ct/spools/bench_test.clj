@@ -16,7 +16,6 @@
             [clojure.test :refer [deftest is testing]]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.registry.alpha :as registry]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.bench :as bench]
             [ct.spools.bench.exec :as exec]
@@ -30,11 +29,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures
-
-(defn- attr-namespace-declaration [rt name]
-  (->> (vocab/declarations rt {:kind :attr-namespace})
-       (filter #(= name (:name %)))
-       first))
 
 (defn- temp-dir [prefix]
   (.toFile (Files/createTempDirectory (.toPath (io/file "/tmp")) prefix
@@ -297,20 +291,6 @@ esac
       (is (thrown? Exception (bench/set-engine! rt [])))
       (is (= ["podman"] (bench/set-engine! rt ["podman"])))
       (is (= ["podman"] (bench/engine rt))))))
-
-(deftest install-declares-the-bench-attribute-namespace
-  (with-bench
-    (fn [rt _]
-      (let [decl (attr-namespace-declaration rt "bench")
-            keys (set (:keys decl))]
-        (is (some? decl))
-        (is (= :millstrand/spools-bench (:owner decl)))
-        (testing "the renamed keys are declared under their new names"
-          (doseq [k ["bench/harness" "bench/run-id"]]
-            (is (contains? keys k) (str k " is listed in the bench vocab")))
-          (is (not (contains? keys "bench/agent")))
-          (is (not (contains? keys "bench/aborted"))
-              "bench/error \"aborted\" carries an abort; the redundant flag is gone"))))))
 
 (deftest state-shape-matches-declared-version
   (test-support/assert-state-shape

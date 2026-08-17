@@ -9,7 +9,7 @@ Bridge workflow subagent gates to agent-run runs.
   an agent-run run for each gate, and delivers successful run results by
   completing the gate through `millhouse.spools.workflow/complete!`. It intentionally
   adds no CLI surface and keeps workflow and agent-run decoupled: this namespace
-  is the only adapter that knows both vocabularies.
+  is the only adapter that knows both contracts.
 
 
 

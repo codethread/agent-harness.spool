@@ -78,7 +78,7 @@ normally.
 
 - **Both engines stay ignorant of each other.** The workflow author writes a plain gate; the
   agent-run spawns a plain run. Neither namespace grows a dependency on the other. The subagent
-  executor is the small adapter that knows both vocabularies, so you can use either engine alone and
+  executor is the small adapter that knows both contracts, so you can use either engine alone and
   bolt them together only where you need to (contract [`subagent.md`, "Overview"](./subagent.md#overview)).
 - **Readiness drives it, so nothing polls.** The subagent executor is an event handler over the same
   graph both engines already watch. The gate spawns its run the moment it becomes ready, after

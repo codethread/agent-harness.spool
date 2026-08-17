@@ -1,6 +1,6 @@
 # Millstrand Subagent Executor Spool
 
-> This is the **contract** doc: gate request attributes, the `gate/*` vocabulary, delivery
+> This is the **contract** doc: gate request attributes, the `gate/*` attributes, delivery
 > semantics, and recovery. Its two companions are [`subagent.cookbook.md`](./subagent.cookbook.md),
 > for worked composition recipes, and [`subagent.api.md`](./subagent.api.md), for generated fn
 > signatures and docstrings. Reach for the cookbook when you want a runnable pattern, the API doc
@@ -14,7 +14,7 @@ run result when the run succeeds.
 
 The workflow engine remains forge/tool agnostic: workflow authors declare an ordinary
 `(workflow/gate ... :subagent ...)` with attributes. Agent-run remains a run engine with no workflow
-concepts. The subagent executor is the small bridge that knows both vocabularies.
+concepts. The subagent executor is the small bridge that knows both contracts.
 
 ## Loading
 

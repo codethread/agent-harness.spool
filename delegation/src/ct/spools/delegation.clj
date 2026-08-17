@@ -13,7 +13,6 @@
             [millstrand.api.runtime.glossary.alpha :as glossary]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.weaver.alpha :as weaver]
             [millstrand.api.format.alpha :as fmt]
             [ct.spools.agent-run :as agent-run]
@@ -2310,7 +2309,7 @@
    [:in [:attr "agent-run/phase"] ["failed" "exhausted"]]])
 
 (defn open-delegation!
-  "Open delegation's vocabulary and glossary runtime resource.
+  "Open delegation's glossary runtime resource.
 
   Claims neither agent-run preamble slot: the injected worker text is the
   workspace's call, so a workspace wanting this spool's task workflow registers
@@ -2323,18 +2322,6 @@
   (doseq [outcome delegation-glossary]
     (glossary/register-glossary-outcome!
      runtime (assoc outcome :owner 'ct.spools.delegation)))
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "review"
-                   :owner :millstrand/spools-delegation
-                   :keys ["review/roster" "review/focus"]
-                   :doc "Reviewer-perspective run attrs stamped by the review preset (advisory key list)."})
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "panel"
-                   :owner :millstrand/spools-delegation
-                   :keys ["panel/blackboard" "panel/pass" "panel/seat" "panel/turn" "panel/synthesis"]
-                   :doc "Panel deliberation run attrs stamped by panel-specs; the review and council presets stamp them too (advisory key list)."})
   {:opened :delegation})
 
 (defn close-delegation!
@@ -2343,6 +2330,6 @@
   {:closed :delegation})
 
 (lifecycle/defresource! delegation-runtime
-  "Own delegation's module-lifetime vocabulary setup."
+  "Own delegation's module-lifetime glossary setup."
   {:open 'ct.spools.delegation/open-delegation!
    :close 'ct.spools.delegation/close-delegation!})

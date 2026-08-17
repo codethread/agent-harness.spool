@@ -5,8 +5,7 @@
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
             [millstrand.api.lifecycle.alpha :as lifecycle]
-            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]))
 
 (def ^:private reasoning-efforts #{"minimal" "low" "medium" "high" "xhigh"})
 
@@ -92,16 +91,9 @@
   :ret ::harness/outcome)
 
 (defn open-codex-harness!
-  "Declare Codex attributes and register the concrete harness."
+  "Register the concrete Codex harness."
   [{:keys [runtime]}]
   (require-valid! ::harness/runtime runtime "codex-harness open received an invalid runtime")
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "harness.codex"
-                   :owner :ct.spools/codex-harness
-                   :keys ["harness.codex/model" "harness.codex/reasoning-effort"
-                          "harness.codex/extra-argv"]
-                   :doc "Codex CLI command overlay attributes."})
   (harness/register-harness!
    runtime :codex
    (harness runtime {:harness.codex/extra-argv

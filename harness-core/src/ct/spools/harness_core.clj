@@ -5,16 +5,11 @@
             [millstrand.api.lifecycle.alpha :as lifecycle]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.weaver.alpha :as weaver])
   (:import [java.util UUID]))
 
 (def ^:private registry-version 1)
 (def ^:private overlay-prefix "harness.")
-(def ^:private core-keys
-  ["harness/run" "harness/alias" "harness/harness" "harness/mode"
-   "harness/phase" "harness/prompt" "harness/cwd" "harness/session-id"
-   "harness/resumes" "harness/result" "harness/exit-code" "harness/error" "harness/generated" "harness/overrides"])
 (declare ^:private json-value? new-registry registry name-string overlay-key?
          normalize-overlay mode-keyword run-title require-run require-phase)
 (s/def ::runtime map?)
@@ -396,12 +391,6 @@
   [{:keys [runtime]}]
   (require-valid! ::runtime runtime "harness-core open received an invalid runtime")
   (registry runtime)
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "harness"
-                   :owner :ct.spools/harness-core
-                   :keys core-keys
-                   :doc "Provider-neutral harness run lifecycle and reconstruction attributes."})
   {:opened :harness-core})
 
 (defn close-harness-core!

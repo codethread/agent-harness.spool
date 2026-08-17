@@ -5,7 +5,7 @@
   an agent-run run for each gate, and delivers successful run results by
   completing the gate through `millhouse.spools.workflow/complete!`. It intentionally
   adds no CLI surface and keeps workflow and agent-run decoupled: this namespace
-  is the only adapter that knows both vocabularies."
+  is the only adapter that knows both contracts."
   (:require [clojure.string :as str]
             [ct.spools.agent-run :as agent-run]
             [millhouse.spools.workflow :as workflow]
@@ -16,10 +16,8 @@
             [millstrand.api.lifecycle.alpha :as lifecycle]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.millstrand.alpha :as millstrand]
-            [millstrand.api.format.alpha :as fmt]
             [millstrand.api.current.alpha :as current]
-            [millstrand.api.return-shape.alpha :as return-shape]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.api.return-shape.alpha :as return-shape]))
 
 (def ^:private event-types
   #{:strand/added :strand/updated :batch/applied :strand/burned :strand/superseded})
@@ -171,7 +169,7 @@
             (when-not (non-blank (attr gate :gate/error))
               (stamp! gate-id {"gate/error" error}))
             ;; The worker's report lands on the gate in this spool's own
-            ;; vocabulary: the engine keeps no outcome-prose field, so
+            ;; contract: the engine keeps no outcome-prose field, so
             ;; `agent-run/result` is the one name for a run's result whether it
             ;; is read off the run or off the gate the run served.
             (let [result (attr run :agent-run/result)
@@ -331,22 +329,6 @@
       (let [handlers (set (map :key (events/handlers runtime)))]
         (when-not (contains? handlers :agent-run/engine)
           (fail! "Subagent executor requires the agent-run engine to be installed first" {:handlers handlers}))
-    ;; The activation module owns the namespace, not the file location: the
-    ;; source sits in the agent-run package but `:millstrand/spools-treadle` is the
-    ;; use-key. `:keys` is advisory (the keys `deliver-run!`/`spawn-for-gate!`
-    ;; stamp), not enforced. `gate/error` is the one key both gate executors
-    ;; write, so the namespace spans them rather than belonging to this one.
-        (vocab/declare! runtime
-                        {:kind :attr-namespace
-                         :name "gate"
-                         :owner :millstrand/spools-treadle
-                         :keys ["gate/completion-policy" "gate/delivered" "gate/delivery-blocked" "gate/error"]
-                         :doc (fmt/reflow "
-                           |Workflow-gate completion, delivery, and spawn control attributes.
-                           |gate/completion-policy selects run-done or status-implemented delivery.
-                           |gate/delivered and gate/delivery-blocked record handing a delegated run's
-                           |result to its gate. gate/error is wider: any gate executor's durable
-                           |failure stamp, written by both the subagent and shell executors.")})
         (events/register-handler! runtime :subagent/engine event-types
                                   'ct.spools.executors.subagent/on-event
                                   {:spool "subagent"})

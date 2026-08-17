@@ -103,9 +103,9 @@ harness-core
 | `agent-cli` | CLI operations; minimal async worker; process execution; interactive launcher/wrapper; await | Claude event semantics, transcripts, workflow gates, general scheduling |
 
 Each spool is a normal shared-spool root with its own `deps.edn` and `spool.edn`. Its `reconcile`
-function takes an explicit runtime. `harness-core` declares the `harness/*` vocabulary and
-initializes its runtime-local registry; `claude-harness` registers only its concrete harness
-definition and vocabulary; `agent-cli` registers the `harness` CLI operation, installs a
+function takes an explicit runtime. `harness-core` initializes its runtime-local registry;
+`claude-harness` registers only its concrete harness definition; `agent-cli` registers the
+`harness` CLI operation, installs a
 graph-mutation event handler for pending headless runs, and performs one install-time scan so work
 created before activation is not parked.
 
