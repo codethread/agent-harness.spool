@@ -8,8 +8,7 @@
             [ct.spools.test-support :as test-support :refer [with-runtime]]
             [millstrand.core.db :as db]
             [millstrand.api.weaver.alpha :as weaver]
-            [millstrand.test.alpha :as test-alpha]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.test.alpha :as test-alpha]))
 
 (defn- with-treadle [f]
   (with-runtime
@@ -31,11 +30,6 @@
                                 :after [:agent-run])
   (test-support/activate-spool! rt :subagent 'ct.spools.executors.subagent
                                 :after [:agent-run :workflow]))
-
-(defn- attr-namespace-declaration [rt name]
-  (->> (vocab/declarations rt {:kind :attr-namespace})
-       (filter #(= name (:name %)))
-       first))
 
 (deftest finding-subagent-queries-publish-through-module-refresh
   (with-runtime
@@ -591,18 +585,6 @@
       (let [gate-id (:id (first (workflow/ready "ci")))]
         (test-alpha/await-quiescent! rt)
         (is (nil? (run-for-gate rt gate-id)))))))
-
-(deftest activation-declares-gate-vocabulary
-  ;; The treadle module owns the `gate/*` namespace — the sole treadle-era
-  ;; durable survivor — under the single use-key :millstrand/spools-treadle.
-  (with-treadle
-    (fn [rt]
-      (let [decl (attr-namespace-declaration rt "gate")]
-        (is (= :attr-namespace (:kind decl)))
-        (is (= "gate" (:name decl)))
-        (is (= :millstrand/spools-treadle (:owner decl)))
-        (is (contains? (set (:keys decl)) "gate/completion-policy"))
-        (is (contains? (set (:keys decl)) "gate/delivered"))))))
 
 (deftest state-shape-matches-declared-version
   ;; Drift alarm for the treadle's versioned spool-state: a key added to

@@ -80,7 +80,6 @@
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.lifecycle.alpha :as lifecycle]
             [millstrand.api.runtime.alpha :as runtime]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.format.alpha :as fmt]
             [millstrand.api.spool.alpha :refer [fail! attr-get]])
   (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
@@ -1099,7 +1098,7 @@
         value))))
 
 ;; ---------------------------------------------------------------------------
-;; Run vocabulary and preamble
+;; Run attributes and preamble
 
 (def run-query
   "Query form selecting all agent run strands."
@@ -1124,21 +1123,6 @@
     "agent-run/backend" "agent-run/completion" "agent-run/completes-on" "agent-run/reap"
     "agent-run/session" "agent-run/session-id" "agent-run/resumes" "agent-run/error-class"
     "agent-run/recovered-at" "agent-run/recovery-deferred-until"})
-
-(def ^:private usage-attrs
-  "Usage attributes written onto a run at completion by finish-run! — distinct
-  from control-attrs, which spawn reserves. Declared through the same F4 vocab
-  entry but never part of the spawn-time reservation set."
-  #{"agent-run/cost-usd" "agent-run/tokens-total" "agent-run/tokens"
-    "agent-run/usage-source"})
-
-(def ^:private carried-attrs
-  "Attributes in this spool's namespace that a higher-level spool writes onto a
-  run through the `:attrs`/`:carry-attrs` seam rather than the engine writing
-  them. Declared through the same vocab entry because the namespace is
-  agent-run's, but deliberately outside control-attrs: spawn reserves those
-  against callers, and these are exactly the keys callers must be able to pass."
-  #{"agent-run/fresh-prompt"})
 
 (defn- interactive? [run]
   (= "interactive" (sattr run "mode")))
@@ -3000,17 +2984,6 @@
   #{:strand/added :strand/updated :batch/applied
     :strand/burned :strand/superseded})
 
-(defn- declare-agent-run-vocab! [runtime]
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "agent-run"
-                   :owner :millstrand/spools-shuttle
-                   :keys (vec (sort (reduce into control-attrs [usage-attrs carried-attrs])))
-                   :doc (fmt/reflow
-                         "|Agent-run engine control attributes reserved by spawn-run! and the
-                          |supervision engine, plus usage attributes finish-run! records at
-                          |completion and the prompt forms higher-level spools carry onto a run.")}))
-
 (defn- register-engine-handler! [runtime]
   (events/register-handler! runtime :agent-run/engine engine-event-types
                             'ct.spools.agent-run/on-event
@@ -3032,13 +3005,12 @@
                         :binding-moment :interactive-session-launch})
 
 (defn open-agent-run!
-  "Open agent-run resources after owner-complete declaration publication.
+  "Open agent-run resources after owner-complete registry publication.
 
-  Applied publication installs the event listener, vocabulary, existing live
+  Applied publication installs the event listener, existing live
   resource state, crash recovery, and the first scan."
   [{:keys [runtime]}]
   (binding [*runtime* runtime]
-    (declare-agent-run-vocab! runtime)
     (register-engine-handler! runtime)
     (state)
     {:recovered (reconcile!)}))

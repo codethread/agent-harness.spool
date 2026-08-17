@@ -26,7 +26,6 @@
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.millstrand.alpha :as millstrand]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.bench.exec :as exec]
@@ -1521,26 +1520,6 @@
                                     "bench/error" "orphaned by weaver restart"}}))
     (mapv :id orphans)))
 
-(def ^:private bench-namespace-declaration
-  "The bench-owned `bench/*` attribute namespace stamped onto run roots, entry
-  strands, and the judge strand. The judge also carries `agent-run/*` keys in
-  `:harness` mode and the bare cross-spool `body` convention key, neither of
-  which bench owns. `:keys` is advisory."
-  {:kind :attr-namespace
-   :name "bench"
-   :owner :millstrand/spools-bench
-   :keys ["bench/run" "bench/suite" "bench/repo" "bench/sha" "bench/data-dir"
-          "bench/entry" "bench/slug" "bench/harness" "bench/model" "bench/thinking"
-          "bench/prompt-slug" "bench/phase" "bench/attempt" "bench/image-digest"
-          "bench/error" "bench/error-detail"
-          "bench/cost-usd" "bench/tokens-in" "bench/tokens-out" "bench/tokens-cache-read"
-          "bench/turns" "bench/duration-ms" "bench/tools-file-reads"
-          "bench/tools-file-writes" "bench/tools-file-edits" "bench/tools-bash"
-          "bench/tool-errors" "bench/diff-files" "bench/diff-insertions"
-          "bench/diff-deletions" "bench/validation-exit" "bench/exit-code"
-          "bench/judge" "bench/run-id" "bench/judge-prompt" "bench/verdict"]
-   :doc "Bench run-root, entry, and judge attributes written by ct.spools.bench/run!."})
-
 (runtime/collect-kind! ::registry
                        {:id harness-kind
                         :entry-spec ::registered-harness
@@ -1575,7 +1554,6 @@
   `:call` at startup/reload."
   [{:keys [runtime]}]
   (state runtime)
-  (vocab/declare! runtime bench-namespace-declaration)
   (register-extractor! runtime :generic generic-extractor)
   (register-default-extractors! runtime)
   (detect-engine! runtime)

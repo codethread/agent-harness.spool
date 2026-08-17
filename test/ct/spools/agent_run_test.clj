@@ -17,7 +17,6 @@
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
             [millstrand.api.registry.alpha :as registry]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
 
@@ -164,11 +163,6 @@
           (is (= {:status :applied :kind :resource}
                  (get-in lifecycles [module effect]))))))))
 
-(defn- attr-namespace-declaration [rt name]
-  (->> (vocab/declarations rt {:kind :attr-namespace})
-       (filter #(= name (:name %)))
-       first))
-
 (defn- await-attr-matching
   "Poll until attribute `k` satisfies `pred` or timeout; return the strand."
   ([rt id k pred] (await-attr-matching rt id k pred (test-support/await-budget-ms)))
@@ -184,21 +178,6 @@
   "Activate the delegation module on `rt` so its `agent` op is registered."
   [rt]
   (test-support/activate-spool! rt :delegation 'ct.spools.delegation))
-
-(deftest activation-declares-usage-attrs-in-agent-run-vocab
-  (with-shuttle
-    (fn [rt]
-      (let [decl (attr-namespace-declaration rt "agent-run")
-            keys (set (:keys decl))]
-        (is (= :millstrand/spools-shuttle (:owner decl))
-            "the agent-run namespace stays owned by :millstrand/spools-shuttle")
-        (testing "the four completion-time usage keys are declared"
-          (doseq [k ["agent-run/cost-usd" "agent-run/tokens-total"
-                     "agent-run/tokens" "agent-run/usage-source"]]
-            (is (contains? keys k) (str k " is listed in the agent-run vocab"))))
-        (testing "refreshing the same owner is idempotent"
-          (test-support/activate-spool! rt :agent-run 'ct.spools.agent-run)
-          (is (= decl (attr-namespace-declaration rt "agent-run"))))))))
 
 (deftest selectable-harness-authoring-is-inert-selectable-and-returning
   (testing "an inert definition returns its Var without collecting"

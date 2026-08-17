@@ -11,7 +11,6 @@
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.patterns.alpha :as patterns]
             [millstrand.api.runtime.glossary.alpha :as glossary]
-            [millstrand.api.vocab.alpha :as vocab]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]
@@ -33,11 +32,6 @@
       (test-support/activate-spool! rt :delegation 'ct.spools.delegation
                                     :after [:agent-run])
       (f rt))))
-
-(defn- attr-namespace-declaration [rt name]
-  (->> (vocab/declarations rt {:kind :attr-namespace})
-       (filter #(= name (:name %)))
-       first))
 
 (defn- seed-run!
   "Add a completed agent-run strand carrying the usage attributes the spend
@@ -238,29 +232,6 @@
           (is (not (str/includes? prompt "<task-id>"))))
         (finally
           (shuttle/set-default-task-contract! nil))))))
-
-(deftest agents-install-declares-review-and-panel-vocab
-  (with-agents
-    (fn [rt]
-      (let [review (attr-namespace-declaration rt "review")
-            panel (attr-namespace-declaration rt "panel")]
-        (is (= :millstrand/spools-delegation (:owner review))
-            "review/* is owned by the delegation spool's use-key")
-        (is (= :millstrand/spools-delegation (:owner panel))
-            "panel/* is owned by the delegation spool's use-key")
-        (is (contains? (set (:keys review)) "review/focus"))
-        (is (contains? (set (:keys panel)) "panel/seat"))
-        (is (contains? (set (:keys panel)) "panel/blackboard")
-            "the deliberation board is panel's noun, not review's")))))
-
-(deftest agent-run-install-declares-agent-run-vocab
-  (with-agents
-    (fn [rt]
-      (let [decl (attr-namespace-declaration rt "agent-run")]
-        (is (= :attr-namespace (:kind decl)))
-        (is (= :millstrand/spools-shuttle (:owner decl))
-            "agent-run/* is owned by the agent-run spool's use-key")
-        (is (contains? (set (:keys decl)) "agent-run/run"))))))
 
 (deftest agent-op-dispatches-and-fails-loudly
   (with-agents

@@ -5,8 +5,7 @@
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
             [millstrand.api.lifecycle.alpha :as lifecycle]
-            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]))
 
 (def ^:private efforts #{"low" "medium" "high" "xhigh" "max"})
 
@@ -92,18 +91,10 @@
   :ret ::harness/outcome)
 
 (defn open-claude-harness!
-  "Declare Claude attributes and register the concrete harness."
+  "Register the concrete Claude harness."
   [{:keys [runtime]}]
   (require-valid! ::harness/runtime runtime
                   "claude-harness open received an invalid runtime")
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "harness.claude"
-                   :owner :ct.spools/claude-harness
-                   :keys ["harness.claude/model"
-                          "harness.claude/effort"
-                          "harness.claude/extra-argv"]
-                   :doc "Claude Code command overlay attributes."})
   (harness/register-harness!
    runtime :claude
    (harness runtime

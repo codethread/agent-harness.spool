@@ -5,8 +5,7 @@
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
             [millstrand.api.lifecycle.alpha :as lifecycle]
-            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]))
 
 (s/def ::argv
   (s/coll-of (s/and string? (complement str/blank?))
@@ -90,15 +89,9 @@
   :ret ::harness/outcome)
 
 (defn open-cursor-harness!
-  "Declare Cursor attributes and register the concrete harness."
+  "Register the concrete Cursor harness."
   [{:keys [runtime]}]
   (require-valid! ::harness/runtime runtime "cursor-harness open received an invalid runtime")
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "harness.cursor"
-                   :owner :ct.spools/cursor-harness
-                   :keys ["harness.cursor/model" "harness.cursor/extra-argv"]
-                   :doc "Cursor Agent CLI command overlay attributes."})
   (harness/register-harness!
    runtime :cursor
    (harness runtime {:harness.cursor/model "composer-2.5[fast=false]"

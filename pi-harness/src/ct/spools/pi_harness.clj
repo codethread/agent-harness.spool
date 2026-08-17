@@ -5,8 +5,7 @@
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
             [millstrand.api.lifecycle.alpha :as lifecycle]
-            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
-            [millstrand.api.vocab.alpha :as vocab]))
+            [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]))
 
 (def ^:private thinking-levels #{"off" "minimal" "low" "medium" "high" "xhigh" "max"})
 
@@ -92,16 +91,9 @@
   :ret ::harness/outcome)
 
 (defn open-pi-harness!
-  "Declare Pi attributes and register the concrete harness."
+  "Register the concrete Pi harness."
   [{:keys [runtime]}]
   (require-valid! ::harness/runtime runtime "pi-harness open received an invalid runtime")
-  (vocab/declare! runtime
-                  {:kind :attr-namespace
-                   :name "harness.pi"
-                   :owner :ct.spools/pi-harness
-                   :keys ["harness.pi/model" "harness.pi/thinking"
-                          "harness.pi/extra-argv"]
-                   :doc "Pi CLI command overlay attributes."})
   (harness/register-harness! runtime :pi
                              (harness runtime {:harness.pi/extra-argv ["--no-tools"]}))
   {:opened :pi})
