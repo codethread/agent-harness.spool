@@ -9,6 +9,56 @@ strand_call() {
   fi
 }
 
+print_help() {
+  cat <<'EOF'
+Launch a tracked interactive coding-agent session.
+
+Usage:
+  mill bin run agent <harness> [options]
+
+The agent bin always creates an interactive harness run. It starts the selected
+provider in this terminal and records its lifecycle in Millstrand.
+
+Arguments:
+  <harness>                   A registered harness or alias.
+
+Options forwarded to `strand harness run`:
+  --cwd <directory>           Execution directory.
+  --prompt <text>             Optional initial prompt for the provider.
+  --title <text>              Title for the tracked run.
+  --attributes <json-object>  Provider-specific configuration overlay.
+  -h, --help                  Show this help.
+
+Registered harnesses and aliases:
+EOF
+  strand_call harness list | jq -r '
+    [.[] | select(.kind == "harness")] as $harnesses
+    | [.[] | select(.kind == "alias")] as $aliases
+    | ($harnesses[] | "  \(.name) — \(.modes | join(", "))")
+    , (if ($aliases | length) > 0 then
+         "\nAliases:"
+         , ($aliases[]
+            | "  \(.name) — \(.["alias-of"])"
+              + (if (.attributes | length) > 0 then
+                   " (\(.attributes | to_entries
+                     | map("\(.key)=\(.value | tojson)")
+                     | join(", ")))"
+                 else ""
+                 end))
+       else empty
+       end)
+  '
+}
+
+for argument in "$@"; do
+  case "$argument" in
+    -h|--help)
+      print_help
+      exit $?
+      ;;
+  esac
+done
+
 created="$(strand_call harness run "$@" --interactive)" || exit $?
 run_id="$(printf '%s' "$created" | jq -r '.id')"
 launcher="$(printf '%s' "$created" | jq -r '.launcher')"
