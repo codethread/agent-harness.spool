@@ -17,7 +17,7 @@
    codethread/devflow-kanban-adapter "kanban-adapter"}},
  millhouse/spools
  {:git/url "https://github.com/codethread/millhouse.spool.git",
-  :git/sha "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+  :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059",
   :roots
   {millhouse.spools/workflow "spools/workflow",
    millhouse.spools/millstrand-workflows "spools/millstrand-workflows",
@@ -33,4 +33,3 @@
    ct.spools/bench "bench"}},
  ct.spools/claude-harness {:local/root "../claude-harness"},
  ct.spools/codex-harness {:local/root "../codex-harness"}}}
-
