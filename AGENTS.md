@@ -8,13 +8,14 @@
   with `strand workflow show feature-iteration`, not from this file.
 - Workflow definitions live in `.millstrand/config/workflows`, one file each, loaded
   and registered by `.millstrand/config/workflows.clj`.
-- Root `deps.edn` deliberately targets Millstrand core from the sibling
-  `../skein-src` checkout and pins Workflow to its independent Millhouse root.
+- Root `deps.edn` pins Millstrand and Millhouse dependencies to immutable Git
+  coordinates; keep those coordinates aligned across every alias and the
+  checked-in `.millstrand/spools.edn` workspace config.
 - Never run `make install` while developing or testing this repository.
 - Kill spawned processes by exact PID only; never use pattern kills.
 - Shared-spool publishing, activation, override, and test conventions live in
   `../skein-src/docs/spools/writing-shared-spools.md`.
-- Working with users: claim a kanban card first; run `strand kanban prime`.
+- Working with users: claim a kanban card first; run `strand prime kanban`.
 - Delegating: run `strand prime agent`; use tracked agent runs, not
   harness-native subagents. List seats with `strand agent harnesses`; shared
   routing policy lives in `ct.spools.codethread.agents`, with this workspace's
@@ -27,6 +28,6 @@
 
 This repo uses Millstrand strands to track work. Orientation ships in the `mill` CLI:
 
-- `mill prime strand` — the day-to-day strand workflow; run it before multi-step work.
-- `mill prime millstrand` — read on demand, only when building on this repo's `.millstrand/` config or spools.
+Start with `strand --help`. Run `mill prime millstrand` on demand when building
+on this repo's `.millstrand/` config or spools.
 <!-- /mill:millstrand-prime -->

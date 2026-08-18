@@ -1,15 +1,15 @@
 {:paths []
  :deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                  :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                  :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                   :deps/root "."}
         millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                     :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                     :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                      :deps/root "spools/batteries"}
         millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                   :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                   :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                    :deps/root "spools/workflow"}
         millhouse.spools/millstrand-workflows {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                               :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                               :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                                :deps/root "spools/millstrand-workflows"}}
  :aliases
  {:test {;; Keep the authoring dependencies pinned to portable Git coordinates.
@@ -28,18 +28,18 @@
                        "../skein-src/test/clojure"
                        "scripts"]
          :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                               :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                               :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                :deps/root "."}
                       millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                   :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                                   :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                    :deps/root "spools/batteries"}
                       millhouse.spools/workflow
                       {:git/url "https://github.com/codethread/millhouse.spool.git"
-                       :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                       :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                        :deps/root "spools/workflow"}
                       millhouse.spools/millstrand-workflows
                       {:git/url "https://github.com/codethread/millhouse.spool.git"
-                       :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                       :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                        :deps/root "spools/millstrand-workflows"}
                       clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
@@ -67,18 +67,18 @@
                                    "delegation/src"
                                    "bench/src"]
                      :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                                           :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                                           :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                            :deps/root "."}
                                   millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                               :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                                               :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                                :deps/root "spools/batteries"}
                                   millhouse.spools/workflow
                                   {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                   :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                   :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                    :deps/root "spools/workflow"}
                                   millhouse.spools/millstrand-workflows
                                   {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                   :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                   :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                    :deps/root "spools/millstrand-workflows"}
                                   clj-kondo/clj-kondo {:mvn/version "2025.06.05"}}
                      :main-opts ["-m" "quality.conventions-check"]}
@@ -93,18 +93,18 @@
                                 "delegation/src"
                                 "bench/src"]
                   :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                                        :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                                        :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                         :deps/root "."}
                                millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                            :git/sha "e0ca975cd0d2d546249f63c9d699ae33e1c9b688"
+                                                            :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                                             :deps/root "spools/batteries"}
                                millhouse.spools/workflow
                                {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                 :deps/root "spools/workflow"}
                                millhouse.spools/millstrand-workflows
                                {:git/url "https://github.com/codethread/millhouse.spool.git"
-                                :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059"
+                                :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                 :deps/root "spools/millstrand-workflows"}
                                }
                   :main-opts ["-m" "quality.reflect-check"]}}}
