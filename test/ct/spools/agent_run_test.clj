@@ -13,12 +13,42 @@
             [ct.spools.delegation :as delegation]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.executors.subagent :as subagent]
+            [ct.spools.harness-core :as harness-core]
             [millstrand.test.alpha :as test-alpha]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
+
+(deftest harness-resume-selectors-resolve-a-completed-predecessor
+  (test-support/with-runtime
+    (fn [rt _config-dir]
+      (harness-core/register-harness!
+       rt :fake
+       {:modes #{:headless}
+        :prepare 'ct.spools.agent-run-test/fake-prepare
+        :finish 'ct.spools.agent-run-test/fake-finish})
+      (let [first-run (harness-core/create! rt {:harness :fake :prompt "first"})
+            _ (harness-core/finish! rt (:id first-run)
+                                    {:status :done :exit-code 0 :result "first done"})
+            second-run (harness-core/resume! rt (:id first-run) {:prompt "second"})
+            second-run (harness-core/finish! rt (:id second-run)
+                                             {:status :done :exit-code 0 :result "second done"})
+            identity (get-in second-run [:attributes :identity/id])
+            session-id (get-in second-run [:attributes :harness/session-id])]
+        (is (= (:id first-run)
+               (:id (harness-core/resolve-resume-run rt {:run-id (:id first-run)}))))
+        (is (= (:id second-run)
+               (:id (harness-core/resolve-resume-run rt {:session-id session-id}))))
+        (is (= (:id second-run)
+               (:id (harness-core/resolve-resume-run rt {:identity identity}))))
+        (testing "exactly one selector is required"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exactly one selector"
+                                (harness-core/resolve-resume-run rt {})))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exactly one selector"
+                                (harness-core/resolve-resume-run
+                                 rt {:run-id (:id first-run) :identity identity}))))))))
 
 (deftest modules-export-resource-lifecycle-declarations
   (doseq [[label actual]
@@ -135,7 +165,7 @@
                 :spools ['ct.spools/delegation 'ct.spools/agent-run]
                 :after [:agent-run]
                 :required? true})"}]
-      (let [{:keys [ops queries patterns bins lifecycles]}
+      (let [{:keys [ops queries patterns bins harness-subcommands lifecycles]}
             (test-alpha/repl!
              ctx
              '(do
@@ -149,8 +179,11 @@
                    :queries (set (keys (graph/queries rt)))
                    :patterns (set (map :name (patterns/patterns rt)))
                    :bins (set (map :name (:bins (weaver/op! rt 'bins ["list"]))))
+                   :harness-subcommands (set (keys (get-in (weaver/resolve-op rt 'harness)
+                                                           [:arg-spec :subcommands])))
                    :lifecycles (:lifecycle/outcomes (runtime/status rt))})))]
         (is (contains? (set ops) "harness"))
+        (is (contains? harness-subcommands "resumable"))
         (is (contains? (set ops) "agent"))
         (is (contains? queries "agent-failures"))
         (is (contains? patterns "agent-plan"))

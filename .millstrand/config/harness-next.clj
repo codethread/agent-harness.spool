@@ -12,7 +12,10 @@
   (harness/register-alias! runtime :sonnet-low :claude
                            {:harness.claude/model "sonnet"
                             :harness.claude/effort "low"})
-  {:opened :harness-next :aliases ["opus-high" "sonnet-low"]})
+  (harness/register-alias! runtime :terra-med :codex
+                           {:harness.codex/model "gpt-5.6-terra"
+                            :harness.codex/effort "medium"})
+  {:opened :harness-next :aliases ["opus-high" "sonnet-low" "terra-med"]})
 
 (defn close-harness-next!
   "Close the harness-next workspace resource."

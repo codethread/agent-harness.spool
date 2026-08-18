@@ -35,9 +35,15 @@
                   :after [:millhouse/spools-workflow]
                   :required? true})
 
+(runtime/module! runtime :millhouse/spools-identity
+                 {:ns 'millhouse.spools.identity
+                  :spools ['millhouse.spools/identity]
+                  :required? true})
+
 (runtime/module! runtime :millstrand/spools-agent-run
                  {:ns 'ct.spools.agent-run
-                  :spools ['ct.spools/agent-run]
+                  :spools ['ct.spools/agent-run 'millhouse.spools/identity]
+                  :after [:millhouse/spools-identity]
                   :required? true})
 (runtime/module! runtime :millstrand/spools-delegation
                  {:ns 'ct.spools.delegation
@@ -54,7 +60,8 @@
 
 (runtime/module! runtime :millstrand/spools-harness-core
                  {:ns 'ct.spools.harness-core
-                  :spools ['ct.spools/harness-core]
+                  :spools ['ct.spools/harness-core 'millhouse.spools/identity]
+                  :after [:millhouse/spools-identity]
                   :required? true})
 (runtime/module! runtime :millstrand/spools-claude-harness
                  {:ns 'ct.spools.claude-harness
