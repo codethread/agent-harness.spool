@@ -52,10 +52,13 @@
 (s/def ::result string?)
 (s/def ::error string?)
 (s/def ::resumes string?)
+(s/def ::identity string?)
+(s/def ::updated-at string?)
 (s/def ::run-summary
   (s/keys :req-un [::harness/id ::harness/title ::harness/state
                    ::alias ::harness ::mode ::phase ::session-id]
-          :opt-un [::launcher ::exit-code ::result ::error ::resumes]))
+          :opt-un [::launcher ::exit-code ::result ::error ::resumes
+                   ::identity ::updated-at]))
 (s/def ::runs (s/coll-of ::run-summary :kind vector?))
 (s/def ::timed-out (s/coll-of ::harness/id :kind vector?))
 (s/def ::claimed-run-ids (s/coll-of ::harness/id :kind vector?))
@@ -63,6 +66,7 @@
   (s/keys :req-un [::runs ::timed-out]))
 (s/def ::op-result
   (s/or :run ::run-summary
+        :runs ::runs
         :await ::await-result
         :registry ::harness/registry-list))
 
@@ -148,6 +152,14 @@
 (defn- resolved-definition [rt run]
   (harness/concrete-harness rt (attr-get run :harness/harness)))
 
+(defn- identity-bound-run [run]
+  (if (attr-get run :harness/resumes)
+    run
+    (if-let [identity-prompt (attr-get run :identity/prompt)]
+      (assoc-in run [:attributes :harness/prompt]
+                (str identity-prompt "\n\n" (or (attr-get run :harness/prompt) "")))
+      run)))
+
 (defn- valid-argv [argv]
   (when-not (and (vector? argv) (seq argv)
                  (every? #(and (string? %) (not (str/blank? %))) argv))
@@ -157,6 +169,8 @@
 (defn- process-result [run argv]
   (let [pb (doto (ProcessBuilder. ^java.util.List argv)
              (.directory (io/file (attr-get run :harness/cwd))))
+        _ (.put (.environment pb) "MILLSTRAND_AGENT_ID"
+                (attr-get run :identity/id))
         process (.start pb)
         stdout-f (future (slurp (.getInputStream process)))
         stderr-f (future (slurp (.getErrorStream process)))]
@@ -171,7 +185,7 @@
   [rt id]
   (try
     (harness/mark-running! rt id)
-    (let [run (full-run rt id)
+    (let [run (identity-bound-run (full-run rt id))
           definition (resolved-definition rt run)
           argv (valid-argv ((callback (:prepare definition)) rt definition run))
           observed (process-result run argv)
@@ -219,6 +233,7 @@
     (spit file
           (str "#!/bin/sh\n"
                "export MILLSTRAND_RUN_ID=" (sh-quote (:id run)) "\n"
+               "export MILLSTRAND_AGENT_ID=" (sh-quote (attr-get run :identity/id)) "\n"
                "export MILLSTRAND_WORKSPACE=" (sh-quote workspace) "\n"
                "export XDG_STATE_HOME=" (sh-quote (state-root rt)) "\n"
                "cd " (sh-quote (attr-get run :harness/cwd)) " || exit 1\n"
@@ -246,11 +261,28 @@
     (assoc :exit-code (attr-get run :harness/exit-code))
     (attr-get run :harness/result) (assoc :result (attr-get run :harness/result))
     (attr-get run :harness/error) (assoc :error (attr-get run :harness/error))
-    (attr-get run :harness/resumes) (assoc :resumes (attr-get run :harness/resumes))))
+    (attr-get run :harness/resumes) (assoc :resumes (attr-get run :harness/resumes))
+    (attr-get run :identity/id) (assoc :identity (attr-get run :identity/id))
+    (:updated_at run) (assoc :updated-at (:updated_at run))))
+
+(defn- resumable-runs [rt]
+  (let [runs (weaver/list rt
+                          [:and
+                           [:= :state "closed"]
+                           [:= [:attr "harness/run"] "true"]
+                           [:= [:attr "harness/mode"] "interactive"]
+                           [:= [:attr "harness/phase"] "done"]]
+                          {})
+        resumed-run-ids (into #{} (keep #(attr-get % :harness/resumes)) runs)]
+    (->> runs
+         (remove #(contains? resumed-run-ids (:id %)))
+         (sort-by :updated_at #(compare %2 %1))
+         (mapv summary))))
 
 (defn- interactive-plan [rt run]
   (try
-    (let [definition (resolved-definition rt run)
+    (let [run (identity-bound-run run)
+          definition (resolved-definition rt run)
           argv (valid-argv ((callback (:prepare definition)) rt definition run))]
       (assoc (summary run) :launcher (write-launcher! rt run argv)))
     (catch Exception e
@@ -300,8 +332,10 @@
       (contains? args :attributes) (assoc :attributes (overlay-map (:attributes args)))))))
 
 (defn- op-resume [rt args]
-  (let [run (harness/resume!
-             rt (:run-id args)
+  (let [predecessor (harness/resolve-resume-run
+                     rt (select-keys args [:run-id :session-id :identity]))
+        run (harness/resume!
+             rt (:id predecessor)
              (cond-> {:mode (if (:interactive args) :interactive :headless)}
                (contains? args :prompt) (assoc :prompt (:prompt args))
                (contains? args :cwd) (assoc :cwd (:cwd args))
@@ -356,14 +390,18 @@
                      :cwd {:type :string :doc "Replacement cwd."}
                      :attributes {:type :string :parse :json :doc "Provider overlay merge patch."}}
              :positionals [{:name :run-id :type :string :required? true :doc "Failed run ID."}]}
+    "resumable" {:doc "List completed interactive runs available for resume."
+                 :hook-class :read :deadline-class :standard}
     "resume" {:doc "Create a new run continuing a completed provider session."
               :hook-class :mutating :deadline-class :standard
-              :flags {:interactive {:type :boolean :doc "Prepare a host-TTY interactive launcher."}
+              :flags {:run-id {:type :string :doc "Exact completed predecessor run ID."}
+                      :session-id {:type :string :doc "Native session's latest completed run."}
+                      :identity {:type :string :doc "Friendly identity's latest completed run."}
+                      :interactive {:type :boolean :doc "Prepare a host-TTY interactive launcher."}
                       :cwd {:type :string :doc "Replacement cwd."}
                       :prompt {:type :string :doc "Continuation prompt; required headlessly."}
                       :title {:type :string :doc "Run title."}
-                      :attributes {:type :string :parse :json :doc "Provider overlay merge patch."}}
-              :positionals [{:name :run-id :type :string :required? true :doc "Completed predecessor run ID."}]}
+                      :attributes {:type :string :parse :json :doc "Provider overlay merge patch."}}}
     "self-complete" {:doc "Record best-effort interactive result text."
                      :hook-class :mutating :deadline-class :standard
                      :positionals [{:name :run-id :type :string :required? true :doc "Interactive run ID."}
@@ -393,6 +431,7 @@
      "run" (op-run runtime args cwd)
      "await" (await! runtime (:run-ids args) (or (:timeout-secs args) 300))
      "retry" (op-retry runtime args)
+     "resumable" (resumable-runs runtime)
      "resume" (op-resume runtime args)
      "self-complete" (summary (harness/self-complete! runtime (:run-id args) (:result args)))
      "_started" (summary (mark-interactive-running! runtime (:run-id args)))

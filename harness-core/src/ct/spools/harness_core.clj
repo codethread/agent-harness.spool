@@ -2,6 +2,8 @@
   "Provider-neutral structure, registry, and lifecycle for harness runs."
   (:require [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [millhouse.spools.identity :as identity]
+            [millstrand.api.graph.alpha :as graph]
             [millstrand.api.lifecycle.alpha :as lifecycle]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
@@ -88,6 +90,13 @@
    #(every? #{:harness :cwd :attributes} (keys %))
    #(or (not (contains? % :attributes))
         (s/valid? ::overlay-attributes (:attributes %)))))
+(s/def ::run-id ::id)
+(s/def ::identity ::id)
+(s/def ::resume-selector
+  (s/and
+   (s/keys :opt-un [::run-id ::session-id ::identity])
+   #(= 1 (count (select-keys % [:run-id :session-id :identity])))
+   #(every? #{:run-id :session-id :identity} (keys %))))
 (s/def ::resume-request
   (s/and
    (s/keys :opt-un [::prompt ::cwd ::attributes ::mode ::title])
@@ -205,33 +214,50 @@
         {:keys [alias harness definition generated]} (resolve-harness rt harness)
         overrides (normalize-overlay attributes)
         effective (merge generated overrides)
-        cwd (or cwd (System/getProperty "user.dir"))]
+        cwd (or cwd (System/getProperty "user.dir"))
+        session-id (or session-id (str (UUID/randomUUID)))]
     (when-not (contains? (:modes definition) mode)
       (fail! "Harness does not support requested mode"
              {:harness harness :mode mode :modes (:modes definition)}))
     (when (and (= :headless mode) (str/blank? prompt))
       (fail! "Headless harness run requires a prompt" {:harness alias}))
-    (require-valid!
-     ::strand
-     (weaver/add!
-      rt
-      (cond-> {:title (or title (run-title alias mode prompt))
-               :attributes
-               (merge
-                {:harness/run "true"
-                 :harness/alias alias
-                 :harness/harness harness
-                 :harness/mode (name mode)
-                 :harness/phase "pending"
-                 :harness/cwd cwd
-                 :harness/session-id (or session-id (str (UUID/randomUUID)))
-                 :harness/generated generated
-                 :harness/overrides overrides}
-                effective
-                (when-not (str/blank? prompt) {:harness/prompt prompt})
-                (when resumes {:harness/resumes resumes}))}
-        resumes (assoc :edges [{:type "resumes" :to resumes}])))
-     "create! produced an invalid run strand")))
+    (let [run (require-valid!
+               ::strand
+               (weaver/add!
+                rt
+                (cond-> {:title (or title (run-title alias mode prompt))
+                         :attributes
+                         (merge
+                          {:harness/run "true"
+                           :harness/alias alias
+                           :harness/harness harness
+                           :harness/mode (name mode)
+                           :harness/phase "pending"
+                           :harness/cwd cwd
+                           :harness/session-id session-id
+                           :harness/generated generated
+                           :harness/overrides overrides}
+                          effective
+                          (when-not (str/blank? prompt) {:harness/prompt prompt})
+                          (when resumes {:harness/resumes resumes}))}
+                  resumes (assoc :edges [{:type "resumes" :to resumes}])))
+               "create! produced an invalid run strand")
+          predecessor (when resumes (require-run rt resumes))
+          identity-binding (identity/bind!
+                            rt
+                            (cond-> {:harness harness
+                                     :native-session-id session-id
+                                     :run-id (:id run)}
+                              predecessor
+                              (assoc :expected-identity
+                                     (attr-get predecessor :identity/id))))]
+      (require-valid!
+       ::strand
+       (weaver/update!
+        rt (:id run)
+        {:attributes {:identity/id (:identity identity-binding)
+                      :identity/prompt (:prompt identity-binding)}})
+       "create! produced an invalid identity-bound run"))))
 
 (s/fdef create! :args (s/cat :runtime ::runtime :request ::create-request) :ret ::strand)
 
@@ -357,6 +383,42 @@
      "retry! produced an invalid run strand")))
 
 (s/fdef retry! :args (s/cat :runtime ::runtime :id ::id :request ::retry-request) :ret ::strand)
+
+(defn resolve-resume-run
+  "Resolve one completed predecessor from exactly one selector.
+
+  `selector` contains one of `:run-id`, `:session-id`, or `:identity`.
+  Run IDs resolve exactly; session and identity selectors choose the most
+  recently updated completed run. Missing, conflicting, and unmatched
+  selectors fail loudly."
+  [rt selector]
+  (require-valid! ::runtime rt "resolve-resume-run requires a Weaver runtime")
+  (require-valid! ::resume-selector selector
+                  "resolve-resume-run requires exactly one selector")
+  (if-let [run-id (:run-id selector)]
+    (require-phase (require-run rt run-id) "done")
+    (let [[attribute value] (if-let [session-id (:session-id selector)]
+                              [:harness/session-id session-id]
+                              [:identity/id (:identity selector)])
+          matches (->> (weaver/list rt)
+                       (filter #(and (= "true" (attr-get % :harness/run))
+                                     (= "done" (attr-get % :harness/phase))
+                                     (= value (attr-get % attribute))))
+                       vec)
+          resumed-ids (into #{}
+                            (map :to_strand_id)
+                            (graph/outgoing-edges rt (mapv :id matches) "resumes"))
+          latest (->> matches
+                      (remove #(contains? resumed-ids (:id %)))
+                      (sort-by (juxt :updated_at :id) #(compare %2 %1))
+                      first)]
+      (or latest
+          (fail! "No completed harness run matches resume selector"
+                 {:selector selector})))))
+
+(s/fdef resolve-resume-run
+  :args (s/cat :runtime ::runtime :selector ::resume-selector)
+  :ret ::strand)
 
 (defn resume!
   "Create a new run that resumes one successful provider session.

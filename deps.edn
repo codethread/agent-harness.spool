@@ -5,6 +5,9 @@
         millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
                                      :git/sha "9bc90d1c8e421699f72098a8ca59a058be6ff88b"
                                      :deps/root "spools/batteries"}
+        millhouse.spools/identity {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                     :git/sha "3c5116ed16439ebd2233e6bf699dc6b7080eb722"
+                                     :deps/root "spools/identity"}
         millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git"
                                    :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff"
                                    :deps/root "spools/workflow"}

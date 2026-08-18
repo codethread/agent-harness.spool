@@ -72,6 +72,7 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [millhouse.spools.identity :as identity]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
             [millstrand.api.weaver.alpha :as weaver]
@@ -1634,6 +1635,7 @@
                     (str/join (for [[k v] env]
                                 (str "export " k "=" (sh-quote v) "\n")))
                     "export MILLSTRAND_RUN_ID=" (sh-quote id) "\n"
+                    "export MILLSTRAND_AGENT_ID=" (sh-quote (attr-get (weaver/show (rt) id) :identity/id)) "\n"
                     "export XDG_STATE_HOME=" (sh-quote (state-root)) "\n"
                     "cd " (sh-quote cwd) " || exit 1\n"
                     "exec " (str/join " " (map sh-quote argv)) "\n"))
@@ -1642,7 +1644,11 @@
     (.getPath file)))
 
 (defn- effective-prompt [harness run]
-  (let [prompt (str (:prompt-prefix harness) (sattr run "prompt"))]
+  (let [identity-prompt (attr-get run :identity/prompt)
+        prompt (str identity-prompt
+                    (when identity-prompt "\n\n")
+                    (:prompt-prefix harness)
+                    (sattr run "prompt"))]
     (cond
       (false? (:preamble? harness)) prompt
       (interactive? run) (str (interactive-preamble run) prompt)
@@ -2151,7 +2157,10 @@
                          "agent-run/started-at" (now)}
                      {})
         (let [process (start-process! argv {:cwd cwd
-                                            :env (:env harness)
+                                            :env (assoc (:env harness)
+                                                        "MILLSTRAND_AGENT_ID"
+                                                        (attr-get (weaver/show (rt) id)
+                                                                  :identity/id))
                                             :out-file out-file
                                             :err-file err-file
                                             :stdin (when (= :stdin (:prompt-via harness)) prompt)})]
@@ -2491,7 +2500,22 @@
                                           serves (conj {:type "serves" :to serves}))})]
       (doseq [parent-id parent-ids]
         (weaver/update! (rt) parent-id {:edges [{:type "parent-of" :to (:id run)}]}))
-      run)))
+      (let [predecessor (when resume (weaver/show (rt) resume))
+            native-key (or (when predecessor (attr-get predecessor :identity/native-key))
+                           (:id run))
+            identity-binding (identity/bind!
+                              (rt)
+                              (cond-> {:harness (name (harness-key harness))
+                                       :native-session-id native-key
+                                       :run-id (:id run)}
+                                (and predecessor (attr-get predecessor :identity/id))
+                                (assoc :expected-identity
+                                       (attr-get predecessor :identity/id))))]
+        (weaver/update! (rt) (:id run)
+                        {:attributes
+                         {:identity/id (:identity identity-binding)
+                          :identity/native-key native-key
+                          :identity/prompt (:prompt identity-binding)}})))))
 
 (defn- parent-of-sources
   "Return strand ids with a parent-of edge to `run-id`, via one indexed fetch."
