@@ -17,7 +17,7 @@
    codethread/devflow-kanban-adapter "kanban-adapter"}},
  millhouse/spools
  {:git/url "https://github.com/codethread/millhouse.spool.git",
-  :git/sha "5325e88dd3e5703d56bd4714665f0a8c377d9059",
+  :git/sha "7c615bd1032be0e443c36fa12e8c50143e8014ff",
   :roots
   {millhouse.spools/workflow "spools/workflow",
    millhouse.spools/millstrand-workflows "spools/millstrand-workflows",
