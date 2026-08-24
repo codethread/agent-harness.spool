@@ -5,6 +5,7 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
             [ct.spools.harness-core :as harness]
+            [ct.spools.process-custody :as custody]
             [millstrand.api.current.alpha :as current]
             [millstrand.api.events.alpha :as events]
             [millstrand.api.lifecycle.alpha :as lifecycle]
@@ -12,12 +13,11 @@
             [millstrand.api.millstrand.alpha :as millstrand]
             [millstrand.api.spool.alpha :refer [attr-get fail! require-valid!]]
             [millstrand.api.weaver.alpha :as weaver])
-  (:import [java.lang ProcessBuilder]
-           [java.nio.file Files]
+  (:import [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
            [java.util.concurrent Executors ThreadFactory TimeUnit]))
 
-(def ^:private state-version 1)
+(def ^:private state-version 2)
 (def ^:private event-types #{:strand/added :strand/updated :batch/applied})
 
 (declare ^:private scan!
@@ -25,6 +25,7 @@
          pending-headless
          claim!
          launch-headless!
+         inspect-owned!
          op-run
          await!
          op-retry
@@ -96,7 +97,7 @@
   (events/register-handler! runtime :harness/engine event-types
                             'ct.spools.agent-cli/on-event
                             {:spool "agent-cli"})
-  {:opened :agent-cli :claimed (scan! runtime)})
+  {:opened :agent-cli :claimed (do (inspect-owned! runtime) (scan! runtime))})
 
 (defn close-agent-cli!
   "Stop the harness CLI event handler."
@@ -111,11 +112,15 @@
         (.setDaemon true)))))
 
 (defn- new-state []
-  (let [executor (Executors/newCachedThreadPool (daemon-thread-factory))]
+  (let [executor (Executors/newCachedThreadPool (daemon-thread-factory))
+        scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1
+                                                                     (daemon-thread-factory))]
     {:in-flight (atom #{})
      :executor executor
+     :scheduler scheduler
      :close-fn (fn []
                  (.shutdownNow executor)
+                 (.shutdownNow scheduler)
                  (.awaitTermination executor 1000 TimeUnit/MILLISECONDS))}))
 
 (defn- state [rt]
@@ -166,45 +171,153 @@
     (fail! "Harness prepare must return a non-empty argv vector" {:argv argv}))
   argv)
 
-(defn- process-result [run argv]
-  (let [pb (doto (ProcessBuilder. ^java.util.List argv)
-             (.directory (io/file (attr-get run :harness/cwd))))
-        _ (.put (.environment pb) "MILLSTRAND_AGENT_ID"
-                (attr-get run :identity/id))
-        process (.start pb)
-        stdout-f (future (slurp (.getInputStream process)))
-        stderr-f (future (slurp (.getErrorStream process)))]
-    (with-open [stdin (.getOutputStream process)]
-      (.write stdin (.getBytes (str (attr-get run :harness/prompt) "\n") "UTF-8")))
-    {:exit-code (.waitFor process)
-     :stdout @stdout-f
-     :stderr @stderr-f}))
+(defn- process-spec [run argv]
+  {:argv argv
+   :cwd (attr-get run :harness/cwd)
+   :env (cond-> {}
+          (attr-get run :identity/id)
+          (assoc "MILLSTRAND_AGENT_ID" (attr-get run :identity/id)))
+   :stdin (str (attr-get run :harness/prompt) "\n")})
+
+(defn- finish-process! [rt run definition record]
+  (weaver/update! rt (:id run)
+                  {:attributes (custody/durable-attributes "harness"
+                                                           (:id run)
+                                                           (attr-get run :harness/attempt)
+                                                           record)})
+  (let [observed (custody/terminal-observed record)
+        observed (if (some? (:exit-code observed))
+                   observed
+                   (assoc observed :exit-code 1
+                          :stderr (or (:stderr observed)
+                                      (custody/terminal-error observed)
+                                      "Process custody terminal failure")))
+        outcome ((callback (:finish definition)) rt definition run observed)]
+    (harness/finish! rt (:id run) outcome)
+    (custody/acknowledge! rt record)))
+
+(defn- inspect-owned! [rt]
+  (let [runs (filter #(and (= "true" (attr-get % :harness/run))
+                           (= "running" (attr-get % :harness/phase))
+                           (= "headless" (attr-get % :harness/mode))
+                           ;; The launching worker owns the pending marker
+                           ;; until Mill has returned a listable record. Only a
+                           ;; replacement with no in-flight claim may recover
+                           ;; it from owner/key custody listing.
+                           (or (not= "pending" (attr-get % :harness/process-handle))
+                               (not (contains? @(:in-flight (state rt)) (:id %)))))
+                     (weaver/list rt
+                                  [:and [:= :state "active"]
+                                   [:= [:attr "harness/run"] "true"]
+                                   [:= [:attr "harness/phase"] "running"]]
+                                  {}))]
+    (when (seq runs)
+      (let [records (custody/list-owned rt)
+            transition-errors (atom [])]
+        (doseq [run runs]
+          (try
+            (let [record (custody/record-for "harness" run records)
+                  durable (custody/durable-attributes "harness"
+                                                      (:id run)
+                                                      (attr-get run :harness/attempt)
+                                                      record)]
+              ;; `pending` is the durable launch claim, never a relaunch signal.
+              ;; Bind the one owner/key-matched opaque handle before continuing
+              ;; to terminal observation or scheduling another inspection.
+              (when (= "pending" (attr-get run :harness/process-handle))
+                (weaver/update! rt (:id run) {:attributes durable}))
+              (if (= :terminal (:phase record))
+                (finish-process! rt run (resolved-definition rt run) record)
+                (.schedule ^java.util.concurrent.ScheduledExecutorService
+                 (:scheduler (state rt))
+                           ^Runnable #(inspect-owned! rt)
+                           100 TimeUnit/MILLISECONDS)))
+            (catch Throwable error
+              (let [id (:id run)
+                    message (str "process custody reconciliation failed: "
+                                 (ex-message error) " " (pr-str (ex-data error)))
+                    record (some #(when (= (:key %) (attr-get run :harness/process-key)) %)
+                                 records)
+                    transition-error (try
+                                       (harness/finish! rt id
+                                                        {:status :failed
+                                                         :error message})
+                                       nil
+                                       (catch Throwable transition-error
+                                         transition-error))]
+                (release! rt id)
+                (when transition-error
+                    ;; Retry only when the owner is still running and the
+                    ;; custody fact is still nonterminal. A committed failed
+                    ;; owner has no inspection work left to schedule.
+                  (when (and record
+                             (not= :terminal (:phase record))
+                             (= "running"
+                                (attr-get (full-run rt id) :harness/phase)))
+                    (.schedule ^java.util.concurrent.ScheduledExecutorService
+                     (:scheduler (state rt))
+                               ^Runnable #(inspect-owned! rt)
+                               100 TimeUnit/MILLISECONDS))
+                  (swap! transition-errors conj
+                         (ex-info "Unable to persist harness custody failure"
+                                  {:run-id id
+                                   :reconciliation-error {:run-id id
+                                                          :message (ex-message error)
+                                                          :data (ex-data error)}
+                                   :failure-transition-error
+                                   {:message (ex-message transition-error)
+                                    :data (ex-data transition-error)}}
+                                  transition-error)))))))
+        (when (seq @transition-errors)
+          (if (= 1 (count @transition-errors))
+            (throw (first @transition-errors))
+            (throw (ex-info "Unable to persist harness custody failures"
+                            {:failure-transition-errors
+                             (mapv ex-data @transition-errors)}
+                            (first @transition-errors)))))))))
 
 (defn- launch-headless!
   "Launch one already-claimed pending headless run."
   [rt id]
   (try
-    (harness/mark-running! rt id)
-    (let [run (identity-bound-run (full-run rt id))
-          definition (resolved-definition rt run)
-          argv (valid-argv ((callback (:prepare definition)) rt definition run))
-          observed (process-result run argv)
-          outcome ((callback (:finish definition)) rt definition run observed)]
-      (harness/finish! rt id outcome))
+    (let [attempt (inc (or (attr-get (full-run rt id) :harness/attempt) 0))]
+      (harness/mark-running! rt id)
+      (let [run (identity-bound-run (full-run rt id))
+            definition (resolved-definition rt run)
+            argv (valid-argv ((callback (:prepare definition)) rt definition run))
+            _ (weaver/update! rt id {:attributes (merge {:harness/attempt attempt
+                                                         :harness/started-at (str (java.time.Instant/now))}
+                                                        (custody/durable-attributes "harness" id attempt
+                                                                                    {:handle "pending"
+                                                                                     :phase :starting}))})
+            record (custody/launch! rt id attempt (process-spec run argv))]
+        (weaver/update! rt id {:attributes (custody/durable-attributes "harness" id attempt record)})
+        (if (= :terminal (:phase record))
+          (finish-process! rt (full-run rt id) definition record)
+          (inspect-owned! rt))))
     (catch Exception e
-      (try
-        (harness/finish! rt id {:status :failed
-                                :error (str (ex-message e)
-                                            (when-let [data (ex-data e)]
-                                              (str " " (pr-str data))))})
-        (catch Exception finish-error
-          (binding [*out* *err*]
-            (println "[harness] failed to record launch failure"
-                     {:run id
-                      :launch-error (ex-message e)
-                      :finish-error (ex-message finish-error)})))))
+      (if (= "failed" (attr-get (full-run rt id) :harness/phase))
+        (throw e)
+        (let [message (str (ex-message e)
+                           (when-let [data (ex-data e)]
+                             (str " " (pr-str data))))
+              transition-error (try
+                                 (harness/finish! rt id {:status :failed
+                                                         :error message})
+                                 nil
+                                 (catch Throwable finish-error finish-error))]
+          (when transition-error
+            (throw (ex-info "Unable to persist harness launch failure"
+                            {:run-id id
+                             :launch-error {:message (ex-message e)
+                                            :data (ex-data e)}
+                             :failure-transition-error
+                             {:message (ex-message transition-error)
+                              :data (ex-data transition-error)}}
+                            transition-error))))))
     (finally
       (release! rt id)
+      (inspect-owned! rt)
       (scan! rt))))
 
 (defn- scan!
@@ -454,6 +567,48 @@
 (millstrand/defbin! agent
   "Open a coding agent in the caller's terminal as a tracked interactive run."
   {:executable [:root "bin/agent"]})
+
+(defn process-custody-desired
+  "Read active headless harness-core runs requiring process inspection."
+  [{:keys [runtime]}]
+  (->> (weaver/list runtime
+                    [:and [:= :state "active"]
+                     [:= [:attr "harness/run"] "true"]
+                     [:= [:attr "harness/mode"] "headless"]
+                     [:= [:attr "harness/phase"] "running"]]
+                    {})
+       (remove #(and (= "pending" (attr-get % :harness/process-handle))
+                     (contains? @(:in-flight (state runtime)) (:id %))))
+       (mapv #(select-keys % [:id :state :attributes]))))
+
+(defn process-custody-actual
+  "Read the owner-scoped process facts for desired harness-core runs."
+  [{:keys [runtime desired]}]
+  (when (seq desired)
+    (custody/list-owned runtime)))
+
+(defn apply-process-custody!
+  "Reconcile harness-core durable runs against Mill process facts."
+  [{:keys [runtime desired actual]}]
+  (when (seq desired)
+    (inspect-owned! runtime))
+  {:reconciled :agent-cli
+   :runs (count desired)
+   :facts (count actual)
+   :status :applied})
+
+(defn remove-process-custody!
+  "Leave Mill-owned facts intact when the declaration is removed."
+  [_context]
+  {:reconciled :agent-cli :status :removed})
+
+(lifecycle/defreconcile! agent-cli-process-custody
+  "Reconcile active harness-core headless runs with Mill process custody."
+  {:read-desired 'ct.spools.agent-cli/process-custody-desired
+   :read-actual 'ct.spools.agent-cli/process-custody-actual
+   :apply 'ct.spools.agent-cli/apply-process-custody!
+   :on-removed 'ct.spools.agent-cli/remove-process-custody!
+   :trigger-kinds #{}})
 
 (lifecycle/defresource! agent-cli-runtime
   "Own the harness CLI event handler for the module lifetime."

@@ -14,6 +14,7 @@
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.delegation :as agents]
             [ct.spools.agent-run :as shuttle]
+            [ct.spools.real-agent-harness-test :as real-agent-harness]
             [ct.spools.test-support :as test-support :refer [await-phase]]
             [millstrand.test.alpha :as t]))
 
@@ -32,6 +33,14 @@
       (test-support/activate-spool! rt :delegation 'ct.spools.delegation
                                     :after [:agent-run])
       (f rt))))
+
+(deftest guarded-real-mill-agent-harness-replacement-acceptance
+  (testing "the external acceptance exercises one real planned replacement"
+    (is (= {:m0-sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
+            :replacement true
+            :custody-reconciled true
+            :delegated-once true}
+           (real-agent-harness/run-acceptance!)))))
 
 (defn- seed-run!
   "Add a completed agent-run strand carrying the usage attributes the spend

@@ -9,6 +9,17 @@
 **Research:** design strand `dulpu`; Codex task `qwm7q`; Claude task `wrzxa`; delegated plan `ck95v`
 **Related existing code:** `agent-run/`, `delegation/` (context only; unchanged by this spike)
 
+## Current contract note (2026-08-24)
+
+This accepted proposal records an earlier throwaway MVP. The custody claims in
+P2.C6, P3.G5, P4.NG5, P8.1, and P15 are superseded for the shipped headless
+`agent-run` path. Mill owns each process by owner and key and returns an opaque
+handle with a phase. Reconciliation never relaunches a retained process. The
+run's terminal state commits durably before the custody fact is acknowledged;
+reconciliation and durable failure-transition errors remain visible with the
+run id and structured exception data. The rest of this document remains
+historical context for the spike.
+
 **Configuration identification:** Document IDs are ordered as document type, short name,
 sequential id, then optional version. Every nested point uses the full document ID so references
 remain globally grepable.

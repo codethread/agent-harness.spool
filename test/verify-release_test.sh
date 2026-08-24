@@ -22,6 +22,72 @@ done
 
 echo "verify-release duplicate-option probes: OK"
 
+candidate_block=$(sed -n '/^if \[\[ "$mode" == "pre-tag" \]\]; then$/,/^else$/p' "$verify_release")
+for required in \
+  'candidate_pin=$(clojure -Sdeps' \
+  '"$source_root/deps.edn"' \
+  'core_url=$(printf' \
+  'core_sha=$(printf' \
+  'candidate root Millstrand pin must be an exact immutable coordinate' \
+  'candidate Millstrand pin disagrees in alias'; do
+  if [[ "$candidate_block" != *"$required"* ]]; then
+    printf 'verify-release candidate-pin selection probe failed; missing %s\n' \
+      "$required" >&2
+    exit 1
+  fi
+done
+if [[ "$candidate_block" == *release_values* ]]; then
+  echo "verify-release candidate-pin selection probe failed; candidate mode still uses historical core coordinates" >&2
+  exit 1
+fi
+echo "verify-release candidate-pin selection: OK"
+
+candidate_fixture=$(mktemp -d "${TMPDIR:-/tmp}/verify-release-candidate.XXXXXX")
+trap 'rm -rf "$candidate_fixture"' EXIT
+cp "$repo_root/deps.edn" "$candidate_fixture/deps.edn"
+mkdir "$candidate_fixture/.git"
+
+expect_candidate_failure() {
+  local label=$1
+  local needle=$2
+  local mutation=$3
+  local output status
+  cp "$repo_root/deps.edn" "$candidate_fixture/deps.edn"
+  python3 - "$candidate_fixture/deps.edn" "$mutation" <<'PY'
+import pathlib
+import sys
+
+path, mutation = sys.argv[1:]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+sha = "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
+if mutation == "sha":
+    text = text.replace(':git/sha "' + sha + '"', ':git/sha "not-a-sha"', 1)
+elif mutation == "disagreement":
+    marker = text.index(':test')
+    before, after = text[:marker], text[marker:]
+    after = after.replace(sha, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1)
+    text = before + after
+else:
+    raise SystemExit("unknown mutation: " + mutation)
+pathlib.Path(path).write_text(text, encoding="utf-8")
+PY
+  set +e
+  output=$("$verify_release" --mode pre-tag --source-root "$candidate_fixture" \
+    --core-release "$repo_root/release/msr04-release.json" \
+    --kanban-release "$repo_root/release/msr05-release.json" 2>&1)
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 || "$output" != *"$needle"* ]]; then
+    printf 'verify-release candidate conflict probe failed for %s (status %s):\n%s\n' \
+      "$label" "$status" "$output" >&2
+    exit 1
+  fi
+}
+
+expect_candidate_failure sha "exact immutable coordinate" sha
+expect_candidate_failure disagreement "disagrees in alias" disagreement
+echo "verify-release candidate coordinate conflict probes: OK"
+
 for required in \
   'candidate_coord/spools.edn' \
   'codethread/devflow-kanban-adapter' \

@@ -13,9 +13,9 @@ Userland spool that spawns coding agents in user-chosen harnesses.
   default; `await` is the opt-in blocking convenience.
 
   Runs survive weaver crashes because the strands are durable: `reconcile!`
-  respawns still-active running strands during applied module reconciliation,
-  bounded by
-  `agent-run/max-attempts`. Run memory is note strands linked by the declared
+  keeps matched headless children owner-local, fails a run whose custody fact is
+  missing or conflicting, and never relaunches an already-running child. Run
+  memory is note strands linked by the declared
   `notes` relation — the edge is the sole linkage — whose `note/text`/`note/at`
   content is storage-enforced write-once.
 
@@ -42,12 +42,13 @@ Userland spool that spawns coding agents in user-chosen harnesses.
   and execution shape, closes the predecessor `agent-run/phase "superseded"`,
   and records lineage as a `supersedes` edge (successor → predecessor) plus an
   `agent-run/supersedes` attr. `runs-serving` resolves the current run for a
-  target as the serving run with no incoming `supersedes` edge. Crash-respawn
-  (`reconcile!`) and session-carrying resume are the same family read two ways:
-  reconcile resets a strand in place so the run id stays stable, and
-  `:continuity :resume` layers the resume link onto a supersession — `resumes`
-  and `supersedes` stay distinct edges and the resolution rule keys on
-  `supersedes` alone.
+  target as the serving run with no incoming `supersedes` edge. Custody
+  reconciliation and session-carrying resume are separate recovery paths:
+  `reconcile!` keeps matched headless children owner-local, fails a run whose
+  custody fact is missing or conflicting, and never relaunches an
+  already-running child. `:continuity :resume` layers the resume link onto a
+  supersession — `resumes` and `supersedes` stay distinct edges and the
+  resolution rule keys on `supersedes` alone.
 
   Interactive runs are the second execution mode: instead of exec-and-wait, the
   engine launches the harness into a user-registered multiplexer backend
@@ -349,11 +350,10 @@ Function.
 
 Recover running runs whose owning weaver died.
 
-  Headless: any active `running` run this weaver has no in-flight handle for
-  was owned by a dead predecessor: its stale process is killed when its
-  identity can be verified (pid plus recorded start instant), then the run is
-  either reset to `pending` for respawn or marked `exhausted` (loudly, still
-  active so dependents stay blocked) when `agent-run/max-attempts` is spent.
+  Headless: each active `running` run is matched to one Mill-owned custody fact
+  by its stable owner and key plus opaque handle. A missing or conflicting fact
+  marks only that owning run `failed` and never relaunches a child. Reconciliation
+  visits every owner before a durable failure-write error is surfaced.
 
   Interactive: sessions survive the weaver by design, so orphans are adopted,
   never respawned — a live session keeps its run `running` from durable
@@ -361,7 +361,7 @@ Recover running runs whose owning weaver died.
   closed (completion wins), otherwise failed loudly regardless of attempts
   (auto-respawn would silently discard a human conversation).
 
-  Returns a summary of respawned/exhausted/adopted/reaped/failed run ids.
+  Returns a summary of running/terminal/failed/adopted/reaped run ids.
 <p><sub><a href="https://github.com/codethread/agent-harness.spool/blob/main/agent-run/src/ct/spools/agent_run.clj#L2158-L2226">Source</a></sub></p>
 
 ## <a name="ct.spools.agent-run/register-alias!">`register-alias!`</a>

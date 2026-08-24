@@ -215,7 +215,20 @@ If you want the human notified as soon as a session is ready to attach, keep tha
 
 ### 5.2 Crash reconciliation
 
-`reconcile!` runs during applied module reconciliation. **Headless:** any active `running` run this weaver holds no in-flight handle for was owned by a dead predecessor: its stale process is killed when its identity can be verified (pid plus recorded OS start instant), then the run is reset to `pending` for respawn or marked `exhausted` (loudly, still active) once `agent-run/max-attempts` (default `3`) is spent. Recovered runs are stamped with `agent-run/recovered-at`; if a recovery-origin respawn references a harness alias that is not registered yet, the run is returned to `pending` with a loud `agent-run/error` and `agent-run/recovery-deferred-until`, and scans skip it until that quiet retry timestamp passes rather than immediately self-looping. The retry wakeup is runtime-owned spool state and is cancelled/joined on runtime stop; after a restart, ordinary scans still enforce the persisted `agent-run/recovery-deferred-until` timestamp. That deferral is bounded by a recovery window (currently 30 seconds from `agent-run/recovered-at`): transient startup/config alias races can heal, but a genuinely missing alias becomes a normal `failed` run and is visible to failure queries. User-created spawns and handmade pending runs with unknown harnesses still fail loudly. **Interactive:** sessions survive the weaver by design, so orphans are *adopted*, never respawned — a live session (probed via its durable handle attrs) keeps its run `running`; a dead one is reaped as done when its target already closed, otherwise failed loudly regardless of attempts. Runs survive weaver crashes because the strands are durable.
+`reconcile!` runs during applied module reconciliation. **Headless:** each active
+`running` run is matched to one Mill-owned custody fact by the stable owner and
+key plus its opaque handle. The `pending` handle is a launch-window marker, not
+permission to launch a second child. A missing or conflicting fact fails that
+run visibly and never relaunches it. A matched nonterminal fact keeps the run
+eligible for a later scheduled reconciliation. A terminal fact is copied to the
+run before the custody fact is acknowledged; the terminal durable run transition
+must commit first. If either reconciliation or that durable failure transition
+cannot commit, the exception remains visible with the run id and structured
+failure data. **Interactive:** sessions survive the weaver by design, so orphans
+are *adopted*, never respawned — a live session (probed via its durable handle
+attrs) keeps its run `running`; a dead one is reaped as done when its target
+already closed, otherwise failed loudly regardless of attempts. Runs survive
+weaver crashes because the strands are durable.
 
 ### 5.3 Serving runs and lineage
 
@@ -283,7 +296,7 @@ Interactive runs get their own preamble variant carrying the completion contract
 | `agent-run/harness` | Harness or alias name. |
 | `agent-run/prompt` | Prompt/script sent to the harness. |
 | `agent-run/phase` | `pending`, `running`, `done`, `failed`, `exhausted`, or `superseded`. |
-| `agent-run/attempt` | Crash-recovery launch attempt count. |
+| `agent-run/attempt` | Launch attempt number used to derive the Mill custody key. |
 | `agent-run/max-attempts` | Optional maximum attempts before exhaustion; defaults to `3`. |
 | `agent-run/result` | Final captured agent result on success; always non-blank (a blank result is failed, not done). |
 | `agent-run/error` | Failure detail when phase is `failed` or `exhausted`. A headless exit 0 with an empty result reads `harness exited 0 with an empty result`; a harness-reported turn error reads `harness exited 0 but the final turn errored: <message>`. Both append a stderr tail when one exists. |
@@ -295,11 +308,11 @@ Interactive runs get their own preamble variant carrying the completion contract
 | `agent-run/tokens` | Token breakdown map (`:input`, `:output`, `:cache-read`, `:cache-write`, `:reasoning`) carrying only the dimensions the run actually spent; a reported zero is dropped, never stored. |
 | `agent-run/resumes` | Predecessor run id whose harness session this run continues (also carried as a `resumes` annotation edge). |
 | `agent-run/error-class` | `resume` on a failure that resolving/continuing a session caused, so recovery can branch to a fresh spawn instead of retrying against a lost session. |
-| `agent-run/recovered-at` | Timestamp set when crash reconciliation returned a headless orphan to `pending`; missing harness aliases on these recovery-origin retries defer back to `pending` only inside the bounded recovery window. |
-| `agent-run/recovery-deferred-until` | Timestamp for the next quiet retry after a recovered run hit an unregistered harness alias. |
 | `agent-run/log` | Path to captured stdout log under the weaver state dir. |
-| `agent-run/pid` | Live process pid recorded after launch. |
-| `agent-run/pid-started-at` | OS process start instant used to avoid signalling recycled pids. |
+| `agent-run/process-owner` | Mill custody owner, currently `agent-harness/run`. |
+| `agent-run/process-key` | Stable owner-scoped key, `<run-id>/attempt-<n>`. |
+| `agent-run/process-handle` | Opaque Mill custody handle. The handle is not a process identity the spool interprets. |
+| `agent-run/process-phase` | Mill custody phase: `starting`, `running`, or `terminal`. |
 | `agent-run/started-at` / `agent-run/finished-at` | Run timing metadata. |
 | `agent-run/spawned-by` | Parent run id for provenance. |
 | `agent-run/supersedes` | Predecessor run id superseded by this successor; mirrored by a `supersedes` edge from successor to predecessor. |
