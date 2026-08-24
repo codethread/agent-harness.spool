@@ -132,7 +132,7 @@ historical_core_url="https://github.com/${historical_core_repository%.git}.git"
 kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
-millhouse_sha="b0ac2268685e53510df01dcd0cc533b8fd40a25d"
+millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
 if [[ "$mode" == "pre-tag" ]]; then
@@ -264,7 +264,10 @@ cat >"$consumer_root/deps.edn" <<EOF
                                    :deps/root "spools/workflow"}
         millhouse.spools/kanban {:git/url "$millhouse_url"
                                  :git/sha "$millhouse_sha"
-                                 :deps/root "spools/kanban"}}}
+                                 :deps/root "spools/kanban"}
+        millhouse.spools/identity {:git/url "$millhouse_url"
+                                   :git/sha "$millhouse_sha"
+                                   :deps/root "spools/identity"}}}
 EOF
 if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
   die "generated consumer metadata contains a local/root or source-root override"
@@ -440,14 +443,12 @@ for value in (
     'millhouse.spools/workflow "spools/workflow"',
     'millhouse.spools.executors/shell "spools/shell-executor"',
     'millhouse.spools/kanban "spools/kanban"',
+    'millhouse.spools/identity "spools/identity"',
     f':git/url "{millhouse_url}"',
     f':git/sha "{millhouse_sha}"',
 ):
     if value not in text:
         raise SystemExit(f"projected disposable spools are missing {value}")
-if not ('codethread/agents "spools/agents"' in text or
-        'agents "spools/agents"' in text):
-    raise SystemExit("projected disposable spools are missing codethread agents root")
 if not ('codethread/devflow "."' in text or 'devflow "."' in text):
     raise SystemExit("projected disposable spools are missing devflow root")
 if not ('codethread/devflow-kanban-adapter "kanban-adapter"' in text or

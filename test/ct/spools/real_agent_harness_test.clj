@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.data.json :as json]
             [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ct.spools.test-support :as test-support]))
 
 (def ^:private m0-sha
@@ -22,12 +23,20 @@
    'ct.spools/cursor-harness "cursor-harness"
    'ct.spools/bench "bench"})
 
-(defn- required-env
-  [name default]
-  (let [value (or (System/getenv name) default)]
-    (when (str/blank? value)
-      (throw (ex-info (str name " must be non-blank") {:env name})))
-    value))
+(defn- required-value
+  [name value]
+  (when (str/blank? value)
+    (throw (ex-info (str name " must be non-blank") {:env name})))
+  value)
+
+(defn- explicit-path!
+  [setting value predicate expected]
+  (when-not (and (string? value) (predicate value))
+    (throw (ex-info (str "Invalid external setting: setting=" setting
+                         "; value=" (pr-str value)
+                         "; expected " expected)
+                    {:setting setting :value value :expected expected})))
+  value)
 
 (defn- command-result
   [argv {:keys [cwd env]}]
@@ -73,6 +82,13 @@
       (throw (ex-info "Disposable integration command failed" result)))
     (parse-json (:output result))))
 
+(defn- run-command!
+  [argv opts]
+  (let [result (command-result argv opts)]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "Disposable setup command failed" result)))
+    result))
+
 (defn- copy-tree!
   [source target]
   (let [source (.toPath (io/file source))
@@ -97,6 +113,17 @@
                                           (.toPath (io/file target))
                                           (make-array java.nio.file.attribute.FileAttribute 0)))
 
+(defn- delete-tree!
+  [root]
+  (when (.exists ^java.io.File root)
+    (with-open [paths (java.nio.file.Files/walk
+                       (.toPath root)
+                       (make-array java.nio.file.FileVisitOption 0))]
+      (doseq [path (sort-by #(.getNameCount ^java.nio.file.Path %)
+                            >
+                            (iterator-seq (.iterator paths)))]
+        (java.nio.file.Files/deleteIfExists path)))))
+
 (defn- source-revision!
   [source cwd]
   (let [result (command-result ["git" "-C" source "rev-parse" "HEAD"] {:cwd cwd :env {}})]
@@ -107,6 +134,83 @@
         (throw (ex-info "External acceptance requires exact Millstrand M0"
                         {:expected m0-sha :actual revision :source source})))
       revision)))
+
+(defn- materialize-m0-source!
+  [origin target]
+  (run-command! ["git" "clone" "--shared" "--no-checkout" origin target]
+                {:cwd origin :env {}})
+  (run-command! ["git" "-C" target "checkout" "--detach" m0-sha]
+                {:cwd origin :env {}})
+  (run-command! ["make" "build"] {:cwd target :env {}})
+  target)
+
+(defn- configured-path
+  [env name default]
+  (required-value name (if (contains? env name) (get env name) default)))
+
+(defn- cleanup!
+  [weaver-stop! mill-stop!]
+  (let [failures (->> [[:weaver-shutdown weaver-stop!]
+                       [:mill-shutdown mill-stop!]]
+                      (keep (fn [[operation cleanup]]
+                              (try
+                                (let [result (cleanup)]
+                                  (when (and (= :weaver-shutdown operation)
+                                             (map? result)
+                                             (contains? result :exit)
+                                             (not (zero? (:exit result))))
+                                    (throw (ex-info (str "Disposable " (name operation)
+                                                         " exited with status " (:exit result))
+                                                    result))))
+                                nil
+                                (catch Throwable error
+                                  {:operation operation :error error}))))
+                      vec)]
+    (when (seq failures)
+      (throw (ex-info (str "Disposable acceptance cleanup failed: "
+                           (str/join ", " (map (comp name :operation) failures)))
+                      {:failures failures}))))
+  nil)
+
+(defn- resolve-m0-tools!
+  [project-root root env]
+  (let [source-override (when (contains? env "MILLSTRAND_M0_SOURCE")
+                          (explicit-path! "MILLSTRAND_M0_SOURCE"
+                                          (get env "MILLSTRAND_M0_SOURCE")
+                                          #(.isDirectory (io/file %))
+                                          "an existing directory"))
+        source (or source-override
+                   (materialize-m0-source!
+                    (.getCanonicalPath (io/file project-root "../skein-src"))
+                    (.getCanonicalPath (io/file root "m0"))))
+        source (.getCanonicalPath (io/file source))
+        mill-bin (if (contains? env "MILLSTRAND_MILL_BIN")
+                   (explicit-path! "MILLSTRAND_MILL_BIN" (get env "MILLSTRAND_MILL_BIN")
+                                   #(let [file (io/file %)]
+                                      (and (.isFile file) (.canExecute file)))
+                                   "an existing executable file")
+                   (let [derived (str (io/file source "bin/mill"))]
+                     (if source-override
+                       (explicit-path! "MILLSTRAND_MILL_BIN" derived
+                                       #(let [file (io/file %)]
+                                          (and (.isFile file) (.canExecute file)))
+                                       "an existing executable file")
+                       (configured-path env "MILLSTRAND_MILL_BIN" derived))))
+        strand-bin (if (contains? env "MILLSTRAND_STRAND_BIN")
+                     (explicit-path! "MILLSTRAND_STRAND_BIN" (get env "MILLSTRAND_STRAND_BIN")
+                                     #(let [file (io/file %)]
+                                        (and (.isFile file) (.canExecute file)))
+                                     "an existing executable file")
+                     (let [derived (str (io/file source "bin/strand"))]
+                       (if source-override
+                         (explicit-path! "MILLSTRAND_STRAND_BIN" derived
+                                         #(let [file (io/file %)]
+                                            (and (.isFile file) (.canExecute file)))
+                                         "an existing executable file")
+                         (configured-path env "MILLSTRAND_STRAND_BIN" derived))))]
+    {:source source
+     :mill-bin mill-bin
+     :strand-bin strand-bin}))
 
 (defn- write-source-overlay!
   [overlay source project-root workspace]
@@ -229,102 +333,229 @@
   shared or canonical Weaver state."
   []
   (let [project-root (.getCanonicalPath (io/file (System/getProperty "user.dir")))
-        m0-source (required-env "MILLSTRAND_M0_SOURCE"
-                                (.getCanonicalPath (io/file project-root "../skein-src")))
-        mill-bin (required-env "MILLSTRAND_MILL_BIN" (str (io/file m0-source "bin/mill")))
-        strand-bin (required-env "MILLSTRAND_STRAND_BIN" (str (io/file m0-source "bin/strand")))
-        _ (source-revision! m0-source project-root)
         root (.toFile (java.nio.file.Files/createTempDirectory
                        (.toPath (io/file "/tmp"))
                        "ah-"
-                       (make-array java.nio.file.attribute.FileAttribute 0)))
-        state-root (io/file root "s")
-        workspace-root (io/file root "w")
-        workspace (io/file workspace-root ".millstrand")
-        overlay (io/file root "m")
-        _ (.mkdirs state-root)
-        _ (.mkdirs workspace-root)
-        _ (.mkdirs overlay)
-        _ (write-source-overlay! overlay m0-source project-root workspace)
-        env {"XDG_STATE_HOME" (.getCanonicalPath state-root)
-             "MILLSTRAND_SOURCE" (.getCanonicalPath overlay)}
-        mill-env {:cwd project-root :env env :mill-bin mill-bin :strand-bin strand-bin}
-        mill (start-process! [mill-bin "start"] mill-env)
-        strand-env {:cwd (.getCanonicalPath workspace-root) :env env :strand-bin strand-bin}]
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
     (try
-      (test-support/poll-until #(zero? (:exit (command-result [mill-bin "status"] mill-env)))
-                               {:timeout-ms 30000
-                                :interval-ms 100
-                                :on-timeout #(throw (ex-info "M0 Mill did not become ready" {:pid (:pid mill)}))})
-      (command! [mill-bin "init" "--workspace" (.getCanonicalPath workspace)] mill-env)
-      (write-workspace! workspace project-root)
-      (command! [mill-bin "weaver" "start" "--workspace" (.getCanonicalPath workspace)] mill-env)
-      (let [a-task (:id (command! [strand-bin "--workspace" workspace "add" "A"
-                                   "--attr" "body=body" "--attr" "agent-run/harness=a"] strand-env))
-            b-task (:id (command! [strand-bin "--workspace" workspace "add" "B"
-                                   "--attr" "body=body" "--attr" "agent-run/harness=b"] strand-env))
-            c-task (:id (command! [strand-bin "--workspace" workspace "add" "C"
-                                   "--attr" "body=body" "--attr" "agent-run/harness=b"
-                                   "--edge" (str "depends-on:" b-task)] strand-env))
-            a-run (:id (:run (agent! strand-env workspace ["delegate" a-task "--harness" "a"])))
-            b-run (:id (:run (agent! strand-env workspace ["delegate" b-task "--harness" "b"])))
-            blocked (command-result [strand-bin "--workspace" workspace "agent"
-                                     "delegate" c-task "--harness" "b"] strand-env)]
-        (when (zero? (:exit blocked))
-          (throw (ex-info "B-to-C delegation was sent before readiness" {:result blocked})))
-        (when (seq (agent! strand-env workspace ["ps" "--for" c-task]))
-          (throw (ex-info "Blocked B-to-C delegation created a run" {:task c-task})))
-        (let [a-before (poll-show! strand-env workspace a-run
-                                   #(= "running" (get-in % [:attributes :agent-run/phase])))
-              b-before (poll-show! strand-env workspace b-run
-                                   #(= "running" (get-in % [:attributes :agent-run/phase])))
-              a-fact (run-fact a-before)
-              b-fact (run-fact b-before)
-              _ (assert-run-fact! a-fact)
-              _ (assert-run-fact! b-fact)
-              before (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
-              restart (command! [mill-bin "weaver" "restart" "--workspace" workspace] mill-env)
-              after (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
-              _ (when-not (and (= "restart" (:operation restart))
-                               (= "running" (:state restart))
-                               (string? (:generation_id restart))
-                               (not= (:generation_id before) (:generation_id after)))
-                  (throw (ex-info "Ordinary planned Weaver replacement was not performed"
-                                  {:before before :restart restart :after after})))
-              a-after (poll-show! strand-env workspace a-run
-                                  #(contains? #{"running" "done"}
-                                              (get-in % [:attributes :agent-run/phase])))
-              b-after (poll-show! strand-env workspace b-run
-                                  #(contains? #{"running" "done"}
-                                              (get-in % [:attributes :agent-run/phase])))
-              a-after-fact (run-fact a-after)
-              b-after-fact (run-fact b-after)]
-          (when-not (= (select-keys a-fact [:id :attempt :owner :key :handle])
-                       (select-keys a-after-fact [:id :attempt :owner :key :handle]))
-            (throw (ex-info "A was replayed or lost its stable custody fact"
-                            {:before a-fact :after a-after-fact})))
-          (when-not (= (select-keys b-fact [:id :attempt :owner :key :handle])
-                       (select-keys b-after-fact [:id :attempt :owner :key :handle]))
-            (throw (ex-info "B was replayed or lost its stable custody fact"
-                            {:before b-fact :after b-after-fact})))
-          (poll-show! strand-env workspace a-run
-                      #(= "done" (get-in % [:attributes :agent-run/phase])))
-          (poll-show! strand-env workspace b-run
-                      #(= "done" (get-in % [:attributes :agent-run/phase])))
-          (command! [strand-bin "--workspace" workspace "update" b-task "--state" "closed"] strand-env)
-          (let [c-result (agent! strand-env workspace ["delegate" c-task "--harness" "b"])
-                c-run (:id (:run c-result))
-                second-send (command-result [strand-bin "--workspace" workspace "agent"
-                                             "delegate" c-task "--harness" "b"] strand-env)]
-            (when (zero? (:exit second-send))
-              (throw (ex-info "B-to-C delegation was sent more than once" {:result second-send})))
-            (when-not (= 1 (count (agent! strand-env workspace ["ps" "--for" c-task])))
-              (throw (ex-info "B-to-C delegation did not have exactly one run" {:task c-task})))
-            (poll-show! strand-env workspace c-run
-                        #(= "done" (get-in % [:attributes :agent-run/phase]))))))
-      {:m0-sha m0-sha :replacement true :custody-reconciled true :delegated-once true}
-      (finally
+      (let [source-tools (resolve-m0-tools! project-root root (into {} (System/getenv)))
+            m0-source (:source source-tools)
+            mill-bin (:mill-bin source-tools)
+            strand-bin (:strand-bin source-tools)
+            _ (source-revision! m0-source project-root)
+            state-root (io/file root "s")
+            workspace-root (io/file root "w")
+            workspace (io/file workspace-root ".millstrand")
+            overlay (io/file root "m")
+            _ (.mkdirs state-root)
+            _ (.mkdirs workspace-root)
+            _ (.mkdirs overlay)
+            _ (write-source-overlay! overlay m0-source project-root workspace)
+            env {"XDG_STATE_HOME" (.getCanonicalPath state-root)
+                 "MILLSTRAND_SOURCE" (.getCanonicalPath overlay)}
+            mill-env {:cwd project-root :env env :mill-bin mill-bin :strand-bin strand-bin}
+            strand-env {:cwd (.getCanonicalPath workspace-root) :env env :strand-bin strand-bin}
+            mill (start-process! [mill-bin "start"] mill-env)]
         (try
-          (command-result [mill-bin "weaver" "stop" "--workspace" (.getCanonicalPath workspace)] mill-env)
-          (catch Throwable _ nil))
-        (stop-process! mill)))))
+          (test-support/poll-until #(zero? (:exit (command-result [mill-bin "status"] mill-env)))
+                                   {:timeout-ms 30000
+                                    :interval-ms 100
+                                    :on-timeout #(throw (ex-info "M0 Mill did not become ready" {:pid (:pid mill)}))})
+          (command! [mill-bin "init" "--workspace" (.getCanonicalPath workspace)] mill-env)
+          (write-workspace! workspace project-root)
+          (command! [mill-bin "weaver" "start" "--workspace" (.getCanonicalPath workspace)] mill-env)
+          (let [a-task (:id (command! [strand-bin "--workspace" workspace "add" "A"
+                                       "--attr" "body=body" "--attr" "agent-run/harness=a"] strand-env))
+                b-task (:id (command! [strand-bin "--workspace" workspace "add" "B"
+                                       "--attr" "body=body" "--attr" "agent-run/harness=b"] strand-env))
+                c-task (:id (command! [strand-bin "--workspace" workspace "add" "C"
+                                       "--attr" "body=body" "--attr" "agent-run/harness=b"
+                                       "--edge" (str "depends-on:" b-task)] strand-env))
+                a-run (:id (:run (agent! strand-env workspace ["delegate" a-task "--harness" "a"])))
+                b-run (:id (:run (agent! strand-env workspace ["delegate" b-task "--harness" "b"])))
+                blocked (command-result [strand-bin "--workspace" workspace "agent"
+                                         "delegate" c-task "--harness" "b"] strand-env)]
+            (when (zero? (:exit blocked))
+              (throw (ex-info "B-to-C delegation was sent before readiness" {:result blocked})))
+            (when (seq (agent! strand-env workspace ["ps" "--for" c-task]))
+              (throw (ex-info "Blocked B-to-C delegation created a run" {:task c-task})))
+            (let [a-before (poll-show! strand-env workspace a-run
+                                       #(= "running" (get-in % [:attributes :agent-run/phase])))
+                  b-before (poll-show! strand-env workspace b-run
+                                       #(= "running" (get-in % [:attributes :agent-run/phase])))
+                  a-fact (run-fact a-before)
+                  b-fact (run-fact b-before)
+                  _ (assert-run-fact! a-fact)
+                  _ (assert-run-fact! b-fact)
+                  before (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
+                  restart (command! [mill-bin "weaver" "restart" "--workspace" workspace] mill-env)
+                  after (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
+                  _ (when-not (and (= "restart" (:operation restart))
+                                   (= "running" (:state restart))
+                                   (string? (:generation_id restart))
+                                   (not= (:generation_id before) (:generation_id after)))
+                      (throw (ex-info "Ordinary planned Weaver replacement was not performed"
+                                      {:before before :restart restart :after after})))
+                  a-after (poll-show! strand-env workspace a-run
+                                      #(contains? #{"running" "done"}
+                                                  (get-in % [:attributes :agent-run/phase])))
+                  b-after (poll-show! strand-env workspace b-run
+                                      #(contains? #{"running" "done"}
+                                                  (get-in % [:attributes :agent-run/phase])))
+                  a-after-fact (run-fact a-after)
+                  b-after-fact (run-fact b-after)]
+              (when-not (= (select-keys a-fact [:id :attempt :owner :key :handle])
+                           (select-keys a-after-fact [:id :attempt :owner :key :handle]))
+                (throw (ex-info "A was replayed or lost its stable custody fact"
+                                {:before a-fact :after a-after-fact})))
+              (when-not (= (select-keys b-fact [:id :attempt :owner :key :handle])
+                           (select-keys b-after-fact [:id :attempt :owner :key :handle]))
+                (throw (ex-info "B was replayed or lost its stable custody fact"
+                                {:before b-fact :after b-after-fact})))
+              (poll-show! strand-env workspace a-run
+                          #(= "done" (get-in % [:attributes :agent-run/phase])))
+              (poll-show! strand-env workspace b-run
+                          #(= "done" (get-in % [:attributes :agent-run/phase])))
+              (command! [strand-bin "--workspace" workspace "update" b-task "--state" "closed"] strand-env)
+              (let [c-result (agent! strand-env workspace ["delegate" c-task "--harness" "b"])
+                    c-run (:id (:run c-result))
+                    second-send (command-result [strand-bin "--workspace" workspace "agent"
+                                                 "delegate" c-task "--harness" "b"] strand-env)]
+                (when (zero? (:exit second-send))
+                  (throw (ex-info "B-to-C delegation was sent more than once" {:result second-send})))
+                (when-not (= 1 (count (agent! strand-env workspace ["ps" "--for" c-task])))
+                  (throw (ex-info "B-to-C delegation did not have exactly one run" {:task c-task})))
+                (poll-show! strand-env workspace c-run
+                            #(= "done" (get-in % [:attributes :agent-run/phase]))))))
+          {:m0-sha m0-sha :replacement true :custody-reconciled true :delegated-once true}
+          (finally
+            (cleanup! #(command-result [mill-bin "weaver" "stop" "--workspace"
+                                        (.getCanonicalPath workspace)] mill-env)
+                      #(stop-process! mill)))))
+      (finally
+        (delete-tree! root)))))
+
+(deftest default-m0-tools-materialize-from-the-sibling-repository
+  (testing "the default uses a disposable exact-M0 source and builds its tools there"
+    (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                         (.toPath (io/file "/tmp"))
+                         "ah-tools-test-"
+                         (make-array java.nio.file.attribute.FileAttribute 0)))
+          project-root (.getCanonicalPath (io/file "/tmp/agent-harness"))
+          expected-source (.getCanonicalPath (io/file root "m0"))
+          calls (atom [])]
+      (try
+        (with-redefs [materialize-m0-source!
+                      (fn [origin target]
+                        (swap! calls conj [origin target])
+                        target)]
+          (is (= {:source expected-source
+                  :mill-bin (str (io/file expected-source "bin/mill"))
+                  :strand-bin (str (io/file expected-source "bin/strand"))}
+                 (resolve-m0-tools! project-root root {})))
+          (is (= [[(.getCanonicalPath (io/file project-root "../skein-src")) expected-source]]
+                 @calls)))
+        (finally
+          (delete-tree! root))))))
+
+(deftest explicit-m0-source-and-tool-overrides-remain-authoritative
+  (testing "explicit source and binaries bypass default materialization"
+    (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                         (.toPath (io/file "/tmp"))
+                         "ah-tools-override-test-"
+                         (make-array java.nio.file.attribute.FileAttribute 0)))
+          source (io/file root "explicit-m0")
+          mill-bin (io/file root "bin/mill")
+          strand-bin (io/file root "bin/strand")]
+      (try
+        (.mkdirs source)
+        (.mkdirs (.getParentFile mill-bin))
+        (spit mill-bin "#!/bin/sh\n")
+        (spit strand-bin "#!/bin/sh\n")
+        (.setExecutable mill-bin true)
+        (.setExecutable strand-bin true)
+        (with-redefs [materialize-m0-source!
+                      (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
+          (is (= {:source (.getCanonicalPath source)
+                  :mill-bin (.getPath mill-bin)
+                  :strand-bin (.getPath strand-bin)}
+                 (resolve-m0-tools! "/project" root
+                                    {"MILLSTRAND_M0_SOURCE" (.getPath source)
+                                     "MILLSTRAND_MILL_BIN" (.getPath mill-bin)
+                                     "MILLSTRAND_STRAND_BIN" (.getPath strand-bin)}))))
+        (finally
+          (delete-tree! root))))))
+
+(deftest explicit-m0-source-validates-derived-tool-paths
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       (.toPath (io/file "/tmp"))
+                       "ah-source-derived-tools-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        source (io/file root "explicit-m0")
+        expected (.getCanonicalPath (io/file source "bin/mill"))]
+    (try
+      (.mkdirs source)
+      (with-redefs [materialize-m0-source!
+                    (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
+        (let [error (try
+                      (resolve-m0-tools! "/project" root
+                                         {"MILLSTRAND_M0_SOURCE" (.getPath source)})
+                      nil
+                      (catch clojure.lang.ExceptionInfo error error))]
+          (is error "a missing derived executable must fail at the boundary")
+          (is (str/includes? (.getMessage error) "setting=MILLSTRAND_MILL_BIN"))
+          (is (str/includes? (.getMessage error) (str "value=\"" expected "\"")))
+          (is (str/includes? (.getMessage error) "expected an existing executable file"))))
+      (finally
+        (delete-tree! root)))))
+
+(deftest explicit-m0-tool-overrides-fail-at-the-boundary
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       (.toPath (io/file "/tmp"))
+                       "ah-tools-boundary-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        source (io/file root "explicit-m0")
+        valid-mill (io/file root "bin/valid-mill")
+        valid-strand (io/file root "bin/valid-strand")]
+    (try
+      (.mkdirs source)
+      (.mkdirs (.getParentFile valid-mill))
+      (spit valid-mill "#!/bin/sh\n")
+      (spit valid-strand "#!/bin/sh\n")
+      (.setExecutable valid-mill true)
+      (.setExecutable valid-strand true)
+      (doseq [[setting value expected]
+              [["MILLSTRAND_M0_SOURCE" (str (io/file root "missing"))
+                "an existing directory"]
+               ["MILLSTRAND_MILL_BIN" (str (io/file root "missing-mill"))
+                "an existing executable file"]
+               ["MILLSTRAND_STRAND_BIN" (str (io/file root "missing-strand"))
+                "an existing executable file"]]]
+        (let [env {"MILLSTRAND_M0_SOURCE" (.getPath source)
+                   "MILLSTRAND_MILL_BIN" (.getPath valid-mill)
+                   "MILLSTRAND_STRAND_BIN" (.getPath valid-strand)}
+              env (assoc env setting value)
+              error (try
+                      (resolve-m0-tools! "/project" root env)
+                      nil
+                      (catch clojure.lang.ExceptionInfo error error))]
+          (is error (str setting " must fail at the boundary"))
+          (is (str/includes? (.getMessage error) (str "setting=" setting)))
+          (is (str/includes? (.getMessage error) (str "value=\"" value "\"")))
+          (is (str/includes? (.getMessage error) (str "expected " expected)))))
+      (finally
+        (delete-tree! root)))))
+
+(deftest cleanup-reports-weaver-failure-after-attempting-mill-stop
+  (let [events (atom [])
+        error (try
+                (cleanup! #(do (swap! events conj :weaver)
+                               {:exit 1 :output "weaver stop failed"})
+                          #(swap! events conj :mill))
+                nil
+                (catch clojure.lang.ExceptionInfo error error))]
+    (is (= [:weaver :mill] @events))
+    (is (str/includes? (.getMessage error) "weaver-shutdown"))
+    (is (= :weaver-shutdown (-> error ex-data :failures first :operation)))
+    (is (= 1
+           (-> error ex-data :failures first :error ex-data :exit)))))

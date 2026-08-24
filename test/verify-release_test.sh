@@ -88,9 +88,38 @@ expect_candidate_failure sha "exact immutable coordinate" sha
 expect_candidate_failure disagreement "disagrees in alias" disagreement
 echo "verify-release candidate coordinate conflict probes: OK"
 
+consumer_block=$(sed -n '/^cat >"\$consumer_root\/deps.edn" <<EOF$/,/^EOF$/p' "$verify_release")
+expected_millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
+if ! grep -Fq "millhouse_sha=\"$expected_millhouse_sha\"" "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; Millhouse pin changed" >&2
+  exit 1
+fi
+if grep -Fq 'millhouse_identity_sha=' "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; identity has a redundant separate pin" >&2
+  exit 1
+fi
+for root in workflow kanban identity; do
+  root_block=$(printf '%s\n' "$consumer_block" | sed -n "/millhouse.spools\\/$root /,/deps\\/root/p")
+  if [[ "$root_block" != *"millhouse.spools/$root"* ||
+        "$root_block" != *':git/url "$millhouse_url"'* ||
+        "$root_block" != *':git/sha "$millhouse_sha"'* ||
+        "$root_block" != *":deps/root \"spools/$root\""* ]]; then
+    printf 'verify-release consumer dependency probe failed; %s is not on the exact shared H1 closure\n' \
+      "$root" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'die "clean consumer dependency resolution failed: $classpath"' "$verify_release" || \
+   ! grep -Fq 'die "clean consumer load failed: $smoke"' "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; closure does not fail loudly" >&2
+  exit 1
+fi
+echo "verify-release consumer dependency closure: OK"
+
 for required in \
   'candidate_coord/spools.edn' \
   'codethread/devflow-kanban-adapter' \
+  'millhouse.spools/identity "spools/identity"' \
   'local candidate root' \
   'dissoc :git/tag' \
   'init.local.clj' \
