@@ -232,11 +232,42 @@
                            ^Runnable #(inspect-owned! rt)
                            100 TimeUnit/MILLISECONDS)))
             (catch clojure.lang.ExceptionInfo error
-              (harness/finish! rt (:id run)
-                               {:status :failed
-                                :error (str "process custody reconciliation failed: "
-                                            (ex-message error) " " (pr-str (ex-data error)))})
-              (release! rt (:id run)))))))))
+              (let [id (:id run)
+                    message (str "process custody reconciliation failed: "
+                                 (ex-message error) " " (pr-str (ex-data error)))
+                    failure (ex-info message
+                                     {:run-id id
+                                      :reconciliation-error (ex-data error)}
+                                     error)
+                    record (some #(when (= (:key %) (attr-get run :harness/process-key)) %)
+                                 records)]
+                ;; A nonterminal custody fact remains eligible for another
+                ;; inspection. The durable run failure is still attempted so
+                ;; the reconciliation error is visible in the graph.
+                (when (and record (not= :terminal (:phase record)))
+                  (.schedule ^java.util.concurrent.ScheduledExecutorService
+                   (:scheduler (state rt))
+                             ^Runnable #(inspect-owned! rt)
+                             100 TimeUnit/MILLISECONDS))
+                (let [transition-error (try
+                                         (harness/finish! rt id
+                                                          {:status :failed
+                                                           :error message})
+                                         nil
+                                         (catch Throwable transition-error
+                                           transition-error))]
+                  (release! rt id)
+                  (if transition-error
+                    (throw (ex-info "Unable to persist harness custody failure"
+                                    {:run-id id
+                                     :reconciliation-error {:run-id id
+                                                            :message (ex-message error)
+                                                            :data (ex-data error)}
+                                     :failure-transition-error
+                                     {:message (ex-message transition-error)
+                                      :data (ex-data transition-error)}}
+                                    transition-error))
+                    (throw failure)))))))))))
 
 (defn- launch-headless!
   "Launch one already-claimed pending headless run."
@@ -258,20 +289,28 @@
           (finish-process! rt (full-run rt id) definition record)
           (inspect-owned! rt))))
     (catch Exception e
-      (try
-        (harness/finish! rt id {:status :failed
-                                :error (str (ex-message e)
-                                            (when-let [data (ex-data e)]
-                                              (str " " (pr-str data))))})
-        (catch Exception finish-error
-          (binding [*out* *err*]
-            (println "[harness] failed to record launch failure"
-                     {:run id
-                      :launch-error (ex-message e)
-                      :finish-error (ex-message finish-error)})))))
+      (if (= "failed" (attr-get (full-run rt id) :harness/phase))
+        (throw e)
+        (let [message (str (ex-message e)
+                           (when-let [data (ex-data e)]
+                             (str " " (pr-str data))))
+              transition-error (try
+                                 (harness/finish! rt id {:status :failed
+                                                         :error message})
+                                 nil
+                                 (catch Throwable finish-error finish-error))]
+          (when transition-error
+            (throw (ex-info "Unable to persist harness launch failure"
+                            {:run-id id
+                             :launch-error {:message (ex-message e)
+                                            :data (ex-data e)}
+                             :failure-transition-error
+                             {:message (ex-message transition-error)
+                              :data (ex-data transition-error)}}
+                            transition-error))))))
     (finally
       (release! rt id)
-      (try (inspect-owned! rt) (catch Exception _ nil))
+      (inspect-owned! rt)
       (scan! rt))))
 
 (defn- scan!

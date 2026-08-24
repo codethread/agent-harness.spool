@@ -1561,11 +1561,7 @@
   (.schedule (recovery-scheduler)
              ^Runnable (fn []
                          (binding [*runtime* runtime]
-                           (try
-                             (reconcile!)
-                             (catch Throwable t
-                               (warn! "process custody inspection failed"
-                                      {:error (ex-message t)})))))
+                           (reconcile!)))
              (long custody-inspection-ms)
              TimeUnit/MILLISECONDS))
 
@@ -2287,6 +2283,34 @@
         (schedule-custody-inspection! (rt) id)
         {:running id}))))
 
+(defn- persist-reconciliation-failure!
+  "Persist one custody reconciliation failure and return its exception.
+
+  The returned exception retains the run id and the original exception data so
+  a caller can surface the failure after every affected run has been visited.
+  A failure to persist the terminal transition propagates immediately with both
+  failure records in its exception data."
+  [id error]
+  (let [message (str "process custody reconciliation failed: "
+                     (ex-message error) " " (pr-str (ex-data error)))
+        failure (ex-info message
+                         {:run-id id
+                          :reconciliation-error (ex-data error)}
+                         error)]
+    (try
+      (mark-failed! id message)
+      failure
+      (catch Throwable transition-error
+        (throw (ex-info "Unable to persist process custody failure"
+                        {:run-id id
+                         :reconciliation-error {:run-id id
+                                                :message (ex-message error)
+                                                :data (ex-data error)}
+                         :failure-transition-error
+                         {:message (ex-message transition-error)
+                          :data (ex-data transition-error)}}
+                        transition-error))))))
+
 (defn reconcile!
   "Reconcile Mill custody facts with active headless agent runs.
 
@@ -2305,16 +2329,14 @@
                        (if (:terminal result)
                          (update acc :terminal conj (:terminal result))
                          (update acc :running conj (:running result))))
-                     (catch clojure.lang.ExceptionInfo error
-                       (try
-                         (mark-failed! (:id run)
-                                       (str "process custody reconciliation failed: "
-                                            (ex-message error) " " (pr-str (ex-data error))))
-                         (catch Throwable _ nil))
-                       (swap! (in-flight) dissoc (:id run))
-                       (update acc :failed conj (:id run)))))
-                 {:running [] :terminal [] :failed []}
+                     (catch Throwable error
+                       (let [id (:id run)
+                             failure (persist-reconciliation-failure! id error)]
+                         (swap! (in-flight) dissoc id)
+                         (update (update acc :failed conj id) :errors conj failure)))))
+                 {:running [] :terminal [] :failed [] :errors []}
                  runs)
+        reconciliation-error (first (:errors summary))
         interactive-orphans (remove #(contains? @(in-flight) (:id %))
                                     (weaver/list runtime interactive-running-query {}))
         adopted (reduce (fn [ids run]
@@ -2326,12 +2348,15 @@
                                 ids))
                             (catch Exception _ ids)))
                         [] interactive-orphans)]
-    (scan!)
-    (let [interactive (try (supervise!) (catch Exception _ {:reaped [] :failed []}))]
-      (merge-with into summary
-                  {:adopted adopted
-                   :reaped (:reaped interactive)
-                   :failed (:failed interactive)}))))
+    (if reconciliation-error
+      (throw reconciliation-error)
+      (do
+        (scan!)
+        (let [interactive (try (supervise!) (catch Exception _ {:reaped [] :failed []}))]
+          (merge-with into (dissoc summary :errors)
+                      {:adopted adopted
+                       :reaped (:reaped interactive)
+                       :failed (:failed interactive)}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Run creation, inspection, notes

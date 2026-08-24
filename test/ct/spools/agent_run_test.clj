@@ -911,10 +911,13 @@
                                                    "agent-run/harness" "sh"
                                                    "agent-run/prompt" "echo recovered"
                                                    "agent-run/phase" "running"
-                                                   "agent-run/attempt" 1
-                                                   "agent-run/pid" 99999999}})
-              summary (shuttle/reconcile!)]
-          (is (= [(:id orphan)] (:failed summary)))
+                                                   "agent-run/attempt" 1}})
+              failure (try (shuttle/reconcile!)
+                           nil
+                           (catch clojure.lang.ExceptionInfo error error))]
+          (is (= (:id orphan) (:run-id (ex-data failure))))
+          (is (= (:id orphan)
+                 (get-in (ex-data failure) [:reconciliation-error :run-id])))
           (let [failed (await-phase rt (:id orphan) #{"failed"})]
             (is (str/includes? (get-in failed [:attributes :agent-run/error])
                                "process custody reconciliation failed")))))
@@ -925,8 +928,10 @@
                                                   "agent-run/prompt" "echo nope"
                                                   "agent-run/phase" "running"
                                                   "agent-run/attempt" 3}})
-              summary (shuttle/reconcile!)]
-          (is (= [(:id spent)] (:failed summary)))
+              failure (try (shuttle/reconcile!)
+                           nil
+                           (catch clojure.lang.ExceptionInfo error error))]
+          (is (= (:id spent) (:run-id (ex-data failure))))
           (let [strand (weaver/show rt (:id spent))]
             (is (= "active" (:state strand)))
             (is (= "failed" (get-in strand [:attributes :agent-run/phase])))
@@ -944,6 +949,33 @@
                               (shuttle/spawn-run! {:harness :sh :prompt "echo x"
                                                    :spawned-by "missing-id"})))
         (is (empty? (filter #(= "echo x" (:title %)) (shuttle/runs))))))))
+
+(deftest reconcile-propagates-durable-failure-transition-errors
+  (with-shuttle
+    (fn [rt]
+      (let [orphan (weaver/add! rt {:title "unwritable orphan"
+                                    :attributes {"agent-run/run" "true"
+                                                 "agent-run/harness" "sh"
+                                                 "agent-run/prompt" "echo never"
+                                                 "agent-run/phase" "running"
+                                                 "agent-run/attempt" 1}})
+            real-update weaver/update!
+            transition-error (ex-info "test durable write failed"
+                                      {:operation :mark-failed})
+            failure (with-redefs [weaver/update!
+                                  (fn [runtime id patch]
+                                    (if (= id (:id orphan))
+                                      (throw transition-error)
+                                      (real-update runtime id patch)))]
+                      (try
+                        (shuttle/reconcile!)
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error)))]
+        (is (= (:id orphan) (:run-id (ex-data failure))))
+        (is (= {:operation :mark-failed}
+               (get-in (ex-data failure) [:failure-transition-error :data])))
+        (is (= (:id orphan)
+               (get-in (ex-data failure) [:reconciliation-error :run-id])))))))
 
 (deftest unresolvable-harness-fails-the-run-loudly
   (with-shuttle
@@ -969,10 +1001,11 @@
                                                  "agent-run/harness" "late-sh"
                                                  "agent-run/prompt" "echo recovered-late"
                                                  "agent-run/phase" "running"
-                                                 "agent-run/attempt" 1
-                                                 "agent-run/pid" 99999999}})
-            summary (shuttle/reconcile!)]
-        (is (= [(:id orphan)] (:failed summary)))
+                                                 "agent-run/attempt" 1}})
+            failure (try (shuttle/reconcile!)
+                         nil
+                         (catch clojure.lang.ExceptionInfo error error))]
+        (is (= (:id orphan) (:run-id (ex-data failure))))
         (let [failed (await-phase rt (:id orphan) #{"failed"})]
           (is (str/includes? (get-in failed [:attributes :agent-run/error])
                              "process custody reconciliation failed")))))))
@@ -985,10 +1018,11 @@
                                                  "agent-run/harness" "never-registered"
                                                  "agent-run/prompt" "echo unreachable"
                                                  "agent-run/phase" "running"
-                                                 "agent-run/attempt" 1
-                                                 "agent-run/pid" 99999999}})
-            summary (shuttle/reconcile!)]
-        (is (= [(:id orphan)] (:failed summary)))
+                                                 "agent-run/attempt" 1}})
+            failure (try (shuttle/reconcile!)
+                         nil
+                         (catch clojure.lang.ExceptionInfo error error))]
+        (is (= (:id orphan) (:run-id (ex-data failure))))
         (let [failed (await-phase rt (:id orphan) #{"failed"})]
           (is (= "active" (:state failed)))
           (is (str/includes? (get-in failed [:attributes :agent-run/error])
