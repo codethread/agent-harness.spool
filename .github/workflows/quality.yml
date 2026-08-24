@@ -51,6 +51,9 @@ jobs:
       - name: Reflection warnings
         working-directory: agent-harness.spool
         run: make reflect-check
+      - name: Build Millstrand CLIs
+        working-directory: skein-src
+        run: make build
       - name: Clojure test suite
         working-directory: agent-harness.spool
         run: make test
