@@ -189,15 +189,25 @@
                                    #(let [file (io/file %)]
                                       (and (.isFile file) (.canExecute file)))
                                    "an existing executable file")
-                   (configured-path env "MILLSTRAND_MILL_BIN"
-                                    (str (io/file source "bin/mill"))))
+                   (let [derived (str (io/file source "bin/mill"))]
+                     (if source-override
+                       (explicit-path! "MILLSTRAND_MILL_BIN" derived
+                                       #(let [file (io/file %)]
+                                          (and (.isFile file) (.canExecute file)))
+                                       "an existing executable file")
+                       (configured-path env "MILLSTRAND_MILL_BIN" derived))))
         strand-bin (if (contains? env "MILLSTRAND_STRAND_BIN")
                      (explicit-path! "MILLSTRAND_STRAND_BIN" (get env "MILLSTRAND_STRAND_BIN")
                                      #(let [file (io/file %)]
                                         (and (.isFile file) (.canExecute file)))
                                      "an existing executable file")
-                     (configured-path env "MILLSTRAND_STRAND_BIN"
-                                      (str (io/file source "bin/strand"))))]
+                     (let [derived (str (io/file source "bin/strand"))]
+                       (if source-override
+                         (explicit-path! "MILLSTRAND_STRAND_BIN" derived
+                                         #(let [file (io/file %)]
+                                            (and (.isFile file) (.canExecute file)))
+                                         "an existing executable file")
+                         (configured-path env "MILLSTRAND_STRAND_BIN" derived))))]
     {:source source
      :mill-bin mill-bin
      :strand-bin strand-bin}))
@@ -475,6 +485,29 @@
                                      "MILLSTRAND_STRAND_BIN" (.getPath strand-bin)}))))
         (finally
           (delete-tree! root))))))
+
+(deftest explicit-m0-source-validates-derived-tool-paths
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       (.toPath (io/file "/tmp"))
+                       "ah-source-derived-tools-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        source (io/file root "explicit-m0")
+        expected (.getCanonicalPath (io/file source "bin/mill"))]
+    (try
+      (.mkdirs source)
+      (with-redefs [materialize-m0-source!
+                    (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
+        (let [error (try
+                      (resolve-m0-tools! "/project" root
+                                         {"MILLSTRAND_M0_SOURCE" (.getPath source)})
+                      nil
+                      (catch clojure.lang.ExceptionInfo error error))]
+          (is error "a missing derived executable must fail at the boundary")
+          (is (str/includes? (.getMessage error) "setting=MILLSTRAND_MILL_BIN"))
+          (is (str/includes? (.getMessage error) (str "value=\"" expected "\"")))
+          (is (str/includes? (.getMessage error) "expected an existing executable file"))))
+      (finally
+        (delete-tree! root)))))
 
 (deftest explicit-m0-tool-overrides-fail-at-the-boundary
   (let [root (.toFile (java.nio.file.Files/createTempDirectory
