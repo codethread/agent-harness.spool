@@ -88,6 +88,28 @@ expect_candidate_failure sha "exact immutable coordinate" sha
 expect_candidate_failure disagreement "disagrees in alias" disagreement
 echo "verify-release candidate coordinate conflict probes: OK"
 
+consumer_block=$(sed -n '/^cat >"\$consumer_root\/deps.edn" <<EOF$/,/^EOF$/p' "$verify_release")
+if ! grep -Fq 'millhouse_identity_sha="3c5116ed16439ebd2233e6bf699dc6b7080eb722"' "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; identity pin changed" >&2
+  exit 1
+fi
+for required in \
+  'millhouse.spools/identity {:git/url "$millhouse_url"' \
+  ':git/sha "$millhouse_identity_sha"' \
+  ':deps/root "spools/identity"'; do
+  if [[ "$consumer_block" != *"$required"* ]]; then
+    printf 'verify-release consumer dependency probe failed; missing %s\n' \
+      "$required" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'die "clean consumer dependency resolution failed: $classpath"' "$verify_release" || \
+   ! grep -Fq 'die "clean consumer load failed: $smoke"' "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; closure does not fail loudly" >&2
+  exit 1
+fi
+echo "verify-release consumer dependency closure: OK"
+
 for required in \
   'candidate_coord/spools.edn' \
   'codethread/devflow-kanban-adapter' \

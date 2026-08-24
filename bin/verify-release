@@ -133,6 +133,7 @@ kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
 millhouse_sha="b0ac2268685e53510df01dcd0cc533b8fd40a25d"
+millhouse_identity_sha="3c5116ed16439ebd2233e6bf699dc6b7080eb722"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
 if [[ "$mode" == "pre-tag" ]]; then
@@ -264,7 +265,10 @@ cat >"$consumer_root/deps.edn" <<EOF
                                    :deps/root "spools/workflow"}
         millhouse.spools/kanban {:git/url "$millhouse_url"
                                  :git/sha "$millhouse_sha"
-                                 :deps/root "spools/kanban"}}}
+                                 :deps/root "spools/kanban"}
+        millhouse.spools/identity {:git/url "$millhouse_url"
+                                   :git/sha "$millhouse_identity_sha"
+                                   :deps/root "spools/identity"}}}
 EOF
 if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
   die "generated consumer metadata contains a local/root or source-root override"
