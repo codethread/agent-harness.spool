@@ -16,7 +16,7 @@ The released Kanban dependency is pinned to `v24` and peeled SHA `87f61bc2750e70
 
 The release verifier treats Millhouse H1 as one immutable dependency closure. Workflow, Kanban, and identity all use the same exact H1 SHA, and release proof has no local override. The verifier checks that shared SHA in the clean consumer dependencies and in the projected disposable workspace.
 
-Both pre-tag and published verification derive the exact Millstrand pin from the candidate `deps.edn`; historical release evidence does not override it.
+Both pre-tag and published verification derive the exact Millstrand pin from the candidate `deps.edn`; published mode does so only from the checked-out candidate after annotated-tag/peeled-SHA verification, with the root and every alias agreeing on the same exact immutable URL/SHA; historical MSR-04 evidence is not a fallback.
 
 The marker-rename smoke intentionally excludes sibling weaver UUID continuity. A fresh sibling weaver generation is allowed; storage identity and representative functional state must remain unchanged.
 
