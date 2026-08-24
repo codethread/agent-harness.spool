@@ -762,8 +762,10 @@
             (is (= {:operation :finish}
                    (get-in (ex-data failure) [:failure-transition-error :data])))
             (is (= "failed"
-                   (get-in (weaver/show rt (:id owner-local))
-                           [:attributes :harness/phase])))
+                   (test-support/poll-until
+                    #(let [phase (get-in (weaver/show rt (:id owner-local))
+                                         [:attributes :harness/phase])]
+                       (when (= "failed" phase) phase)))))
             (is (= "active" (:state (weaver/show rt (:id owner-local)))))
             (is (= "running"
                    (get-in (weaver/show rt (:id healthy))
