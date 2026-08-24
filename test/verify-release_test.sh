@@ -59,7 +59,7 @@ import sys
 
 path, mutation = sys.argv[1:]
 text = pathlib.Path(path).read_text(encoding="utf-8")
-sha = "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
+sha = "6f265f45f894859c74dfd7c6bf32a94c48cb32d0"
 if mutation == "sha":
     text = text.replace(':git/sha "' + sha + '"', ':git/sha "not-a-sha"', 1)
 elif mutation == "disagreement":

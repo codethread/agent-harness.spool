@@ -36,7 +36,7 @@
 
 (deftest guarded-real-mill-agent-harness-replacement-acceptance
   (testing "the external acceptance exercises one real planned replacement"
-    (is (= {:m0-sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
+    (is (= {:m0-sha "6f265f45f894859c74dfd7c6bf32a94c48cb32d0"
             :replacement true
             :custody-reconciled true
             :delegated-once true}
