@@ -726,7 +726,7 @@
             healthy (weaver/add! rt {:title "healthy custody owner"
                                      :attributes (attrs "running" "pending")})
             healthy-record (custody/launch! rt (:id healthy) 1
-                                            {:argv ["sh" "-c" "sleep 30"]
+                                            {:argv ["sh" "-c" "while :; do sleep 1; done"]
                                              :cwd (str config-dir)
                                              :env {}})
             _ (weaver/update! rt (:id healthy)

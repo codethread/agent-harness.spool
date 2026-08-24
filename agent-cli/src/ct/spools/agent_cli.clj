@@ -267,14 +267,14 @@
                                    :failure-transition-error
                                    {:message (ex-message transition-error)
                                     :data (ex-data transition-error)}}
-                                  transition-error))))))
-          (when (seq @transition-errors)
-            (if (= 1 (count @transition-errors))
-              (throw (first @transition-errors))
-              (throw (ex-info "Unable to persist harness custody failures"
-                              {:failure-transition-errors
-                               (mapv ex-data @transition-errors)}
-                              (first @transition-errors))))))))))
+                                  transition-error)))))))
+        (when (seq @transition-errors)
+          (if (= 1 (count @transition-errors))
+            (throw (first @transition-errors))
+            (throw (ex-info "Unable to persist harness custody failures"
+                            {:failure-transition-errors
+                             (mapv ex-data @transition-errors)}
+                            (first @transition-errors)))))))))
 
 (defn- launch-headless!
   "Launch one already-claimed pending headless run."
