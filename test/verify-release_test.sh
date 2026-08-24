@@ -156,4 +156,28 @@ if grep -Fq 'source_root/../' "$verify_release" || \
   exit 1
 fi
 
+cleanup_block=$(sed -n '/^cleanup() {$/,/^}$/p' "$verify_release")
+for required in \
+  'local cleanup_rc=0' \
+  'Weaver shutdown failed' \
+  'if ! rm -rf "$tmp_root"; then' \
+  'if [[ "$rc" == 0 && "$cleanup_rc" != 0 ]]; then'; do
+  if [[ "$cleanup_block" != *"$required"* ]]; then
+    printf 'verify-release cleanup probe failed; missing %s\n' "$required" >&2
+    exit 1
+  fi
+done
+if [[ "$cleanup_block" == *'|| true'* ]]; then
+  echo "verify-release cleanup probe failed; cleanup failures are swallowed" >&2
+  exit 1
+fi
+weaver_line=$(printf '%s\n' "$cleanup_block" | grep -n 'weaver stop' | cut -d: -f1)
+mill_line=$(printf '%s\n' "$cleanup_block" | grep -n 'kill "$mill_pid"' | cut -d: -f1)
+state_line=$(printf '%s\n' "$cleanup_block" | grep -n 'rm -rf "$tmp_root"' | cut -d: -f1)
+if [[ -z "$weaver_line" || -z "$mill_line" || -z "$state_line" || \
+      "$weaver_line" -ge "$mill_line" || "$mill_line" -ge "$state_line" ]]; then
+  echo "verify-release cleanup probe failed; cleanup order is not Weaver, Mill, state" >&2
+  exit 1
+fi
+
 echo "verify-release candidate workspace projection: OK"

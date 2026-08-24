@@ -29,6 +29,15 @@
     (throw (ex-info (str name " must be non-blank") {:env name})))
   value)
 
+(defn- explicit-path!
+  [setting value predicate expected]
+  (when-not (and (string? value) (predicate value))
+    (throw (ex-info (str "Invalid external setting: setting=" setting
+                         "; value=" (pr-str value)
+                         "; expected " expected)
+                    {:setting setting :value value :expected expected})))
+  value)
+
 (defn- command-result
   [argv {:keys [cwd env]}]
   (let [builder (doto (ProcessBuilder. (mapv str argv))
@@ -139,21 +148,52 @@
   [env name default]
   (required-value name (if (contains? env name) (get env name) default)))
 
+(defn- cleanup!
+  [weaver-stop! mill-stop!]
+  (let [failures (->> [[:weaver-shutdown weaver-stop!]
+                       [:mill-shutdown mill-stop!]]
+                      (keep (fn [[operation cleanup]]
+                              (try
+                                (cleanup)
+                                nil
+                                (catch Throwable error
+                                  {:operation operation :error error}))))
+                      vec)]
+    (when (seq failures)
+      (throw (ex-info (str "Disposable acceptance cleanup failed: "
+                           (str/join ", " (map (comp name :operation) failures)))
+                      {:failures failures}))))
+  nil)
+
 (defn- resolve-m0-tools!
   [project-root root env]
   (let [source-override (when (contains? env "MILLSTRAND_M0_SOURCE")
-                          (required-value "MILLSTRAND_M0_SOURCE"
-                                          (get env "MILLSTRAND_M0_SOURCE")))
+                          (explicit-path! "MILLSTRAND_M0_SOURCE"
+                                          (get env "MILLSTRAND_M0_SOURCE")
+                                          #(.isDirectory (io/file %))
+                                          "an existing directory"))
         source (or source-override
                    (materialize-m0-source!
                     (.getCanonicalPath (io/file project-root "../skein-src"))
                     (.getCanonicalPath (io/file root "m0"))))
-        source (.getCanonicalPath (io/file source))]
+        source (.getCanonicalPath (io/file source))
+        mill-bin (if (contains? env "MILLSTRAND_MILL_BIN")
+                   (explicit-path! "MILLSTRAND_MILL_BIN" (get env "MILLSTRAND_MILL_BIN")
+                                   #(let [file (io/file %)]
+                                      (and (.isFile file) (.canExecute file)))
+                                   "an existing executable file")
+                   (configured-path env "MILLSTRAND_MILL_BIN"
+                                    (str (io/file source "bin/mill"))))
+        strand-bin (if (contains? env "MILLSTRAND_STRAND_BIN")
+                     (explicit-path! "MILLSTRAND_STRAND_BIN" (get env "MILLSTRAND_STRAND_BIN")
+                                     #(let [file (io/file %)]
+                                        (and (.isFile file) (.canExecute file)))
+                                     "an existing executable file")
+                     (configured-path env "MILLSTRAND_STRAND_BIN"
+                                      (str (io/file source "bin/strand"))))]
     {:source source
-     :mill-bin (configured-path env "MILLSTRAND_MILL_BIN"
-                                (str (io/file source "bin/mill")))
-     :strand-bin (configured-path env "MILLSTRAND_STRAND_BIN"
-                                  (str (io/file source "bin/strand")))}))
+     :mill-bin mill-bin
+     :strand-bin strand-bin}))
 
 (defn- write-source-overlay!
   [overlay source project-root workspace]
@@ -372,10 +412,9 @@
                             #(= "done" (get-in % [:attributes :agent-run/phase]))))))
           {:m0-sha m0-sha :replacement true :custody-reconciled true :delegated-once true}
           (finally
-            (try
-              (command-result [mill-bin "weaver" "stop" "--workspace" (.getCanonicalPath workspace)] mill-env)
-              (catch Throwable _ nil))
-            (stop-process! mill))))
+            (cleanup! #(command-result [mill-bin "weaver" "stop" "--workspace"
+                                        (.getCanonicalPath workspace)] mill-env)
+                      #(stop-process! mill)))))
       (finally
         (delete-tree! root)))))
 
@@ -407,16 +446,76 @@
     (let [root (.toFile (java.nio.file.Files/createTempDirectory
                          (.toPath (io/file "/tmp"))
                          "ah-tools-override-test-"
-                         (make-array java.nio.file.attribute.FileAttribute 0)))]
+                         (make-array java.nio.file.attribute.FileAttribute 0)))
+          source (io/file root "explicit-m0")
+          mill-bin (io/file root "bin/mill")
+          strand-bin (io/file root "bin/strand")]
       (try
+        (.mkdirs source)
+        (.mkdirs (.getParentFile mill-bin))
+        (spit mill-bin "#!/bin/sh\n")
+        (spit strand-bin "#!/bin/sh\n")
+        (.setExecutable mill-bin true)
+        (.setExecutable strand-bin true)
         (with-redefs [materialize-m0-source!
                       (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
-          (is (= {:source (.getCanonicalPath (io/file "/explicit/m0"))
-                  :mill-bin "/explicit/bin/mill"
-                  :strand-bin "/explicit/bin/strand"}
+          (is (= {:source (.getCanonicalPath source)
+                  :mill-bin (.getPath mill-bin)
+                  :strand-bin (.getPath strand-bin)}
                  (resolve-m0-tools! "/project" root
-                                    {"MILLSTRAND_M0_SOURCE" "/explicit/m0"
-                                     "MILLSTRAND_MILL_BIN" "/explicit/bin/mill"
-                                     "MILLSTRAND_STRAND_BIN" "/explicit/bin/strand"}))))
+                                    {"MILLSTRAND_M0_SOURCE" (.getPath source)
+                                     "MILLSTRAND_MILL_BIN" (.getPath mill-bin)
+                                     "MILLSTRAND_STRAND_BIN" (.getPath strand-bin)}))))
         (finally
           (delete-tree! root))))))
+
+(deftest explicit-m0-tool-overrides-fail-at-the-boundary
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       (.toPath (io/file "/tmp"))
+                       "ah-tools-boundary-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        source (io/file root "explicit-m0")
+        valid-mill (io/file root "bin/valid-mill")
+        valid-strand (io/file root "bin/valid-strand")]
+    (try
+      (.mkdirs source)
+      (.mkdirs (.getParentFile valid-mill))
+      (spit valid-mill "#!/bin/sh\n")
+      (spit valid-strand "#!/bin/sh\n")
+      (.setExecutable valid-mill true)
+      (.setExecutable valid-strand true)
+      (doseq [[setting value expected]
+              [["MILLSTRAND_M0_SOURCE" (str (io/file root "missing"))
+                "an existing directory"]
+               ["MILLSTRAND_MILL_BIN" (str (io/file root "missing-mill"))
+                "an existing executable file"]
+               ["MILLSTRAND_STRAND_BIN" (str (io/file root "missing-strand"))
+                "an existing executable file"]]]
+        (let [env {"MILLSTRAND_M0_SOURCE" (.getPath source)
+                   "MILLSTRAND_MILL_BIN" (.getPath valid-mill)
+                   "MILLSTRAND_STRAND_BIN" (.getPath valid-strand)}
+              env (assoc env setting value)
+              error (try
+                      (resolve-m0-tools! "/project" root env)
+                      nil
+                      (catch clojure.lang.ExceptionInfo error error))]
+          (is error (str setting " must fail at the boundary"))
+          (is (str/includes? (.getMessage error) (str "setting=" setting)))
+          (is (str/includes? (.getMessage error) (str "value=\"" value "\"")))
+          (is (str/includes? (.getMessage error) (str "expected " expected)))))
+      (finally
+        (delete-tree! root)))))
+
+(deftest cleanup-reports-weaver-failure-after-attempting-mill-stop
+  (let [events (atom [])
+        error (try
+                (cleanup! #(do (swap! events conj :weaver)
+                               (throw (ex-info "weaver stop failed" {})))
+                          #(swap! events conj :mill))
+                nil
+                (catch clojure.lang.ExceptionInfo error error))]
+    (is (= [:weaver :mill] @events))
+    (is (str/includes? (.getMessage error) "weaver-shutdown"))
+    (is (= :weaver-shutdown (-> error ex-data :failures first :operation)))
+    (is (= "weaver stop failed"
+           (-> error ex-data :failures first :error .getMessage)))))
