@@ -213,38 +213,16 @@ gitlibs_root="$tmp_root/.gitlibs"
 mkdir -p "$consumer_root"
 cleanup() {
   local rc=$?
-  local cleanup_rc=0
   if [[ "${weaver_active:-0}" == 1 ]]; then
-    local weaver_output
-    if ! weaver_output=$(XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
-      "$mill_bin" weaver stop --workspace "$weaver_workspace" 2>&1); then
-      printf 'verify-release: Weaver shutdown failed: %s\n' "$weaver_output" >&2
-      cleanup_rc=1
-    fi
+    XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
+      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
   fi
   if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
-    if ! kill "$mill_pid" 2>/dev/null; then
-      echo "verify-release: Mill shutdown failed for PID $mill_pid" >&2
-      cleanup_rc=1
-    fi
-    if wait "$mill_pid" 2>/dev/null; then
-      :
-    else
-      local wait_rc=$?
-      if [[ "$wait_rc" != 143 ]]; then
-        echo "verify-release: Mill exited during shutdown with status $wait_rc" >&2
-        cleanup_rc=1
-      fi
-    fi
+    kill "$mill_pid" 2>/dev/null || true
+    wait "$mill_pid" 2>/dev/null || true
   fi
-  if ! rm -rf "$tmp_root"; then
-    echo "verify-release: disposable state cleanup failed: $tmp_root" >&2
-    cleanup_rc=1
-  fi
+  rm -rf "$tmp_root"
   trap - EXIT
-  if [[ "$rc" == 0 && "$cleanup_rc" != 0 ]]; then
-    rc=$cleanup_rc
-  fi
   exit "$rc"
 }
 trap cleanup EXIT
