@@ -12,6 +12,9 @@
   "Stable Mill process-custody owner for all headless agent runs."
   :agent-harness/run)
 
+(def ^:private owner-attribute
+  (subs (str owner) 1))
+
 (defn process-key
   "Return the owner-scoped idempotency key for one durable run attempt."
   [run-id attempt]
@@ -28,7 +31,7 @@
 (defn durable-attributes
   "Return run attributes that persist one custody record and its stable key."
   [prefix run-id attempt record]
-  {(str prefix "/process-owner") (subs (str owner) 1)
+  {(str prefix "/process-owner") owner-attribute
    (str prefix "/process-key") (process-key run-id attempt)
    (str prefix "/process-handle") (:handle record)
    (str prefix "/process-phase") (name (:phase record))
@@ -40,31 +43,51 @@
   (process/list-owned runtime owner))
 
 (defn record-for
-  "Return the process record matching a run's durable handle and attempt.
+  "Return the one process record matching a run's owner, key, and handle.
 
-  Missing facts, mismatched handles, and attempt conflicts fail loudly with
-  owner-local context so callers can continue reconciling healthy runs."
+  A durable `pending` handle is a launch-window marker. In that case the
+  returned record is the recovery candidate, and the caller must persist its
+  opaque handle before continuing phase reconciliation. Missing facts,
+  mismatched owners or handles, attempt conflicts, and non-unique matches fail
+  loudly with owner-local context so callers can continue reconciling healthy
+  runs."
   [prefix run records]
   (let [attrs (:attributes run)
         run-id (:id run)
         attempt (get attrs (keyword prefix "attempt"))
+        expected-owner (get attrs (keyword prefix "process-owner"))
         expected-key (get attrs (keyword prefix "process-key"))
         expected-handle (get attrs (keyword prefix "process-handle"))
-        candidates (filter #(= expected-key (:key %)) records)
-        record (first candidates)]
+        candidates (filter #(and (= owner (:owner %))
+                                 (= expected-key (:key %))) records)]
     (when-not (and (integer? attempt) (pos? attempt))
       (fail! "Process custody run has no valid attempt" {:run-id run-id :attempt attempt}))
     (when-not (= expected-key (process-key run-id attempt))
       (fail! "Process custody run has a conflicting attempt key"
              {:run-id run-id :attempt attempt :expected (process-key run-id attempt)
               :actual expected-key}))
-    (when-not record
+    (when-not (= owner-attribute expected-owner)
+      (fail! "Process custody run has a conflicting owner"
+             {:run-id run-id :expected owner-attribute :actual expected-owner}))
+    (when (empty? candidates)
       (fail! "Process custody fact is missing for an active run"
              {:run-id run-id :attempt attempt :key expected-key}))
-    (when-not (= expected-handle (:handle record))
-      (fail! "Process custody handle does not match the durable run"
-             {:run-id run-id :expected expected-handle :actual (:handle record)}))
-    record))
+    (when (next candidates)
+      (fail! "Process custody key has multiple retained facts"
+             {:run-id run-id :attempt attempt :key expected-key
+              :handles (mapv :handle candidates)}))
+    (let [record (first candidates)]
+      (if (= "pending" expected-handle)
+        (do
+          (when (= "pending" (:handle record))
+            (fail! "Process custody fact has no opaque handle"
+                   {:run-id run-id :attempt attempt :key expected-key}))
+          record)
+        (do
+          (when-not (= expected-handle (:handle record))
+            (fail! "Process custody handle does not match the durable run"
+                   {:run-id run-id :expected expected-handle :actual (:handle record)}))
+          record)))))
 
 (defn terminal-observed
   "Read Mill-retained output and project one terminal record for an engine."

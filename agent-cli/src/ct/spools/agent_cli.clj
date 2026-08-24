@@ -199,7 +199,13 @@
 (defn- inspect-owned! [rt]
   (let [runs (filter #(and (= "true" (attr-get % :harness/run))
                            (= "running" (attr-get % :harness/phase))
-                           (= "headless" (attr-get % :harness/mode)))
+                           (= "headless" (attr-get % :harness/mode))
+                           ;; The launching worker owns the pending marker
+                           ;; until Mill has returned a listable record. Only a
+                           ;; replacement with no in-flight claim may recover
+                           ;; it from owner/key custody listing.
+                           (or (not= "pending" (attr-get % :harness/process-handle))
+                               (not (contains? @(:in-flight (state rt)) (:id %)))))
                      (weaver/list rt
                                   [:and [:= :state "active"]
                                    [:= [:attr "harness/run"] "true"]
@@ -209,7 +215,16 @@
       (let [records (custody/list-owned rt)]
         (doseq [run runs]
           (try
-            (let [record (custody/record-for "harness" run records)]
+            (let [record (custody/record-for "harness" run records)
+                  durable (custody/durable-attributes "harness"
+                                                      (:id run)
+                                                      (attr-get run :harness/attempt)
+                                                      record)]
+              ;; `pending` is the durable launch claim, never a relaunch signal.
+              ;; Bind the one owner/key-matched opaque handle before continuing
+              ;; to terminal observation or scheduling another inspection.
+              (when (= "pending" (attr-get run :harness/process-handle))
+                (weaver/update! rt (:id run) {:attributes durable}))
               (if (= :terminal (:phase record))
                 (finish-process! rt run (resolved-definition rt run) record)
                 (.schedule ^java.util.concurrent.ScheduledExecutorService
@@ -516,7 +531,8 @@
                      [:= [:attr "harness/mode"] "headless"]
                      [:= [:attr "harness/phase"] "running"]]
                     {})
-       (remove #(= "pending" (attr-get % :harness/process-handle)))
+       (remove #(and (= "pending" (attr-get % :harness/process-handle))
+                     (contains? @(:in-flight (state runtime)) (:id %))))
        (mapv #(select-keys % [:id :state :attributes]))))
 
 (defn process-custody-actual

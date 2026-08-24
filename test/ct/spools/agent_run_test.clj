@@ -11,6 +11,7 @@
             [next.jdbc :as jdbc]
             [ct.spools.bench :as bench]
             [ct.spools.delegation :as delegation]
+            [ct.spools.agent-cli :as agent-cli]
             [ct.spools.agent-run :as shuttle]
             [ct.spools.process-custody :as custody]
             [ct.spools.executors.subagent :as subagent]
@@ -571,6 +572,137 @@
         (is (= (:handle first-record) (:handle repeated-record))
             "a replacement retry observes the reserved child instead of launching another")
         (is (#{:starting :running :terminal} (:phase repeated-record)))))))
+
+(defn cli-recovery-prepare
+  "Prepare a deterministic shell argv for the agent-cli custody test."
+  [_runtime _definition _run]
+  ["sh" "-c" "printf cli-recovered"])
+
+(defn cli-recovery-finish
+  "Project the deterministic custody output into a harness-core outcome."
+  [_runtime _definition _run observed]
+  {:status :done
+   :exit-code (:exit-code observed)
+   :result (str/trim (:stdout observed))})
+
+(deftest pending-custody-handle-recovery-is-owner-key-exact
+  (let [run {:id "run-a"
+             :attributes
+             {:agent-run/process-owner "agent-harness/run"
+              :agent-run/process-key "run-a/attempt-1"
+              :agent-run/process-handle "pending"
+              :agent-run/attempt 1}}
+        retained {:owner custody/owner :key "run-a/attempt-1" :handle "opaque-a"
+                  :phase :running}]
+    (testing "both engines adopt one exact retained owner/key record"
+      (doseq [prefix ["agent-run" "harness"]]
+        (let [run (assoc run :attributes
+                         (into {}
+                               (map (fn [[key value]]
+                                      [(keyword prefix (name key)) value]))
+                               (:attributes run)))]
+          (is (= retained (custody/record-for prefix run [retained]))))))
+    (testing "a missing or non-unique retained fact fails instead of guessing"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"missing for an active run"
+                            (custody/record-for "agent-run" run [])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"multiple retained facts"
+                            (custody/record-for "agent-run" run
+                                                [retained (assoc retained :handle "opaque-b")])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"conflicting owner"
+                            (custody/record-for "agent-run"
+                                                (assoc-in run [:attributes :agent-run/process-owner]
+                                                          "other-owner")
+                                                [retained]))))))
+
+(deftest legacy-reconcile-recovers-pending-child-without-relaunch
+  (with-shuttle
+    (fn [rt]
+      (let [run (weaver/add! rt {:title "legacy pending recovery"
+                                 :attributes {"agent-run/run" "true"
+                                              "agent-run/harness" "sh"
+                                              "agent-run/prompt" "unused"
+                                              "agent-run/phase" "running"
+                                              "agent-run/attempt" 1
+                                              "agent-run/process-owner" "agent-harness/run"
+                                              "agent-run/process-key" "pending-legacy/attempt-1"
+                                              "agent-run/process-handle" "pending"}})
+            run-id (:id run)
+            key (custody/process-key run-id 1)
+            _ (weaver/update! rt run-id {:attributes {"agent-run/process-key" key}})
+            retained (custody/launch! rt run-id 1 {:argv ["sh" "-c" "printf legacy-recovered"]
+                                                   :cwd (get-in rt [:metadata :config-dir])
+                                                   :env {}})
+            launches (atom 0)
+            _ (test-support/poll-until
+               #(when (= :terminal (:phase (first (custody/list-owned rt)))) true))]
+        (with-redefs [custody/launch!
+                      (fn [& _]
+                        (swap! launches inc)
+                        (throw (ex-info "unexpected relaunch" {})))
+                      custody/acknowledge!
+                      (fn [_ _]
+                        (is (= "done" (get-in (weaver/show rt run-id)
+                                              [:attributes :agent-run/phase]))))]
+          (shuttle/reconcile!)
+          (let [done (await-phase rt run-id #{"done"})]
+            (is (= (:handle retained) (get-in done [:attributes :agent-run/process-handle])))
+            (is (= "legacy-recovered" (get-in done [:attributes :agent-run/result])))
+            (is (zero? @launches))))))))
+
+(deftest agent-cli-reconcile-recovers-pending-child-without-relaunch
+  (test-support/with-runtime
+    {:publish? true :prefix "millstrand-agent-cli-recovery"}
+    (fn [rt config-dir]
+      (test-support/activate-spool! rt :harness-core 'ct.spools.harness-core)
+      (harness-core/register-harness!
+       rt :cli-recovery
+       {:modes #{:headless}
+        :prepare 'ct.spools.agent-run-test/cli-recovery-prepare
+        :finish 'ct.spools.agent-run-test/cli-recovery-finish})
+      (let [run (weaver/add! rt {:title "harness pending recovery"
+                                 :attributes {"harness/run" "true"
+                                              "harness/alias" "cli-recovery"
+                                              "harness/harness" "cli-recovery"
+                                              "harness/mode" "headless"
+                                              "harness/phase" "running"
+                                              "harness/prompt" "unused"
+                                              "harness/cwd" (str config-dir)
+                                              "harness/attempt" 1
+                                              "harness/process-owner" "agent-harness/run"
+                                              "harness/process-key" "pending-cli/attempt-1"
+                                              "harness/process-handle" "pending"}})
+            run-id (:id run)
+            key (custody/process-key run-id 1)
+            _ (weaver/update! rt run-id {:attributes {"harness/process-key" key}})
+            retained (custody/launch! rt run-id 1 {:argv ["sh" "-c" "printf cli-recovered"]
+                                                   :cwd (str config-dir)
+                                                   :env {}})
+            _ (test-support/poll-until
+               #(when (= :terminal (:phase (first (custody/list-owned rt)))) true))]
+        (test-support/activate-spool! rt :agent-cli 'ct.spools.agent-cli :after [:harness-core])
+        (let [launches (atom 0)]
+          (with-redefs [custody/launch!
+                        (fn [& _]
+                          (swap! launches inc)
+                          (throw (ex-info "unexpected relaunch" {})))
+                        custody/acknowledge!
+                        (fn [_ _]
+                          (is (= "done" (get-in (weaver/show rt run-id)
+                                                [:attributes :harness/phase]))))]
+            (agent-cli/apply-process-custody!
+             {:runtime rt
+              :desired (agent-cli/process-custody-desired {:runtime rt})
+              :actual (custody/list-owned rt)})
+            (let [done (test-support/poll-until
+                        #(let [strand (weaver/show rt run-id)]
+                           (when (= "done" (get-in strand [:attributes :harness/phase]))
+                             strand)))]
+              (is (= (:handle retained) (get-in done [:attributes :harness/process-handle])))
+              (is (= "cli-recovered" (get-in done [:attributes :harness/result])))
+              (is (zero? @launches)))))))))
 
 (deftest stdin-prompt-stays-off-argv
   (with-shuttle

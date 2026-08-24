@@ -2257,22 +2257,26 @@
 (defn- headless-running? [run]
   (and (= "active" (:state run))
        (= "running" (sattr run "phase"))
-       ;; The durable starting marker is written before Mill reserves the
-       ;; process. Do not classify that short launch window as a missing-fact
-       ;; orphan; once an opaque handle exists, reconciliation owns the run.
-       (not= "pending" (sattr run "process-handle"))
-       (not (interactive? run))))
+       (not (interactive? run))
+       ;; A pending marker is reconciled only after this weaver has lost its
+       ;; in-flight claim. During the launch seam the current worker still owns
+       ;; the claim and Mill may not have retained a listable record yet.
+       (or (not= "pending" (sattr run "process-handle"))
+           (not (contains? @(in-flight) (:id run))))))
 
 (defn- reconcile-headless-run! [run records]
   (let [id (:id run)
-        record (custody/record-for "agent-run" run records)]
+        attempt (sattr run "attempt")
+        record (custody/record-for "agent-run" run records)
+        durable (custody/durable-attributes "agent-run" id attempt record)]
+    ;; The pending handle is a durable claim, not permission to launch again.
+    ;; Bind the retained opaque handle in one Weaver update before observing its
+    ;; phase; a replacement can then resume the ordinary terminal/running path.
+    (when (= "pending" (sattr run "process-handle"))
+      (update-run! id durable {}))
     (if (= :terminal (:phase record))
       (do
-        (update-run! id (custody/durable-attributes "agent-run"
-                                                    id
-                                                    (sattr run "attempt")
-                                                    record)
-                     {})
+        (update-run! id durable {})
         (finish-run! id (or (get-in @(launch-bindings) [id :harness])
                             (:harness (launch-binding id run)))
                      (custody/terminal-observed record))
