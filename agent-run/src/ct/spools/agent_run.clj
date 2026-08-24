@@ -40,12 +40,13 @@
   and execution shape, closes the predecessor `agent-run/phase \"superseded\"`,
   and records lineage as a `supersedes` edge (successor → predecessor) plus an
   `agent-run/supersedes` attr. `runs-serving` resolves the current run for a
-  target as the serving run with no incoming `supersedes` edge. Crash-respawn
-  (`reconcile!`) and session-carrying resume are the same family read two ways:
-  reconcile resets a strand in place so the run id stays stable, and
-  `:continuity :resume` layers the resume link onto a supersession — `resumes`
-  and `supersedes` stay distinct edges and the resolution rule keys on
-  `supersedes` alone.
+  target as the serving run with no incoming `supersedes` edge. Custody
+  reconciliation and session-carrying resume are separate recovery paths:
+  `reconcile!` keeps matched headless children owner-local, fails a run whose
+  custody fact is missing or conflicting, and never relaunches an
+  already-running child. `:continuity :resume` layers the resume link onto a
+  supersession — `resumes` and `supersedes` stay distinct edges and the
+  resolution rule keys on `supersedes` alone.
 
   Interactive runs are the second execution mode: instead of exec-and-wait, the
   engine launches the harness into a user-registered multiplexer backend
@@ -2321,8 +2322,9 @@
 
   Starting and running facts preserve their durable claims and schedule another
   inspection. Terminal facts update the run before acknowledgement. A missing
-  fact, mismatched handle, or attempt conflict fails only its owning run; a
-  custody-channel failure remains visible to the lifecycle coordinator."
+  fact, mismatched handle, or attempt conflict marks only its owning run failed
+  and never relaunches the child. Reconciliation visits every owner before a
+  durable failure-write error is surfaced to the lifecycle coordinator."
   []
   (let [runtime (rt)
         runs (filter headless-running? (weaver/list runtime running-query {}))

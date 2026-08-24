@@ -706,6 +706,75 @@
               (is (= "cli-recovered" (get-in done [:attributes :harness/result])))
               (is (zero? @launches)))))))))
 
+(deftest agent-cli-inspect-owned-keeps-custody-failures-owner-local
+  (test-support/with-runtime
+    {:publish? true :prefix "millstrand-agent-cli-custody-failure"}
+    (fn [rt config-dir]
+      (test-support/activate-spool! rt :harness-core 'ct.spools.harness-core)
+      (test-support/activate-spool! rt :agent-cli 'ct.spools.agent-cli
+                                    :after [:harness-core])
+      (let [attrs (fn [phase handle]
+                    {"harness/run" "true"
+                     "harness/harness" "unused"
+                     "harness/mode" "headless"
+                     "harness/phase" phase
+                     "harness/prompt" "unused"
+                     "harness/cwd" (str config-dir)
+                     "harness/attempt" 1
+                     "harness/process-owner" "agent-harness/run"
+                     "harness/process-handle" handle})
+            healthy (weaver/add! rt {:title "healthy custody owner"
+                                     :attributes (attrs "running" "pending")})
+            healthy-record (custody/launch! rt (:id healthy) 1
+                                            {:argv ["sh" "-c" "sleep 30"]
+                                             :cwd (str config-dir)
+                                             :env {}})
+            _ (weaver/update! rt (:id healthy)
+                              {:attributes (custody/durable-attributes
+                                            "harness" (:id healthy) 1 healthy-record)})
+            owner-local (weaver/add! rt {:title "owner-local custody mismatch"
+                                         :attributes (attrs "running" "missing-owner-local")})
+            _ (weaver/update! rt (:id owner-local)
+                              {:attributes {"harness/process-key"
+                                            (custody/process-key (:id owner-local) 1)}})
+            unwritable (weaver/add! rt {:title "unwritable custody owner"
+                                        :attributes (attrs "running" "missing-unwritable")})
+            _ (weaver/update! rt (:id unwritable)
+                              {:attributes {"harness/process-key"
+                                            (custody/process-key (:id unwritable) 1)}})
+            real-finish harness-core/finish!
+            transition-error (ex-info "test durable failure write failed"
+                                      {:operation :finish})]
+        (try
+          (let [failure (with-redefs [harness-core/finish!
+                                      (fn [runtime id outcome]
+                                        (if (= id (:id unwritable))
+                                          (throw transition-error)
+                                          (real-finish runtime id outcome)))]
+                          (try
+                            (agent-cli/apply-process-custody!
+                             {:runtime rt
+                              :desired (agent-cli/process-custody-desired {:runtime rt})
+                              :actual (custody/list-owned rt)})
+                            nil
+                            (catch clojure.lang.ExceptionInfo error error)))]
+            (is (= (:id unwritable) (:run-id (ex-data failure))))
+            (is (= {:operation :finish}
+                   (get-in (ex-data failure) [:failure-transition-error :data])))
+            (is (= "failed"
+                   (get-in (weaver/show rt (:id owner-local))
+                           [:attributes :harness/phase])))
+            (is (= "active" (:state (weaver/show rt (:id owner-local)))))
+            (is (= "running"
+                   (get-in (weaver/show rt (:id healthy))
+                           [:attributes :harness/phase])))
+            (is (= :running (:phase (first (custody/list-owned rt))))))
+          (finally
+            (.shutdownNow ^java.util.concurrent.ScheduledExecutorService
+             (:scheduler (#'agent-cli/state rt)))
+            (when-let [record (first (custody/list-owned rt))]
+              (custody/cancel! rt record))))))))
+
 (deftest stdin-prompt-stays-off-argv
   (with-shuttle
     (fn [rt]
