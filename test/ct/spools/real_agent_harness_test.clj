@@ -154,7 +154,14 @@
                        [:mill-shutdown mill-stop!]]
                       (keep (fn [[operation cleanup]]
                               (try
-                                (cleanup)
+                                (let [result (cleanup)]
+                                  (when (and (= :weaver-shutdown operation)
+                                             (map? result)
+                                             (contains? result :exit)
+                                             (not (zero? (:exit result))))
+                                    (throw (ex-info (str "Disposable " (name operation)
+                                                         " exited with status " (:exit result))
+                                                    result))))
                                 nil
                                 (catch Throwable error
                                   {:operation operation :error error}))))
@@ -510,12 +517,12 @@
   (let [events (atom [])
         error (try
                 (cleanup! #(do (swap! events conj :weaver)
-                               (throw (ex-info "weaver stop failed" {})))
+                               {:exit 1 :output "weaver stop failed"})
                           #(swap! events conj :mill))
                 nil
                 (catch clojure.lang.ExceptionInfo error error))]
     (is (= [:weaver :mill] @events))
     (is (str/includes? (.getMessage error) "weaver-shutdown"))
     (is (= :weaver-shutdown (-> error ex-data :failures first :operation)))
-    (is (= "weaver stop failed"
-           (-> error ex-data :failures first :error .getMessage)))))
+    (is (= 1
+           (-> error ex-data :failures first :error ex-data :exit)))))
