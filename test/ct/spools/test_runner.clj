@@ -8,6 +8,7 @@
             [ct.spools.pi-harness-test]
             [ct.spools.cursor-harness-test]
             [ct.spools.delegation-test]
+            [ct.spools.real-agent-harness-test]
             [ct.spools.kondo-export-test]
             [ct.spools.quality-conventions-test]
             [ct.spools.subagent-test]))
@@ -20,6 +21,7 @@
     ct.spools.pi-harness-test
     ct.spools.cursor-harness-test
     ct.spools.delegation-test
+    ct.spools.real-agent-harness-test
     ct.spools.kondo-export-test
     ct.spools.quality-conventions-test
     ct.spools.subagent-test])
