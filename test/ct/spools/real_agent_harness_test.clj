@@ -8,7 +8,7 @@
 
 (def ^:private m0-sha
   "The Millstrand source revision exercised by the guarded acceptance test."
-  "db2cb4c3e1b305dc9203cdf98044ac453556a80b")
+  "6f265f45f894859c74dfd7c6bf32a94c48cb32d0")
 
 (def ^:private module-roots
   "Agent Harness roots projected into the disposable M0 launch basis."
@@ -124,6 +124,8 @@
 (defn- write-workspace!
   [workspace project-root]
   (copy-tree! (io/file project-root ".millstrand") workspace)
+  (java.nio.file.Files/deleteIfExists
+   (.toPath (io/file workspace "spools.local.edn")))
   (doseq [[_ root] module-roots]
     (symlink! (io/file project-root root)
               (io/file (.getParentFile (io/file workspace)) root)))

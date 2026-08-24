@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: codethread/millstrand
-          ref: db2cb4c3e1b305dc9203cdf98044ac453556a80b
+          ref: 6f265f45f894859c74dfd7c6bf32a94c48cb32d0
           path: skein-src
       - uses: actions/setup-java@v4
         with:
