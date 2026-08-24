@@ -35,13 +35,12 @@
       (f rt))))
 
 (deftest guarded-real-mill-agent-harness-replacement-acceptance
-  (testing "the external acceptance is opt-in because it starts real supervisors"
-    (is (or (not (real-agent-harness/enabled?))
-            (= {:m0-sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
-                :replacement true
-                :custody-reconciled true
-                :delegated-once true}
-               (real-agent-harness/run-acceptance!))))))
+  (testing "the external acceptance exercises one real planned replacement"
+    (is (= {:m0-sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+            :replacement true
+            :custody-reconciled true
+            :delegated-once true}
+           (real-agent-harness/run-acceptance!)))))
 
 (defn- seed-run!
   "Add a completed agent-run strand carrying the usage attributes the spend
