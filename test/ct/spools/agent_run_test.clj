@@ -12,6 +12,7 @@
             [ct.spools.bench :as bench]
             [ct.spools.delegation :as delegation]
             [ct.spools.agent-run :as shuttle]
+            [ct.spools.process-custody :as custody]
             [ct.spools.executors.subagent :as subagent]
             [ct.spools.harness-core :as harness-core]
             [millstrand.test.alpha :as test-alpha]
@@ -195,17 +196,6 @@
                  [:delegation :delegation-runtime]]]
           (is (= {:status :applied :kind :resource}
                  (get-in lifecycles [module effect]))))))))
-
-(defn- await-attr-matching
-  "Poll until attribute `k` satisfies `pred` or timeout; return the strand."
-  ([rt id k pred] (await-attr-matching rt id k pred (test-support/await-budget-ms)))
-  ([rt id k pred timeout-ms]
-   (test-support/poll-until
-    #(let [strand (weaver/show rt id)]
-       (when (pred (get-in strand [:attributes k])) strand))
-    {:timeout-ms timeout-ms
-     :on-timeout #(throw (ex-info "Timed out waiting for matching attribute"
-                                  {:id id :attr k :strand (weaver/show rt id)}))})))
 
 (defn- activate-delegation!
   "Activate the delegation module on `rt` so its `agent` op is registered."
@@ -564,7 +554,23 @@
         (is (= "closed" (:state done)))
         (is (= "hello-shuttle" (get-in done [:attributes :agent-run/result])))
         (is (= 1 (get-in done [:attributes :agent-run/attempt])))
-        (is (some? (get-in done [:attributes :agent-run/pid])))))))
+        (is (= (str (:id run) "/attempt-1")
+               (get-in done [:attributes :agent-run/process-key])))
+        (is (string? (get-in done [:attributes :agent-run/process-handle])))
+        (is (= "terminal" (get-in done [:attributes :agent-run/process-phase])))))))
+
+(deftest custody-key-converges-repeated-launches
+  (with-shuttle
+    (fn [rt]
+      (let [spec {:argv ["sh" "-c" "echo one"]
+                  :cwd (get-in rt [:metadata :config-dir])
+                  :env {}}
+            first-record (custody/launch! rt "planned-run" 1 spec)
+            repeated-record (custody/launch! rt "planned-run" 1 spec)]
+        (is (= "planned-run/attempt-1" (:key first-record)))
+        (is (= (:handle first-record) (:handle repeated-record))
+            "a replacement retry observes the reserved child instead of launching another")
+        (is (#{:starting :running :terminal} (:phase repeated-record)))))))
 
 (deftest stdin-prompt-stays-off-argv
   (with-shuttle
@@ -764,10 +770,10 @@
         (let [failed (await-phase rt (:id run) #{"failed"})]
           (is (str/includes? (get-in failed [:attributes :agent-run/error]) "killed")))))))
 
-(deftest reconcile-respawns-orphans-and-exhausts-bounded-attempts
+(deftest reconcile-fails-custody-orphans-without-relaunching
   (with-shuttle
     (fn [rt]
-      (testing "an orphaned running run respawns and completes"
+      (testing "a running run with no custody fact fails locally"
         (let [orphan (weaver/add! rt {:title "orphan"
                                       :attributes {"agent-run/run" "true"
                                                    "agent-run/harness" "sh"
@@ -776,11 +782,11 @@
                                                    "agent-run/attempt" 1
                                                    "agent-run/pid" 99999999}})
               summary (shuttle/reconcile!)]
-          (is (= [(:id orphan)] (:respawned summary)))
-          (is (= "recovered"
-                 (get-in (await-phase rt (:id orphan) #{"done"})
-                         [:attributes :agent-run/result])))))
-      (testing "a run out of attempts is marked exhausted, stays active"
+          (is (= [(:id orphan)] (:failed summary)))
+          (let [failed (await-phase rt (:id orphan) #{"failed"})]
+            (is (str/includes? (get-in failed [:attributes :agent-run/error])
+                               "process custody reconciliation failed")))))
+      (testing "an attempt conflict fails locally and stays active"
         (let [spent (weaver/add! rt {:title "spent"
                                      :attributes {"agent-run/run" "true"
                                                   "agent-run/harness" "sh"
@@ -788,11 +794,11 @@
                                                   "agent-run/phase" "running"
                                                   "agent-run/attempt" 3}})
               summary (shuttle/reconcile!)]
-          (is (= [(:id spent)] (:exhausted summary)))
+          (is (= [(:id spent)] (:failed summary)))
           (let [strand (weaver/show rt (:id spent))]
             (is (= "active" (:state strand)))
-            (is (= "exhausted" (get-in strand [:attributes :agent-run/phase])))
-            (is (str/includes? (get-in strand [:attributes :agent-run/error]) "exhausted"))))))))
+            (is (= "failed" (get-in strand [:attributes :agent-run/phase])))
+            (is (str/includes? (get-in strand [:attributes :agent-run/error]) "conflicting attempt key"))))))))
 
 (deftest spawn-validates-inputs-before-creating-anything
   (with-shuttle
@@ -823,7 +829,7 @@
               failed (await-phase rt run-id #{"failed"})]
           (is (str/includes? (get-in failed [:attributes :agent-run/error]) "Harness not found")))))))
 
-(deftest recovered-run-with-late-registered-alias-defers-then-respawns
+(deftest recovered-run-with-late-registered-alias-fails-without-respawn
   (with-shuttle
     (fn [rt]
       (let [orphan (weaver/add! rt {:title "late-alias-orphan"
@@ -834,40 +840,27 @@
                                                  "agent-run/attempt" 1
                                                  "agent-run/pid" 99999999}})
             summary (shuttle/reconcile!)]
-        (is (= [(:id orphan)] (:respawned summary)))
-        (let [deferred (await-attr-matching rt (:id orphan) :agent-run/error
-                                            #(and % (str/includes? % "Harness not found")))]
-          (is (= "pending" (get-in deferred [:attributes :agent-run/phase])))
-          (is (some? (get-in deferred [:attributes :agent-run/recovered-at])))
-          (is (= 1 (get-in deferred [:attributes :agent-run/attempt]))))
-        (shuttle/register-alias! :late-sh {:alias-of :sh})
-        (shuttle/scan!)
-        (let [done (await-phase rt (:id orphan) #{"done"})]
-          (is (= "closed" (:state done)))
-          (is (= "recovered-late" (get-in done [:attributes :agent-run/result])))
-          (is (= 2 (get-in done [:attributes :agent-run/attempt]))))))))
+        (is (= [(:id orphan)] (:failed summary)))
+        (let [failed (await-phase rt (:id orphan) #{"failed"})]
+          (is (str/includes? (get-in failed [:attributes :agent-run/error])
+                             "process custody reconciliation failed")))))))
 
-(deftest recovered-run-with-permanently-missing-alias-eventually-fails
-  (let [original @#'shuttle/*recovery-harness-deferral-ms*]
-    (try
-      (with-shuttle
-        (fn [rt]
-          (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly 0))
-          (let [orphan (weaver/add! rt {:title "missing-alias-orphan"
-                                        :attributes {"agent-run/run" "true"
-                                                     "agent-run/harness" "never-registered"
-                                                     "agent-run/prompt" "echo unreachable"
-                                                     "agent-run/phase" "running"
-                                                     "agent-run/attempt" 1
-                                                     "agent-run/pid" 99999999}})
-                summary (shuttle/reconcile!)]
-            (is (= [(:id orphan)] (:respawned summary)))
-            (let [failed (await-phase rt (:id orphan) #{"failed"})]
-              (is (= "active" (:state failed)))
-              (is (str/includes? (get-in failed [:attributes :agent-run/error])
-                                 "Harness not found"))))))
-      (finally
-        (alter-var-root #'shuttle/*recovery-harness-deferral-ms* (constantly original))))))
+(deftest recovered-run-with-permanently-missing-alias-fails-locally
+  (with-shuttle
+    (fn [rt]
+      (let [orphan (weaver/add! rt {:title "missing-alias-orphan"
+                                    :attributes {"agent-run/run" "true"
+                                                 "agent-run/harness" "never-registered"
+                                                 "agent-run/prompt" "echo unreachable"
+                                                 "agent-run/phase" "running"
+                                                 "agent-run/attempt" 1
+                                                 "agent-run/pid" 99999999}})
+            summary (shuttle/reconcile!)]
+        (is (= [(:id orphan)] (:failed summary)))
+        (let [failed (await-phase rt (:id orphan) #{"failed"})]
+          (is (= "active" (:state failed)))
+          (is (str/includes? (get-in failed [:attributes :agent-run/error])
+                             "process custody reconciliation failed")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Interactive runs
@@ -2379,10 +2372,20 @@
   [_rt gates sessions]
   (doseq [g gates] (release-gate! g))
   (let [gate-ids (map :id gates)]
-    (test-support/poll-until
-     #(let [in-flight (shuttle/in-flight-run-ids)] (not-any? in-flight gate-ids))
-     {:on-timeout #(throw (ex-info "gated runs never drained after release"
-                                   {:in-flight (shuttle/in-flight-run-ids)}))}))
+    (try
+      (test-support/poll-until
+       #(do
+          (try (shuttle/reconcile!) (catch Throwable _ nil))
+          (let [in-flight (shuttle/in-flight-run-ids)] (not-any? in-flight gate-ids)))
+       {:on-timeout #(throw (ex-info "gated runs never drained after release"
+                                     {:in-flight (shuttle/in-flight-run-ids)}))})
+      (catch Throwable _
+        ;; Cleanup must not leave a child behind when a scheduler assertion has
+        ;; already failed. The production path remains responsible for terminal
+        ;; observation; this exact-id fallback only runs in test teardown.
+        (doseq [id gate-ids]
+          (when (contains? (shuttle/in-flight-run-ids) id)
+            (try (shuttle/kill! id) (catch Throwable _ nil)))))))
   (doseq [s sessions]
     (try (shuttle/kill! (:id (:run s))) (catch Throwable _ nil))))
 
@@ -2428,7 +2431,9 @@
               (let [victim (first (filter by-id in-flight))]
                 (release-gate! (by-id victim))
                 (test-support/poll-until
-                 #(not (contains? (shuttle/in-flight-run-ids) victim))
+                 #(do
+                    (try (shuttle/reconcile!) (catch Throwable _ nil))
+                    (not (contains? (shuttle/in-flight-run-ids) victim)))
                  {:on-timeout #(throw (ex-info "released run never left in-flight"
                                                {:victim victim}))})
                 (settle! rt))))

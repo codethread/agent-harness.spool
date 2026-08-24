@@ -8,6 +8,7 @@
             [clojure.test :as t]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.weaver.alpha :as weaver]
+            [millstrand.core.weaver.process-protocol :as process-protocol]
             [millstrand.core.weaver.config :as weaver-config]
             [millstrand.core.weaver.runtime :as weaver-runtime]))
 
@@ -65,6 +66,79 @@
          config-dir (if nest-millstrand? (io/file root ".millstrand") root)]
      (doto config-dir (.mkdirs)))))
 
+(defn- test-process-control
+  "Provide a disposable Mill custody seam for in-JVM spool tests.
+
+  Production runtimes use Mill's Unix control channel. The ordinary spool suite
+  has no Mill supervisor, so this fixture keeps the same wire records while
+  running children in the test JVM."
+  [root]
+  (let [records (atom {})
+        processes (atom {})
+        tombstones (atom #{})
+        path (fn [handle suffix]
+               (.getCanonicalPath (io/file root (str handle suffix))))
+        record (fn [handle]
+                 (get @records handle))
+        launch (fn [{:strs [owner key launch_spec]}]
+                 (when (contains? @tombstones [owner key])
+                   (throw (ex-info "test custody key is tombstoned" {:owner owner :key key})))
+                 (if-let [existing (some (fn [[_ value]]
+                                           (when (and (= owner (:owner value))
+                                                      (= key (:key value)))
+                                             value))
+                                         @records)]
+                   existing
+                   (let [handle (str (java.util.UUID/randomUUID))
+                         out (path handle ".out")
+                         err (path handle ".err")
+                         argv (vec (get launch_spec "argv"))
+                         cwd (io/file (get launch_spec "cwd"))
+                         pb (doto (ProcessBuilder. ^java.util.List argv)
+                              (.directory cwd)
+                              (.redirectOutput (java.io.File. out))
+                              (.redirectError (java.io.File. err)))
+                         env (.environment pb)]
+                     (doseq [[k v] (get launch_spec "env" {})]
+                       (.put env k v))
+                     (let [proc (.start pb)
+                           base {:handle handle :owner owner :key key
+                                 :phase "running"
+                                 :output {:stdout_ref out :stderr_ref err}}]
+                       (swap! records assoc handle base)
+                       (swap! processes assoc handle proc)
+                       (when-let [stdin (get launch_spec "stdin")]
+                         (with-open [stream (.getOutputStream proc)]
+                           (.write stream (.getBytes ^String stdin "UTF-8"))))
+                       (future
+                         (let [exit (.waitFor proc)]
+                           (swap! records update handle
+                                  #(assoc % :phase "terminal"
+                                          :exit {:code exit :signal nil}))
+                           (swap! processes dissoc handle)))
+                       base))))
+        control (fn [operation arguments]
+                  (case operation
+                    "process.launch" (launch arguments)
+                    "process.get" (or (record (get arguments "handle"))
+                                      (throw (ex-info "test custody handle missing" arguments)))
+                    "process.list-owned" (->> @records vals
+                                              (filter #(= (get arguments "owner") (:owner %)))
+                                              vec)
+                    "process.cancel" (let [handle (get arguments "handle")
+                                           proc (get @processes handle)]
+                                       (when proc (.destroy proc))
+                                       (swap! records update handle
+                                              #(assoc % :phase "terminal"
+                                                      :cancellation {:reason "cancelled"}))
+                                       (get @records handle))
+                    "process.acknowledge" (let [handle (get arguments "handle")
+                                                value (get @records handle)]
+                                            (swap! tombstones conj [(:owner value) (:key value)])
+                                            (swap! records dissoc handle)
+                                            {:acknowledged true :handle handle})))]
+    control))
+
 (defn await-budget-ms
   "Poll deadline for cross-thread/subprocess readiness waits, in ms. Scales
   `base-ms` (default 10000) via the MILLSTRAND_TEST_AWAIT_SCALE env var (a
@@ -120,9 +194,19 @@
          config-dir (temp-config-dir (select-keys opts [:prefix :nest-millstrand?]))]
      (try
        (let [rt (weaver-runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))
-                                                :publish? publish?})]
+                                                :publish? publish?})
+             control (test-process-control config-dir)
+             original-call! (deref #'process-protocol/call!)]
          (try
-           (weaver-runtime/with-runtime-binding rt #(f rt config-dir))
+           (with-redefs [process-protocol/call!
+                         (fn [runtime operation arguments]
+                           (if (contains? #{"process.launch" "process.get"
+                                            "process.list-owned" "process.cancel"
+                                            "process.acknowledge"}
+                                          operation)
+                             (control operation arguments)
+                             (original-call! runtime operation arguments)))]
+             (weaver-runtime/with-runtime-binding rt #(f rt config-dir)))
            (finally
              (weaver-runtime/stop! rt))))
        (finally

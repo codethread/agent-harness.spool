@@ -8,10 +8,12 @@
   closes the strand so dependent runs unblock. Everything is asynchronous by
   default; `await` is the opt-in blocking convenience.
 
-  Runs survive weaver crashes because the strands are durable: `reconcile!`
-  respawns still-active running strands during applied module reconciliation,
-  bounded by
-  `agent-run/max-attempts`. Run memory is note strands linked by the declared
+  Runs survive the ordinary planned Weaver replacement because the strands and
+  Mill-owned process facts are durable: `reconcile!` compares active runs with
+  the owner-scoped custody listing, retains starting/running claims, and folds
+  terminal output into the run before acknowledgement. A missing or conflicting
+  fact fails only its owning run; it never relaunches an already-running child.
+  Run memory is note strands linked by the declared
   `notes` relation — the edge is the sole linkage — whose `note/text`/`note/at`
   content is storage-enforced write-once.
 
@@ -72,6 +74,7 @@
             [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
+            [ct.spools.process-custody :as custody]
             [millhouse.spools.identity :as identity]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
@@ -83,13 +86,11 @@
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.format.alpha :as fmt]
             [millstrand.api.spool.alpha :refer [fail! attr-get]])
-  (:import [java.lang ProcessBuilder$Redirect ProcessHandle]
+  (:import [java.lang ProcessBuilder]
            [java.nio.file Files]
            [java.nio.file.attribute PosixFilePermissions]
            [java.time Instant]
            [java.util.concurrent Executors ScheduledThreadPoolExecutor ThreadFactory TimeUnit]))
-
-(def ^:private default-max-attempts 3)
 
 (def ^:private default-fanout-ceiling
   "Smart default for the workspace headless fan-out ceiling the claim! window
@@ -1546,55 +1547,29 @@
                           extra)
                 {})))
 
-(def ^:private ^:dynamic *recovery-harness-deferral-ms*
-  "Milliseconds a recovered run may wait for harness aliases to register."
-  30000)
-
-(def ^:private recovery-harness-retry-ms 250)
-
-(defn- harness-not-found? [t]
-  (= "harness-not-found" (:error-class (ex-data t))))
-
-(defn- recovered-run? [run]
-  (some? (sattr run "recovered-at")))
-
-(defn- recovery-deferral-expired? [run]
-  (let [recovered-at (java.time.Instant/parse (sattr run "recovered-at"))]
-    (not (.isBefore (java.time.Instant/now)
-                    (.plusMillis recovered-at *recovery-harness-deferral-ms*)))))
-
 (defn- recovery-deferred? [run]
   (when-let [deferred-until (sattr run "recovery-deferred-until")]
     (.isAfter (Instant/parse deferred-until) (Instant/now))))
 
-(declare claim! claim-ready! launch-run! note! run-for-target scan!)
+(def ^:private custody-inspection-ms 100)
 
-(defn- schedule-deferred-recovery!
-  "Schedule a recovered run retry on the runtime-owned recovery executor."
-  [runtime id]
+(declare reconcile!)
+
+(defn- schedule-custody-inspection!
+  "Inspect Mill-retained process facts after a starting/running observation."
+  [runtime _id]
   (.schedule (recovery-scheduler)
              ^Runnable (fn []
                          (binding [*runtime* runtime]
-                           (swap! (in-flight) dissoc id)
-                           (when-let [run (first (weaver/ready runtime [:and pending-query [:= :id id]] {}))]
-                             (when (claim-ready! run)
-                               (launch-run! runtime run)))))
-             (long recovery-harness-retry-ms)
+                           (try
+                             (reconcile!)
+                             (catch Throwable t
+                               (warn! "process custody inspection failed"
+                                      {:error (ex-message t)})))))
+             (long custody-inspection-ms)
              TimeUnit/MILLISECONDS))
 
-(defn- defer-recovered-missing-harness!
-  "Return a recovered run to pending while its alias registration may still be loading."
-  [id run t]
-  (if (recovery-deferral-expired? run)
-    (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " "))))
-    (do
-      (swap! (in-flight) assoc id {:phase :deferred-recovery})
-      (update-run! id {"agent-run/phase" "pending"
-                       "agent-run/error" (str (ex-message t) (some->> (ex-data t) (str " ")))
-                       "agent-run/recovery-deferred-until" (str (.plusMillis (Instant/now)
-                                                                             recovery-harness-retry-ms))}
-                   {})
-      (schedule-deferred-recovery! (rt) id))))
+(declare claim! claim-ready! launch-run! note! run-for-target scan! reconcile!)
 
 (defn- suggested-session
   "Deterministic session name suggested to backends. Workspace-namespaced:
@@ -1723,23 +1698,6 @@
       argv
       (conj argv prompt))))
 
-(defn- start-process! [argv {:keys [cwd env out-file err-file stdin]}]
-  (let [pb (ProcessBuilder. ^java.util.List argv)]
-    (.directory pb (io/file cwd))
-    (.redirectOutput pb (ProcessBuilder$Redirect/to out-file))
-    (.redirectError pb (ProcessBuilder$Redirect/to err-file))
-    (let [environment (.environment pb)]
-      (doseq [[k v] env]
-        (.put environment (str k) (str v))))
-    (let [process (.start pb)]
-      (with-open [in (.getOutputStream process)]
-        (when stdin
-          (.write in (.getBytes ^String stdin "UTF-8"))))
-      process)))
-
-(defn- read-file-safe [file]
-  (if (.exists ^java.io.File file) (slurp file) ""))
-
 (defn- tail [s n]
   (if (> (count s) n) (subs s (- (count s) n)) s))
 
@@ -1782,13 +1740,12 @@
         (assoc usage :cost-usd (reduce + priced))
         usage))))
 
-(defn- finish-run! [id process harness out-file err-file]
-  (let [exit (.waitFor ^Process process)
-        stdout (read-file-safe out-file)
+(defn- finish-run! [id harness {:keys [exit-code stdout stderr cancellation launch-failure]}]
+  (let [exit exit-code
         current (weaver/show (rt) id)]
     (swap! (in-flight) dissoc id)
     (when-not (= "failed" (sattr current "phase"))
-      (if (zero? exit)
+      (if (and (some? exit) (zero? exit))
         (let [{:keys [result session-id parse-error error usage]}
               (try
                 (parse-output (:parse harness) stdout)
@@ -1805,7 +1762,7 @@
           ;; exiting cleanly does not make the turn a success. Fail loudly and
           ;; retryably instead of closing a done run with no real report.
             error
-            (let [stderr (str/trim (read-file-safe err-file))]
+            (let [stderr (str/trim stderr)]
               (mark-failed! id
                             (str "harness exited 0 but the final turn errored: " error
                                  (when-not (str/blank? stderr) (str "; stderr: " (tail stderr 2000))))
@@ -1823,7 +1780,7 @@
           ;; tool-only pi-json turn spent tokens even with no result text, so its
           ;; spend must not vanish; the failure is deliberately not resume-classed,
           ;; so a plain retry respawns fresh.
-            (let [stderr (str/trim (read-file-safe err-file))]
+            (let [stderr (str/trim stderr)]
               (mark-failed! id
                             (str "harness exited 0 with an empty result"
                                  (when parse-error (str " (parse error: " parse-error ")"))
@@ -1841,15 +1798,14 @@
                                      parse-error (assoc "agent-run/parse-error" parse-error))
                                    usage-attrs)
                          {:state "closed"})))
-        (let [stderr (str/trim (read-file-safe err-file))
-              detail (if (str/blank? stderr) (str/trim stdout) stderr)]
+        (let [detail (if (str/blank? stderr) (str/trim stdout) stderr)
+              detail (or detail
+                         (some-> cancellation :reason)
+                         (some-> launch-failure :message)
+                         "unknown process failure")]
           (mark-failed! id (str "harness exited " exit ": " (tail detail 2000))
-                        {"agent-run/exit-code" exit}))))))
-
-(defn- process-start-instant
-  "Return the OS start instant string for a live process, or nil when unknown."
-  [^Process process]
-  (some-> (.info process) (.startInstant) (.orElse nil) str))
+                        (cond-> {}
+                          (some? exit) (assoc "agent-run/exit-code" exit))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Interactive supervision
@@ -2132,58 +2088,51 @@
                                  (ex-message t)))))))))))
 
 (defn- launch-headless! [id run]
-  (let [process-ref (atom nil)]
-    (try
-      (validate-resume-at-launch! run)
-      (let [harness (resolve-harness (sattr run "harness"))
-            resume (resume-args harness run)
-            prompt (effective-prompt harness run)
-            argv (build-argv harness resume prompt)
-            cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))
-            dir (log-dir)
-            out-file (io/file dir (str id ".out"))
-            err-file (io/file dir (str id ".err"))
-            attempt (inc (or (sattr run "attempt") 0))]
-        (capture-launch-binding! id {:harness harness
-                                     :backend-name nil
-                                     :backend nil
-                                     :cwd cwd})
-        ;; durably mark the run running before the process exists: a crash in
-        ;; the gap respawns a strand whose process never started, instead of
-        ;; leaving a pending strand with a live orphan process.
-        (update-run! id {"agent-run/phase" "running"
-                         "agent-run/attempt" attempt
-                         "agent-run/log" (.getPath out-file)
-                         "agent-run/started-at" (now)}
+  (try
+    (validate-resume-at-launch! run)
+    (let [harness (resolve-harness (sattr run "harness"))
+          resume (resume-args harness run)
+          prompt (effective-prompt harness run)
+          argv (build-argv harness resume prompt)
+          cwd (or (sattr run "cwd") (:cwd harness) (workspace-dir))
+          attempt (inc (or (sattr run "attempt") 0))
+          launch-spec {:argv argv
+                       :cwd cwd
+                       :env (cond-> (or (:env harness) {})
+                              (attr-get (weaver/show (rt) id) :identity/id)
+                              (assoc "MILLSTRAND_AGENT_ID"
+                                     (attr-get (weaver/show (rt) id) :identity/id)))
+                       :stdin (when (= :stdin (:prompt-via harness)) prompt)}]
+      (capture-launch-binding! id {:harness harness
+                                   :backend-name nil
+                                   :backend nil
+                                   :cwd cwd})
+      ;; The durable claim is committed before Mill is asked to launch. A
+      ;; replacement therefore reports a missing fact instead of guessing that
+      ;; it is safe to start a second child.
+      (update-run! id (merge {"agent-run/phase" "running"
+                              "agent-run/attempt" attempt
+                              "agent-run/started-at" (now)}
+                             (custody/durable-attributes "agent-run" id attempt
+                                                         {:handle "pending"
+                                                          :phase :starting}))
+                   {})
+      (let [record (custody/launch! (rt) id attempt launch-spec)]
+        (update-run! id (merge (custody/durable-attributes "agent-run" id attempt record)
+                               {"agent-run/log" (get-in record [:output :stdout-ref])})
                      {})
-        (let [process (start-process! argv {:cwd cwd
-                                            :env (assoc (:env harness)
-                                                        "MILLSTRAND_AGENT_ID"
-                                                        (attr-get (weaver/show (rt) id)
-                                                                  :identity/id))
-                                            :out-file out-file
-                                            :err-file err-file
-                                            :stdin (when (= :stdin (:prompt-via harness)) prompt)})]
-          (reset! process-ref process)
-          ;; merge over the claim entry so the window's headless?/group fields
-          ;; survive the :claimed -> :running transition and keep counting.
-          (swap! (in-flight) update id merge {:phase :running :process process})
-          (update-run! id (cond-> {"agent-run/pid" (.pid ^Process process)}
-                            (process-start-instant process)
-                            (assoc "agent-run/pid-started-at" (process-start-instant process)))
-                       {})
-          (finish-run! id process harness out-file err-file)))
-      (catch Throwable t
-        (some-> ^Process @process-ref (.destroy))
-        (swap! (in-flight) dissoc id)
-        (try
-          (if (and (recovered-run? run) (harness-not-found? t))
-            (defer-recovered-missing-harness! id run t)
-            (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " ")))
-                          (when (= "resume" (:error-class (ex-data t)))
-                            {"agent-run/error-class" "resume"})))
-          (catch Throwable _
-            nil))))))
+        (swap! (in-flight) update id merge {:phase :running :headless? true})
+        (if (= :terminal (:phase record))
+          (do (finish-run! id harness (custody/terminal-observed record))
+              (custody/acknowledge! (rt) record))
+          (schedule-custody-inspection! (rt) id))))
+    (catch Throwable t
+      (swap! (in-flight) dissoc id)
+      (try
+        (mark-failed! id (str (ex-message t) (some->> (ex-data t) (str " ")))
+                      (when (= "resume" (:error-class (ex-data t)))
+                        {"agent-run/error-class" "resume"}))
+        (catch Throwable _ nil)))))
 
 (defn- launch-run! [runtime run]
   (binding [*runtime* runtime]
@@ -2305,90 +2254,80 @@
 ;; ---------------------------------------------------------------------------
 ;; Crash reconciliation
 
-(defn- run-process-handle
-  "Return a verified live ProcessHandle for run's recorded pid, or nil.
+(defn- headless-running? [run]
+  (and (= "active" (:state run))
+       (= "running" (sattr run "phase"))
+       ;; The durable starting marker is written before Mill reserves the
+       ;; process. Do not classify that short launch window as a missing-fact
+       ;; orphan; once an opaque handle exists, reconciliation owns the run.
+       (not= "pending" (sattr run "process-handle"))
+       (not (interactive? run))))
 
-  PIDs are recycled, so the handle is returned only when the OS start instant
-  matches the one recorded at launch; an unverified pid must never be
-  signalled — it could belong to an unrelated process."
-  ^ProcessHandle [run]
-  (when-let [pid (sattr run "pid")]
-    (when-let [handle ^ProcessHandle (.orElse (ProcessHandle/of (long pid)) nil)]
-      (when (.isAlive handle)
-        (let [recorded (sattr run "pid-started-at")
-              actual (some-> (.info handle) (.startInstant) (.orElse nil) str)]
-          (when (and recorded actual (= recorded actual))
-            handle))))))
+(defn- reconcile-headless-run! [run records]
+  (let [id (:id run)
+        record (custody/record-for "agent-run" run records)]
+    (if (= :terminal (:phase record))
+      (do
+        (update-run! id (custody/durable-attributes "agent-run"
+                                                    id
+                                                    (sattr run "attempt")
+                                                    record)
+                     {})
+        (finish-run! id (or (get-in @(launch-bindings) [id :harness])
+                            (:harness (launch-binding id run)))
+                     (custody/terminal-observed record))
+        (custody/acknowledge! (rt) record)
+        {:terminal id})
+      (do
+        (swap! (in-flight) update id merge {:phase :running :headless? true})
+        (schedule-custody-inspection! (rt) id)
+        {:running id}))))
 
 (defn reconcile!
-  "Recover running runs whose owning weaver died.
+  "Reconcile Mill custody facts with active headless agent runs.
 
-  Headless: any active `running` run this weaver has no in-flight handle for
-  was owned by a dead predecessor: its stale process is killed when its
-  identity can be verified (pid plus recorded start instant), then the run is
-  either reset to `pending` for respawn or marked `exhausted` (loudly, still
-  active so dependents stay blocked) when `agent-run/max-attempts` is spent.
-
-  Interactive: sessions survive the weaver by design, so orphans are adopted,
-  never respawned — a live session keeps its run `running` from durable
-  handle attributes; a dead one is reaped as done when its target already
-  closed (completion wins), otherwise failed loudly regardless of attempts
-  (auto-respawn would silently discard a human conversation).
-
-  Returns a summary of respawned/exhausted/adopted/reaped/failed run ids."
+  Starting and running facts preserve their durable claims and schedule another
+  inspection. Terminal facts update the run before acknowledgement. A missing
+  fact, mismatched handle, or attempt conflict fails only its owning run; a
+  custody-channel failure remains visible to the lifecycle coordinator."
   []
-  (let [orphans (remove #(contains? @(in-flight) (:id %))
-                        (weaver/list (rt) running-query {}))
-        {interactive-orphans true headless-orphans false}
-        (group-by (comp boolean interactive?) orphans)
+  (let [runtime (rt)
+        runs (filter headless-running? (weaver/list runtime running-query {}))
+        records (when (seq runs) (custody/list-owned runtime))
         summary (reduce
                  (fn [acc run]
-                   (let [id (:id run)
-                         attempt (or (sattr run "attempt") 0)
-                         max-attempts (or (sattr run "max-attempts") default-max-attempts)]
-                     (some-> (run-process-handle run) (.destroy))
-                     (if (>= attempt max-attempts)
-                       (do (update-run! id {"agent-run/phase" "exhausted"
-                                            "agent-run/error" (str "run exhausted " attempt " of " max-attempts
-                                                                   " attempts after weaver crash")}
-                                        {})
-                           (update acc :exhausted conj id))
-                       (do (update-run! id {"agent-run/phase" "pending"
-                                            "agent-run/recovered-at" (now)} {})
-                           (update acc :respawned conj id)))))
-                 {:respawned [] :exhausted [] :adopted [] :reaped [] :failed []}
-                 headless-orphans)
-        ;; adoption is bookkeeping only: live sessions enter in-flight so a
-        ;; second reconcile skips them. Reap/fail decisions are deliberately
-        ;; left to supervise! below so completion-first ordering (including
-        ;; closed-state manual-close leftovers running-query cannot see) lives
-        ;; in exactly one place.
-        summary (reduce
-                 (fn [acc run]
-                   (let [id (:id run)]
-                     (try
-                       (let [{:keys [backend-name backend]} (launch-binding id run)]
-                         (if (session-alive? id run backend-name backend)
-                           (do (swap! (in-flight) assoc id {:phase :running})
-                               (update acc :adopted conj id))
-                           acc))
-                       (catch Exception e
-                         (try
-                           (mark-failed! id (str "reconcile failed: " (ex-message e)
-                                                 (some->> (ex-data e) (str " "))))
-                           (catch Throwable _ nil))
-                         (update acc :failed conj id)))))
-                 summary
-                 interactive-orphans)
-        supervised (try
-                     (supervise!)
-                     (catch Exception e
-                       {:reaped [] :failed [] :supervise-error (ex-message e)}))]
+                   (try
+                     (let [result (reconcile-headless-run! run records)]
+                       (if (:terminal result)
+                         (update acc :terminal conj (:terminal result))
+                         (update acc :running conj (:running result))))
+                     (catch clojure.lang.ExceptionInfo error
+                       (try
+                         (mark-failed! (:id run)
+                                       (str "process custody reconciliation failed: "
+                                            (ex-message error) " " (pr-str (ex-data error))))
+                         (catch Throwable _ nil))
+                       (swap! (in-flight) dissoc (:id run))
+                       (update acc :failed conj (:id run)))))
+                 {:running [] :terminal [] :failed []}
+                 runs)
+        interactive-orphans (remove #(contains? @(in-flight) (:id %))
+                                    (weaver/list runtime interactive-running-query {}))
+        adopted (reduce (fn [ids run]
+                          (try
+                            (let [{:keys [backend-name backend]} (launch-binding (:id run) run)]
+                              (if (session-alive? (:id run) run backend-name backend)
+                                (do (swap! (in-flight) assoc (:id run) {:phase :running})
+                                    (conj ids (:id run)))
+                                ids))
+                            (catch Exception _ ids)))
+                        [] interactive-orphans)]
     (scan!)
-    (cond-> (-> summary
-                (update :reaped into (:reaped supervised))
-                (update :failed into (:failed supervised)))
-      (:supervise-error supervised) (assoc :supervise-error (:supervise-error supervised)))))
+    (let [interactive (try (supervise!) (catch Exception _ {:reaped [] :failed []}))]
+      (merge-with into summary
+                  {:adopted adopted
+                   :reaped (:reaped interactive)
+                   :failed (:failed interactive)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Run creation, inspection, notes
@@ -2926,19 +2865,35 @@
             (finally
               (swap! (in-flight) dissoc id))))
         {:killed id})
-      (let [process (:process (get @(in-flight) id))
-            process-handle (when-not process (run-process-handle run))]
-        (when-not (or process process-handle)
-          (fail! "Run has no live process" {:id id}))
-        ;; Mark failed before destroying: the run's waiter thread is blocked in
-        ;; waitFor until the destroy, and must see the failed phase when it wakes
-        ;; so it does not overwrite this error with its own exit stamp.
-        (mark-failed! id "killed by request")
-        (if process
-          (.destroy ^Process process)
-          (.destroy ^ProcessHandle process-handle))
-        (swap! (in-flight) dissoc id)
-        {:killed id}))))
+      (try
+        (when-not (= "running" (sattr run "phase"))
+          (fail! "Run has no live process" {:id id :phase (sattr run "phase")}))
+        (let [record (custody/record-for "agent-run" run
+                                         (custody/list-owned (rt)))]
+          ;; Commit the durable failure before acknowledging Mill's terminal
+          ;; cancellation fact. A replacement can then safely observe either the
+          ;; failed run or the retained terminal fact.
+          (mark-failed! id "killed by request")
+          (let [cancelled (custody/cancel! (rt) record)]
+            (when (= :terminal (:phase cancelled))
+              (update-run! id (custody/durable-attributes "agent-run"
+                                                          id
+                                                          (sattr run "attempt")
+                                                          cancelled)
+                           {})
+              (custody/acknowledge! (rt) cancelled)))
+          (swap! (in-flight) dissoc id)
+          {:killed id})
+        (catch clojure.lang.ExceptionInfo error
+          (when-not (= "running" (sattr run "phase"))
+            (throw error))
+          ;; The child may have reached terminal and been acknowledged between
+          ;; the user's kill request and this lookup. Preserve the visible local
+          ;; failure instead of resurrecting or guessing at a process identity.
+          (mark-failed! id (str "killed by request; process custody reconciliation failed: "
+                                (ex-message error)))
+          (swap! (in-flight) dissoc id)
+          {:killed id :custody-error (ex-message error)})))))
 
 (defn capture!
   "Capture an interactive run's transcript right now, persist it as the run's
@@ -3045,6 +3000,43 @@
   (binding [*runtime* runtime]
     (events/unregister-handler! runtime :agent-run/engine)
     {:retained-in-flight (vec (sort (in-flight-run-ids)))}))
+
+(defn process-custody-desired
+  "Read active headless runs that require Mill custody reconciliation."
+  [{:keys [runtime]}]
+  (mapv #(select-keys % [:id :state :attributes])
+        (filter headless-running? (weaver/list runtime running-query {}))))
+
+(defn process-custody-actual
+  "Read Mill-owned process facts for active headless runs."
+  [{:keys [runtime desired]}]
+  (when (seq desired)
+    (custody/list-owned runtime)))
+
+(defn apply-process-custody!
+  "Apply owner-local custody reconciliation after durable state is available."
+  [{:keys [runtime desired actual]}]
+  (binding [*runtime* runtime]
+    (when (seq desired)
+      (reconcile!))
+    {:reconciled :agent-run
+     :runs (count desired)
+     :facts (count actual)
+     :status :applied}))
+
+(defn remove-process-custody!
+  "Leave Mill-owned facts untouched when this declaration is removed."
+  [_context]
+  {:reconciled :agent-run
+   :status :removed})
+
+(lifecycle/defreconcile! agent-run-process-custody
+  "Reconcile active headless runs with Mill's owner-scoped process facts."
+  {:read-desired 'ct.spools.agent-run/process-custody-desired
+   :read-actual 'ct.spools.agent-run/process-custody-actual
+   :apply 'ct.spools.agent-run/apply-process-custody!
+   :on-removed 'ct.spools.agent-run/remove-process-custody!
+   :trigger-kinds #{}})
 
 (lifecycle/defresource! agent-run-engine
   "Own the agent-run event engine for the module lifetime."
