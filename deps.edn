@@ -1,9 +1,9 @@
 {:paths []
  :deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                  :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                  :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                   :deps/root "."}
         millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                     :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                     :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                      :deps/root "spools/batteries"}
         millhouse.spools/identity {:git/url "https://github.com/codethread/millhouse.spool.git"
                                      :git/sha "3c5116ed16439ebd2233e6bf699dc6b7080eb722"
@@ -31,10 +31,10 @@
                        "../skein-src/test/clojure"
                        "scripts"]
          :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                               :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                               :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                :deps/root "."}
                       millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                   :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                                   :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                    :deps/root "spools/batteries"}
                       millhouse.spools/workflow
                       {:git/url "https://github.com/codethread/millhouse.spool.git"
@@ -70,10 +70,10 @@
                                    "delegation/src"
                                    "bench/src"]
                      :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                                           :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                                           :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                            :deps/root "."}
                                   millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                               :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                                               :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                                :deps/root "spools/batteries"}
                                   millhouse.spools/workflow
                                   {:git/url "https://github.com/codethread/millhouse.spool.git"
@@ -96,10 +96,10 @@
                                 "delegation/src"
                                 "bench/src"]
                   :extra-deps {io.millstrand/millstrand {:git/url "https://github.com/codethread/millstrand.git"
-                                                        :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                                        :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                         :deps/root "."}
                                millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
-                                                            :git/sha "4df5f35b2ecd1833f18fe9a161f0181cac66c806"
+                                                            :git/sha "db2cb4c3e1b305dc9203cdf98044ac453556a80b"
                                                             :deps/root "spools/batteries"}
                                millhouse.spools/workflow
                                {:git/url "https://github.com/codethread/millhouse.spool.git"

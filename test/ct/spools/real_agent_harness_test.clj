@@ -8,7 +8,7 @@
 
 (def ^:private m0-sha
   "The Millstrand source revision exercised by the guarded acceptance test."
-  "4df5f35b2ecd1833f18fe9a161f0181cac66c806")
+  "db2cb4c3e1b305dc9203cdf98044ac453556a80b")
 
 (def ^:private module-roots
   "Agent Harness roots projected into the disposable M0 launch basis."
