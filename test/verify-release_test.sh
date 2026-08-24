@@ -22,25 +22,39 @@ done
 
 echo "verify-release duplicate-option probes: OK"
 
-candidate_block=$(sed -n '/^if \[\[ "$mode" == "pre-tag" \]\]; then$/,/^else$/p' "$verify_release")
+candidate_pin_block=$(sed -n '/^read_candidate_pin() {$/,/^}$/p' "$verify_release")
 for required in \
   'candidate_pin=$(clojure -Sdeps' \
-  '"$source_root/deps.edn"' \
+  '"$candidate_root/deps.edn"' \
   'core_url=$(printf' \
   'core_sha=$(printf' \
   'candidate root Millstrand pin must be an exact immutable coordinate' \
   'candidate Millstrand pin disagrees in alias'; do
-  if [[ "$candidate_block" != *"$required"* ]]; then
+  if [[ "$candidate_pin_block" != *"$required"* ]]; then
     printf 'verify-release candidate-pin selection probe failed; missing %s\n' \
       "$required" >&2
     exit 1
   fi
 done
-if [[ "$candidate_block" == *release_values* ]]; then
-  echo "verify-release candidate-pin selection probe failed; candidate mode still uses historical core coordinates" >&2
+published_block=$(sed -n '/^else$/,/^fi$/p' "$verify_release")
+if [[ "$published_block" == *historical_core* ||
+      "$published_block" == *'core_sha="$historical'* ||
+      "$published_block" == *'core_url="$historical'* ]]; then
+  echo "verify-release published candidate-pin selection probe failed; published mode still uses historical core coordinates" >&2
   exit 1
 fi
-echo "verify-release candidate-pin selection: OK"
+if ! grep -Fq 'read_candidate_pin "$candidate_root"' "$verify_release"; then
+  echo "verify-release candidate-pin selection probe failed; both modes do not derive the candidate core pin" >&2
+  exit 1
+fi
+published_clone_line=$(grep -n 'git clone --quiet --depth 1 --branch "$tag"' "$verify_release" | cut -d: -f1)
+candidate_pin_call_line=$(grep -n '^read_candidate_pin "$candidate_root"$' "$verify_release" | cut -d: -f1)
+core_clone_line=$(grep -n 'git clone --quiet "$core_url"' "$verify_release" | cut -d: -f1)
+if (( candidate_pin_call_line <= published_clone_line || candidate_pin_call_line >= core_clone_line )); then
+  echo "verify-release published candidate-pin ordering probe failed; pin is not derived from the cloned candidate before core resolution" >&2
+  exit 1
+fi
+echo "verify-release candidate-pin selection and published parity: OK"
 
 candidate_fixture=$(mktemp -d "${TMPDIR:-/tmp}/verify-release-candidate.XXXXXX")
 trap 'rm -rf "$candidate_fixture"' EXIT

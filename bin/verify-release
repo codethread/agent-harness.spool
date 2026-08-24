@@ -112,36 +112,25 @@ if kanban["peeled-sha"] != kanban["landed-main-commit"]:
 if not isinstance(kanban["verification"], list) or not kanban["verification"]:
     raise SystemExit("Kanban verification must be a non-empty array")
 
-print(core["repository"])
-print(core["coordinate"])
-print(core["sha"])
 print(kanban["repository"])
 print(kanban["coordinate"])
 print(kanban["tag"])
 print(kanban["peeled-sha"])
 PY
 )
-historical_core_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
-historical_core_coordinate=$(printf '%s\n' "$release_values" | sed -n '2p')
-historical_core_sha=$(printf '%s\n' "$release_values" | sed -n '3p')
-kanban_repository=$(printf '%s\n' "$release_values" | sed -n '4p')
-kanban_coordinate=$(printf '%s\n' "$release_values" | sed -n '5p')
-kanban_tag=$(printf '%s\n' "$release_values" | sed -n '6p')
-kanban_sha=$(printf '%s\n' "$release_values" | sed -n '7p')
-historical_core_url="https://github.com/${historical_core_repository%.git}.git"
+kanban_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
+kanban_coordinate=$(printf '%s\n' "$release_values" | sed -n '2p')
+kanban_tag=$(printf '%s\n' "$release_values" | sed -n '3p')
+kanban_sha=$(printf '%s\n' "$release_values" | sed -n '4p')
 kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
 millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
-if [[ "$mode" == "pre-tag" ]]; then
-  [[ -n "$source_root" && -d "$source_root" ]] || die "--source-root must name a directory"
-  [[ -z "$repository" && -z "$tag" && -z "$sha" ]] || \
-    die "--repository, --tag, and --sha are published-mode options"
-  source_root=$(cd "$source_root" && pwd -P)
-  [[ -d "$source_root/.git" || -f "$source_root/.git" ]] || \
-    die "source root is not a Git checkout: $source_root"
+read_candidate_pin() {
+  local candidate_root=$1
+  local candidate_pin
   candidate_pin=$(clojure -Sdeps '{:deps {}}' -M -e '
 (require (quote [clojure.edn :as edn]))
 (let [family (quote io.millstrand/millstrand)
@@ -163,13 +152,21 @@ if [[ "$mode" == "pre-tag" ]]; then
       (throw (ex-info (str "candidate Millstrand pin disagrees in alias " alias) {}))))
   (println (:git/url root))
   (println (:git/sha root)))
-' - "$source_root/deps.edn" 2>&1) || \
+' - "$candidate_root/deps.edn" 2>&1) || \
     die "candidate io.millstrand/millstrand pin is invalid: $candidate_pin"
   core_url=$(printf '%s\n' "$candidate_pin" | sed -n '1p')
   core_sha=$(printf '%s\n' "$candidate_pin" | sed -n '2p')
   core_repository="codethread/millstrand"
   core_coordinate="io.millstrand/millstrand"
-  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
+}
+
+if [[ "$mode" == "pre-tag" ]]; then
+  [[ -n "$source_root" && -d "$source_root" ]] || die "--source-root must name a directory"
+  [[ -z "$repository" && -z "$tag" && -z "$sha" ]] || \
+    die "--repository, --tag, and --sha are published-mode options"
+  source_root=$(cd "$source_root" && pwd -P)
+  [[ -d "$source_root/.git" || -f "$source_root/.git" ]] || \
+    die "source root is not a Git checkout: $source_root"
 else
   [[ -z "$source_root" ]] || die "--source-root is a pre-tag option"
   [[ -n "$repository" && -n "$tag" && -n "$sha" ]] || \
@@ -178,10 +175,6 @@ else
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "sha must be a lowercase 40-hex commit"
   [[ "$repository" != *"../"* && "$repository" != /* ]] || \
     die "published repository must not be a local path"
-  core_repository="$historical_core_repository"
-  core_coordinate="$historical_core_coordinate"
-  core_sha="$historical_core_sha"
-  core_url="$historical_core_url"
   remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
   [[ "$remote_sha" == "$sha" ]] || \
     die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
@@ -207,6 +200,10 @@ if [[ "$mode" == "pre-tag" ]]; then
         "$tmp_root/agent-harness/.millstrand/spools.local.edn"
   chmod -R u+rwX "$tmp_root/agent-harness"
   candidate_root="$tmp_root/agent-harness"
+fi
+read_candidate_pin "$candidate_root"
+if [[ "$mode" == "pre-tag" ]]; then
+  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
 fi
 consumer_root="$tmp_root/consumer"
 gitlibs_root="$tmp_root/.gitlibs"
