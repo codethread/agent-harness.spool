@@ -212,7 +212,8 @@
                                    [:= [:attr "harness/phase"] "running"]]
                                   {}))]
     (when (seq runs)
-      (let [records (custody/list-owned rt)]
+      (let [records (custody/list-owned rt)
+            transition-errors (atom [])]
         (doseq [run runs]
           (try
             (let [record (custody/record-for "harness" run records)
@@ -231,43 +232,49 @@
                  (:scheduler (state rt))
                            ^Runnable #(inspect-owned! rt)
                            100 TimeUnit/MILLISECONDS)))
-            (catch clojure.lang.ExceptionInfo error
+            (catch Throwable error
               (let [id (:id run)
                     message (str "process custody reconciliation failed: "
                                  (ex-message error) " " (pr-str (ex-data error)))
-                    failure (ex-info message
-                                     {:run-id id
-                                      :reconciliation-error (ex-data error)}
-                                     error)
                     record (some #(when (= (:key %) (attr-get run :harness/process-key)) %)
-                                 records)]
-                ;; A nonterminal custody fact remains eligible for another
-                ;; inspection. The durable run failure is still attempted so
-                ;; the reconciliation error is visible in the graph.
-                (when (and record (not= :terminal (:phase record)))
-                  (.schedule ^java.util.concurrent.ScheduledExecutorService
-                   (:scheduler (state rt))
-                             ^Runnable #(inspect-owned! rt)
-                             100 TimeUnit/MILLISECONDS))
-                (let [transition-error (try
-                                         (harness/finish! rt id
-                                                          {:status :failed
-                                                           :error message})
-                                         nil
-                                         (catch Throwable transition-error
-                                           transition-error))]
-                  (release! rt id)
-                  (if transition-error
-                    (throw (ex-info "Unable to persist harness custody failure"
-                                    {:run-id id
-                                     :reconciliation-error {:run-id id
-                                                            :message (ex-message error)
-                                                            :data (ex-data error)}
-                                     :failure-transition-error
-                                     {:message (ex-message transition-error)
-                                      :data (ex-data transition-error)}}
-                                    transition-error))
-                    (throw failure)))))))))))
+                                 records)
+                    transition-error (try
+                                       (harness/finish! rt id
+                                                        {:status :failed
+                                                         :error message})
+                                       nil
+                                       (catch Throwable transition-error
+                                         transition-error))]
+                (release! rt id)
+                (when transition-error
+                    ;; Retry only when the owner is still running and the
+                    ;; custody fact is still nonterminal. A committed failed
+                    ;; owner has no inspection work left to schedule.
+                  (when (and record
+                             (not= :terminal (:phase record))
+                             (= "running"
+                                (attr-get (full-run rt id) :harness/phase)))
+                    (.schedule ^java.util.concurrent.ScheduledExecutorService
+                     (:scheduler (state rt))
+                               ^Runnable #(inspect-owned! rt)
+                               100 TimeUnit/MILLISECONDS))
+                  (swap! transition-errors conj
+                         (ex-info "Unable to persist harness custody failure"
+                                  {:run-id id
+                                   :reconciliation-error {:run-id id
+                                                          :message (ex-message error)
+                                                          :data (ex-data error)}
+                                   :failure-transition-error
+                                   {:message (ex-message transition-error)
+                                    :data (ex-data transition-error)}}
+                                  transition-error))))))
+          (when (seq @transition-errors)
+            (if (= 1 (count @transition-errors))
+              (throw (first @transition-errors))
+              (throw (ex-info "Unable to persist harness custody failures"
+                              {:failure-transition-errors
+                               (mapv ex-data @transition-errors)}
+                              (first @transition-errors))))))))))
 
 (defn- launch-headless!
   "Launch one already-claimed pending headless run."

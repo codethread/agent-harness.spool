@@ -2284,32 +2284,37 @@
         {:running id}))))
 
 (defn- persist-reconciliation-failure!
-  "Persist one custody reconciliation failure and return its exception.
+  "Persist one custody reconciliation failure and return a write error.
 
-  The returned exception retains the run id and the original exception data so
-  a caller can surface the failure after every affected run has been visited.
-  A failure to persist the terminal transition propagates immediately with both
-  failure records in its exception data."
+  A successful terminal transition makes the custody mismatch owner-local. When
+  that transition cannot commit, return a structured error so reconciliation
+  can finish visiting every owner before surfacing it."
   [id error]
   (let [message (str "process custody reconciliation failed: "
-                     (ex-message error) " " (pr-str (ex-data error)))
-        failure (ex-info message
-                         {:run-id id
-                          :reconciliation-error (ex-data error)}
-                         error)]
+                     (ex-message error) " " (pr-str (ex-data error)))]
     (try
       (mark-failed! id message)
-      failure
+      nil
       (catch Throwable transition-error
-        (throw (ex-info "Unable to persist process custody failure"
-                        {:run-id id
-                         :reconciliation-error {:run-id id
-                                                :message (ex-message error)
-                                                :data (ex-data error)}
-                         :failure-transition-error
-                         {:message (ex-message transition-error)
-                          :data (ex-data transition-error)}}
-                        transition-error))))))
+        (ex-info "Unable to persist process custody failure"
+                 {:run-id id
+                  :reconciliation-error {:run-id id
+                                         :message (ex-message error)
+                                         :data (ex-data error)}
+                  :failure-transition-error
+                  {:message (ex-message transition-error)
+                   :data (ex-data transition-error)}}
+                 transition-error)))))
+
+(defn- throw-reconciliation-errors!
+  "Throw one or more durable custody failure-transition errors."
+  [errors]
+  (when (seq errors)
+    (if (= 1 (count errors))
+      (throw (first errors))
+      (throw (ex-info "Unable to persist process custody failures"
+                      {:failure-transition-errors (mapv ex-data errors)}
+                      (first errors))))))
 
 (defn reconcile!
   "Reconcile Mill custody facts with active headless agent runs.
@@ -2331,12 +2336,13 @@
                          (update acc :running conj (:running result))))
                      (catch Throwable error
                        (let [id (:id run)
-                             failure (persist-reconciliation-failure! id error)]
+                             transition-error (persist-reconciliation-failure! id error)]
                          (swap! (in-flight) dissoc id)
-                         (update (update acc :failed conj id) :errors conj failure)))))
+                         (cond-> (update acc :failed conj id)
+                           transition-error
+                           (update :errors conj transition-error))))))
                  {:running [] :terminal [] :failed [] :errors []}
                  runs)
-        reconciliation-error (first (:errors summary))
         interactive-orphans (remove #(contains? @(in-flight) (:id %))
                                     (weaver/list runtime interactive-running-query {}))
         adopted (reduce (fn [ids run]
@@ -2348,15 +2354,14 @@
                                 ids))
                             (catch Exception _ ids)))
                         [] interactive-orphans)]
-    (if reconciliation-error
-      (throw reconciliation-error)
-      (do
-        (scan!)
-        (let [interactive (try (supervise!) (catch Exception _ {:reaped [] :failed []}))]
-          (merge-with into (dissoc summary :errors)
-                      {:adopted adopted
-                       :reaped (:reaped interactive)
-                       :failed (:failed interactive)}))))))
+    (scan!)
+    (let [interactive (try (supervise!) (catch Exception _ {:reaped [] :failed []}))
+          result (merge-with into (dissoc summary :errors)
+                             {:adopted adopted
+                              :reaped (:reaped interactive)
+                              :failed (:failed interactive)})]
+      (throw-reconciliation-errors! (:errors summary))
+      result)))
 
 ;; ---------------------------------------------------------------------------
 ;; Run creation, inspection, notes
