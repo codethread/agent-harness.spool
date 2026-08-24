@@ -89,17 +89,23 @@ expect_candidate_failure disagreement "disagrees in alias" disagreement
 echo "verify-release candidate coordinate conflict probes: OK"
 
 consumer_block=$(sed -n '/^cat >"\$consumer_root\/deps.edn" <<EOF$/,/^EOF$/p' "$verify_release")
-if ! grep -Fq 'millhouse_identity_sha="3c5116ed16439ebd2233e6bf699dc6b7080eb722"' "$verify_release"; then
-  echo "verify-release consumer dependency probe failed; identity pin changed" >&2
+expected_millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
+if ! grep -Fq "millhouse_sha=\"$expected_millhouse_sha\"" "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; Millhouse pin changed" >&2
   exit 1
 fi
-for required in \
-  'millhouse.spools/identity {:git/url "$millhouse_url"' \
-  ':git/sha "$millhouse_identity_sha"' \
-  ':deps/root "spools/identity"'; do
-  if [[ "$consumer_block" != *"$required"* ]]; then
-    printf 'verify-release consumer dependency probe failed; missing %s\n' \
-      "$required" >&2
+if grep -Fq 'millhouse_identity_sha=' "$verify_release"; then
+  echo "verify-release consumer dependency probe failed; identity has a redundant separate pin" >&2
+  exit 1
+fi
+for root in workflow kanban identity; do
+  root_block=$(printf '%s\n' "$consumer_block" | sed -n "/millhouse.spools\\/$root /,/deps\\/root/p")
+  if [[ "$root_block" != *"millhouse.spools/$root"* ||
+        "$root_block" != *':git/url "$millhouse_url"'* ||
+        "$root_block" != *':git/sha "$millhouse_sha"'* ||
+        "$root_block" != *":deps/root \"spools/$root\""* ]]; then
+    printf 'verify-release consumer dependency probe failed; %s is not on the exact shared H1 closure\n' \
+      "$root" >&2
     exit 1
   fi
 done
@@ -113,6 +119,7 @@ echo "verify-release consumer dependency closure: OK"
 for required in \
   'candidate_coord/spools.edn' \
   'codethread/devflow-kanban-adapter' \
+  'millhouse.spools/identity "spools/identity"' \
   'local candidate root' \
   'dissoc :git/tag' \
   'init.local.clj' \
