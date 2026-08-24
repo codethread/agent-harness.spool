@@ -102,6 +102,32 @@ expect_candidate_failure sha "exact immutable coordinate" sha
 expect_candidate_failure disagreement "disagrees in alias" disagreement
 echo "verify-release candidate coordinate conflict probes: OK"
 
+candidate_pin_probe=$(mktemp)
+candidate_pin_fake_bin=$(mktemp -d "${TMPDIR:-/tmp}/verify-release-candidate-pin.XXXXXX")
+trap 'rm -rf "$candidate_fixture" "$candidate_pin_probe" "$candidate_pin_fake_bin"' EXIT
+{
+  printf '%s\n' 'set -euo pipefail' \
+    'die() { echo "verify-release: $*" >&2; exit 1; }'
+  sed -n '/^read_candidate_pin() {$/,/^}$/p' "$verify_release"
+  printf '%s\n' 'read_candidate_pin "$1"'
+} >"$candidate_pin_probe"
+chmod +x "$candidate_pin_probe"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'printf "%s\\n" "https://github.com/codethread/millstrand.git" "6f265f45f894859c74dfd7c6bf32a94c48cb32d0" "diagnostic from candidate pin command"' \
+  >"$candidate_pin_fake_bin/clojure"
+chmod +x "$candidate_pin_fake_bin/clojure"
+set +e
+output=$(PATH="$candidate_pin_fake_bin:$PATH" "$candidate_pin_probe" "$candidate_fixture" 2>&1)
+status=$?
+set -e
+if [[ "$status" -eq 0 || "$output" != *"candidate io.millstrand/millstrand pin is invalid"* ||
+      "$output" != *"diagnostic from candidate pin command"* ]]; then
+  printf 'verify-release candidate-pin diagnostic probe failed (status %s):\n%s\n' \
+    "$status" "$output" >&2
+  exit 1
+fi
+echo "verify-release candidate-pin diagnostic rejection probe: OK"
+
 consumer_block=$(sed -n '/^cat >"\$consumer_root\/deps.edn" <<EOF$/,/^EOF$/p' "$verify_release")
 expected_millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
 if ! grep -Fq "millhouse_sha=\"$expected_millhouse_sha\"" "$verify_release"; then

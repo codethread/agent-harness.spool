@@ -154,6 +154,10 @@ read_candidate_pin() {
   (println (:git/sha root)))
 ' - "$candidate_root/deps.edn" 2>&1) || \
     die "candidate io.millstrand/millstrand pin is invalid: $candidate_pin"
+  local expected_candidate_pin
+  expected_candidate_pin=$'^https://github\\.com/codethread/millstrand\\.git\n[0-9a-f]{40}$'
+  [[ "$candidate_pin" =~ $expected_candidate_pin ]] || \
+    die "candidate io.millstrand/millstrand pin is invalid: $candidate_pin"
   core_url=$(printf '%s\n' "$candidate_pin" | sed -n '1p')
   core_sha=$(printf '%s\n' "$candidate_pin" | sed -n '2p')
   core_repository="codethread/millstrand"
