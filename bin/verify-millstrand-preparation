@@ -53,7 +53,7 @@ kanban_sha=$(json_value kanban_sha)
 source_marker=$(json_value source_marker)
 source_db=$(json_value source_database)
 millhouse_repository="codethread/millhouse.spool"
-millhouse_sha="b0ac2268685e53510df01dcd0cc533b8fd40a25d"
+millhouse_sha="f1cdda3b46706b186f547251d285791be650d232"
 
 [[ -d "$source_marker" ]] || die "recorded live source marker does not exist: $source_marker"
 [[ -f "$source_db" ]] || die "recorded live source database does not exist: $source_db"
@@ -210,7 +210,7 @@ printf '%s\n' \
   "git ls-remote https://github.com/$agent_repository.git refs/tags/$agent_tag^{} -> $agent_resolved" \
   "millhouse kanban root pinned at $kanban_repository@$kanban_sha (spools/kanban)" \
   "git checkout https://github.com/$core_repository.git $core_sha" \
-  "git dependency https://github.com/$millhouse_repository.git $millhouse_sha roots spools/workflow,spools/shell-executor,spools/kanban" \
+  "git dependency https://github.com/$millhouse_repository.git $millhouse_sha roots spools/workflow,spools/kanban" \
   >"$evidence_root/release-resolution.txt"
 
 core_url="https://github.com/${core_repository%.git}.git"
@@ -309,7 +309,6 @@ cat >"$target_marker/spools.edn" <<EOF
           {:git/url "https://github.com/codethread/millhouse.spool.git"
            :git/sha "$millhouse_sha"
            :roots {millhouse.spools/workflow "spools/workflow"
-                   millhouse.spools.executors/shell "spools/shell-executor"
                    millhouse.spools/kanban "spools/kanban"}}
           ct.spools/agent-run
           {:git/url "https://github.com/codethread/agent-harness.spool.git"
@@ -353,7 +352,6 @@ for value in (
     f':git/url "https://github.com/{millhouse_repository}.git"',
     f':git/sha "{millhouse_sha}"',
     'millhouse.spools/workflow "spools/workflow"',
-    'millhouse.spools.executors/shell "spools/shell-executor"',
     'millhouse.spools/kanban "spools/kanban"',
 ):
     if value not in millhouse:
