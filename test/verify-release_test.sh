@@ -129,7 +129,7 @@ fi
 echo "verify-release candidate-pin diagnostic rejection probe: OK"
 
 consumer_block=$(sed -n '/^cat >"\$consumer_root\/deps.edn" <<EOF$/,/^EOF$/p' "$verify_release")
-expected_millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
+expected_millhouse_sha="f1cdda3b46706b186f547251d285791be650d232"
 if ! grep -Fq "millhouse_sha=\"$expected_millhouse_sha\"" "$verify_release"; then
   echo "verify-release consumer dependency probe failed; Millhouse pin changed" >&2
   exit 1

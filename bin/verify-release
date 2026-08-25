@@ -125,7 +125,7 @@ kanban_sha=$(printf '%s\n' "$release_values" | sed -n '4p')
 kanban_url="https://github.com/${kanban_repository%.git}.git"
 millhouse_repository="codethread/millhouse.spool"
 millhouse_coordinate="millhouse.spools/workflow"
-millhouse_sha="3af5786f06121ee6055f34b4eefddc7000a84b5a"
+millhouse_sha="f1cdda3b46706b186f547251d285791be650d232"
 millhouse_url="https://github.com/${millhouse_repository}.git"
 
 read_candidate_pin() {
@@ -442,7 +442,6 @@ text = pathlib.Path(path).read_text(encoding="utf-8")
 for value in (
     'codethread/spools',
     'millhouse.spools/workflow "spools/workflow"',
-    'millhouse.spools.executors/shell "spools/shell-executor"',
     'millhouse.spools/kanban "spools/kanban"',
     'millhouse.spools/identity "spools/identity"',
     f':git/url "{millhouse_url}"',

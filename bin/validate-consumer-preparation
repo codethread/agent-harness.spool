@@ -86,7 +86,7 @@ def validate(path):
     kanban_pin = mapping(pins.get("kanban"), "manifest source.active-pins.kanban")
     exact(kanban_pin.get("repository"), "codethread/millhouse.spool", "source kanban repository")
     exact(kanban_pin.get("coordinate"), "millhouse.spools/kanban", "source kanban coordinate")
-    exact(kanban_pin.get("sha"), "b0ac2268685e53510df01dcd0cc533b8fd40a25d", "source kanban sha")
+    exact(kanban_pin.get("sha"), "f1cdda3b46706b186f547251d285791be650d232", "source kanban sha")
 
     target = mapping(doc["target"], "manifest target")
     for key in ("marker", "database", "world-hash", "world-hash-algorithm", "activation", "database-policy"):
@@ -160,8 +160,8 @@ def validate(path):
         "repository": "codethread/millhouse.spool",
         "coordinate": "millhouse.spools/kanban",
         "ref-kind": "sha",
-        "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
-        "landed-main-commit": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+        "sha": "f1cdda3b46706b186f547251d285791be650d232",
+        "landed-main-commit": "f1cdda3b46706b186f547251d285791be650d232",
     }
     for key, value in expected05.items():
         exact(msr05.get(key), value, f"MSR-05 {key}")

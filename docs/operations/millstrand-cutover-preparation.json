@@ -19,7 +19,7 @@
       },
       "kanban": {
         "repository": "codethread/millhouse.spool",
-        "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+        "sha": "f1cdda3b46706b186f547251d285791be650d232",
         "coordinate": "millhouse.spools/kanban"
       }
     }
@@ -65,8 +65,8 @@
       "repository": "codethread/millhouse.spool",
       "coordinate": "millhouse.spools/kanban",
       "ref-kind": "sha",
-      "sha": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
-      "landed-main-commit": "b0ac2268685e53510df01dcd0cc533b8fd40a25d",
+      "sha": "f1cdda3b46706b186f547251d285791be650d232",
+      "landed-main-commit": "f1cdda3b46706b186f547251d285791be650d232",
       "land-run": "land-hqtjg-20260806-1709",
       "verification": ["millhouse kanban root at spools/kanban on pinned millhouse SHA"]
     }
