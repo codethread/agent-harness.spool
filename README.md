@@ -7,13 +7,11 @@ This monorepo contains four related Millstrand surfaces:
 - `delegation`: the cross-harness `strand agent` delegation surface.
 - `bench`: deterministic harness benchmarking and metrics extraction.
 
-Each top-level spool root has its own `deps.edn`. Source roots are approved and
-activated explicitly; this repository does not ship composition metadata.
+Each published spool root has its own `deps.edn`. The checked-in `.millstrand/deps.edn` composes the repository's harness source paths and external pins; source roots are activated explicitly.
 
 ## Dependency information
 
-Use a real 40-character commit SHA in the workspace's `deps.edn`. Git
-coordinates for all three roots:
+Use a real 40-character commit SHA in the workspace's `deps.edn`. Git coordinates for all three roots:
 
 ```clojure
 {:deps
@@ -40,8 +38,7 @@ Equivalent local coordinates:
   ct.spools/bench {:local/root "/path/to/agent-harness.spool/bench"}}}
 ```
 
-The subagent executor also requires Millhouse's Workflow spool. Add either its
-root in a local Millhouse checkout:
+The subagent executor also requires Millhouse's Workflow spool. Add either its root in a local Millhouse checkout:
 
 ```clojure
 {:deps
@@ -58,10 +55,7 @@ or a pinned nested root:
    :deps/root "spools/workflow"}}}
 ```
 
-Dependencies make source available; each workspace still activates only the
-modules it needs from trusted `init.clj`. A runtime loads one version of each
-namespace, so a pinned agent-harness commit runs against the consumer's chosen
-Workflow version.
+Dependencies make source available; each workspace still activates only the modules it needs from trusted `init.clj`. A runtime loads one version of each namespace, so a pinned agent-harness commit runs against the consumer's chosen Workflow version.
 
 ## Compatibility: v7 → v8 (discovery-tier factoring)
 
@@ -137,8 +131,7 @@ Remove activation blocks and approvals for surfaces the workspace does not use.
 
 ## Local development overrides
 
-Keep shared `deps.edn` SHA-pinned. In gitignored `deps.local.edn`, override
-the same coordinate symbols with direct roots:
+Keep shared `deps.edn` SHA-pinned. In gitignored `.millstrand/deps.local.edn`, override the same coordinate symbols with direct roots:
 
 ```clojure
 {:deps
@@ -148,9 +141,7 @@ the same coordinate symbols with direct roots:
   millhouse.spools/workflow {:local/root "/Users/you/dev/millhouse.spool/spools/workflow"}}}
 ```
 
-Local entries replace shared entries by coordinate. `:deps/root` is git-only;
-a local root points directly at the selected spool directory. A changed
-dependency basis requires a replacement Weaver generation.
+Local entries replace shared entries by coordinate. `:deps/root` is git-only; a local root points directly at the selected spool directory. A changed dependency basis requires a replacement Weaver generation.
 
 ## Development
 
