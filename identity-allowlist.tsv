@@ -6,5 +6,3 @@ README.md	.*skein-src.*	The local test-suite instructions name the canonical sib
 bin/compat-alarm	.*skein-src.*	The local compatibility alarm tests against the canonical sibling checkout.
 test/ct/spools/kondo_export_test.clj	.*skein-src.*	The local consumer Kondo export proof resolves Millstrand from the canonical sibling checkout.
 test/ct/spools/real_agent_harness_test.clj	.*skein-src.*	The disposable replacement acceptance resolves Millstrand from the canonical sibling checkout when no explicit M0 source is provided.
-bin/verify-millstrand-preparation	.*	Disposable cutover verification names the live source marker and isolated Skein-compatible fixture paths without activating them.
-bin/validate-consumer-preparation	.*	The reusable MSR-14C manifest validator enforces the recorded live source marker and rollback boundary.
