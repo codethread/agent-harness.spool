@@ -3,12 +3,12 @@
   "repository": "codethread/millstrand",
   "coordinate": "io.millstrand/millstrand",
   "ref-kind": "sha",
-  "sha": "3bbe5dc15359975a8e8203ef47b3a7514177e75b",
-  "landed-main-commit": "3bbe5dc15359975a8e8203ef47b3a7514177e75b",
-  "land-run": "land-bxwq0-sha-20260806",
+  "sha": "71c0ed3d80fcad090b74a704a8eb165a3fad996e",
+  "landed-main-commit": "71c0ed3d80fcad090b74a704a8eb165a3fad996e",
+  "land-run": "deps-native-millstrand-20260830",
   "verification": [
-    "make build",
-    "scripts/verify-published-core.sh --mode candidate --source-root \"$PWD\" --coordinate io.millstrand/millstrand --repository https://github.com/codethread/millstrand.git",
-    "PATH=\"$PWD/bin:$PATH\" scripts/verify-published-core.sh --mode published --coordinate io.millstrand/millstrand --repository https://github.com/codethread/millstrand.git --sha 3bbe5dc15359975a8e8203ef47b3a7514177e75b"
+    "make quality",
+    "git rev-parse 71c0ed3d80fcad090b74a704a8eb165a3fad996e^{commit}",
+    "deps-native disposable-world refresh regression"
   ]
 }
