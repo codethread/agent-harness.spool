@@ -8,5 +8,4 @@ echo "== Agent Harness local landing quality =="
 git diff --check
 make quality
 make identity-check
-echo "release-check is owned by the coordinated cutover gate"
 echo "local landing quality: clean"

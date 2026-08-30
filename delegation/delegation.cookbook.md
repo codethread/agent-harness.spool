@@ -211,9 +211,9 @@ Honest source: `review!` and `defroster!` in [`delegation.api.md`](./delegation.
   vector inside it is validated (the panel spec checks seat shape and name
   uniqueness), but `council!`'s outer option keys are checked ad hoc inside the
   function — a typoed key fails at runtime, not against a named spec. Copy the
-  shape from the API doc rather than from memory. This MSR-06 cutover did not
-  introduce or reshape that public outer-options map, so adding its spec is
-  explicitly out of scope here.
+  shape from the API doc rather than from memory. The current implementation
+  does not introduce or reshape that public outer-options map, so adding its
+  spec is explicitly out of scope here.
 
 Honest source: the panel composition layer in [`delegation/README.md` §6](./delegation/README.md#6-panels-presets-and-the-composition-layer), `council!` in [`delegation.api.md`](./delegation.api.md), and the independent-synthesis review concept in the roster semantics described here and covered by ``test/ct/spools/delegation_test.clj``. Harnesses and seats are consumer-owned trusted configuration.
 
