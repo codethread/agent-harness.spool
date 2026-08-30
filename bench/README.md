@@ -15,18 +15,17 @@ Division of labor with the [agent-run engine](../agent-run/README.md):
 
 ## 2. Loading
 
-Approved local-root spool. Agent-run must be installed first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
+Deps-native spool. Agent-run must be available first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
 
 ```clojure
-;; .millstrand/spools.edn
-{:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}
-          ct.spools/bench   {:local/root "../spools/bench"}}}
+;; .millstrand/deps.edn
+{:deps {ct.spools/agent-run {:local/root "../spools/agent-run"}
+        ct.spools/bench {:local/root "../spools/bench"}}}
 ```
 
 ```clojure
 (runtime/module! runtime :bench
   {:ns 'ct.spools.bench
-   :spools ['ct.spools/bench]
    :required? true
    :after [:agent-run]})
 ```

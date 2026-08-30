@@ -9,7 +9,7 @@
 
 (def ^:private m0-sha
   "The Millstrand source revision exercised by the guarded acceptance test."
-  "6f265f45f894859c74dfd7c6bf32a94c48cb32d0")
+  "71c0ed3d80fcad090b74a704a8eb165a3fad996e")
 
 (def ^:private module-roots
   "Agent Harness roots projected into the disposable M0 launch basis."
@@ -229,17 +229,10 @@
   [workspace project-root]
   (copy-tree! (io/file project-root ".millstrand") workspace)
   (java.nio.file.Files/deleteIfExists
-   (.toPath (io/file workspace "spools.local.edn")))
+   (.toPath (io/file workspace "deps.local.edn")))
   (doseq [[_ root] module-roots]
     (symlink! (io/file project-root root)
               (io/file (.getParentFile (io/file workspace)) root)))
-  (let [spools-file (io/file workspace "spools.edn")
-        spools (edn/read-string (slurp spools-file))
-        spools (reduce-kv (fn [config lib root]
-                            (assoc-in config [:spools lib] {:local/root
-                                                            (str (io/file project-root root))}))
-                          spools module-roots)]
-    (spit spools-file (pr-str spools)))
   (spit (io/file workspace "init.clj")
         (str "(when-not (find-ns 'millstrand.api.current.alpha)\n"
              "  (require '[millstrand.api.current.alpha])\n"
@@ -248,20 +241,16 @@
              "(def module! (var-get (ns-resolve 'millstrand.api.runtime.alpha 'module!)))\n"
              "(module! runtime :millstrand/spools-batteries\n"
              "                 {:ns 'millstrand.spools.batteries\n"
-             "                  :spools ['millstrand.spools/batteries]\n"
              "                  :required? true})\n"
              "(module! runtime :millhouse/spools-identity\n"
              "                 {:ns 'millhouse.spools.identity\n"
-             "                  :spools ['millhouse.spools/identity]\n"
              "                  :required? true})\n"
              "(module! runtime :millstrand/spools-agent-run\n"
              "                 {:ns 'ct.spools.agent-run\n"
-             "                  :spools ['ct.spools/agent-run 'millhouse.spools/identity]\n"
              "                  :after [:millstrand/spools-batteries :millhouse/spools-identity]\n"
              "                  :required? true})\n"
              "(module! runtime :millstrand/spools-delegation\n"
              "                 {:ns 'ct.spools.delegation\n"
-             "                  :spools ['ct.spools/delegation 'ct.spools/agent-run]\n"
              "                  :after [:millstrand/spools-agent-run]\n"
              "                  :required? true})\n"))
   (spit (io/file workspace "init.local.clj")
@@ -272,7 +261,6 @@
              "(def module! (var-get (ns-resolve 'millstrand.api.runtime.alpha 'module!)))\n"
              "(module! runtime :integration-harnesses\n"
              "                 {:file \"config/integration_harnesses.clj\"\n"
-             "                  :spools ['ct.spools/agent-run]\n"
              "                  :after [:millstrand/spools-agent-run]\n"
              "                  :required? true})\n"))
   (spit (io/file workspace "config/integration_harnesses.clj")

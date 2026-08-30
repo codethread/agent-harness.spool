@@ -67,12 +67,12 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 
 ## 2. Overview and loading
 
-`delegation` layers over agent-run, so agent-run must be installed first. A workspace opts in with `spools.edn` and trusted startup or REPL code:
+`delegation` layers over agent-run, so agent-run must be available first. A workspace opts in with `deps.edn` and trusted startup or REPL code:
 
 ```clojure
-;; .millstrand/spools.edn
-{:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}
-          ct.spools/delegation  {:local/root "../spools/delegation"}}}
+;; .millstrand/deps.edn
+{:deps {ct.spools/agent-run {:local/root "../spools/agent-run"}
+        ct.spools/delegation {:local/root "../spools/delegation"}}}
 ```
 
 ```clojure
@@ -82,11 +82,9 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 (def runtime (current/runtime))
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
-   :spools ['ct.spools/agent-run]
    :required? true})
 (runtime/module! runtime :delegation
   {:ns 'ct.spools.delegation
-   :spools ['ct.spools/delegation]
    :required? true
    :after [:agent-run]})
 ```
