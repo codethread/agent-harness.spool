@@ -7,12 +7,12 @@
             [clojure.test :refer [deftest is testing]]
             [ct.spools.test-support :as test-support]))
 
-(def ^:private m0-sha
+(def ^:private millstrand-sha
   "The Millstrand source revision exercised by the guarded acceptance test."
-  "71c0ed3d80fcad090b74a704a8eb165a3fad996e")
+  "8312ad49d02f0f9f20fa167a8305e86a36f3fcae")
 
 (def ^:private module-roots
-  "Agent Harness roots projected into the disposable M0 launch basis."
+  "Agent Harness roots projected into the disposable Millstrand launch basis."
   {'ct.spools/agent-run "agent-run"
    'ct.spools/delegation "delegation"
    'ct.spools/harness-core "harness-core"
@@ -130,16 +130,16 @@
     (when-not (zero? (:exit result))
       (throw (ex-info "Unable to inspect the pinned Millstrand source revision" result)))
     (let [revision (str/trim (:output result))]
-      (when-not (= m0-sha revision)
-        (throw (ex-info "External acceptance requires exact Millstrand M0"
-                        {:expected m0-sha :actual revision :source source})))
+      (when-not (= millstrand-sha revision)
+        (throw (ex-info "External acceptance requires the current pinned Millstrand"
+                        {:expected millstrand-sha :actual revision :source source})))
       revision)))
 
-(defn- materialize-m0-source!
+(defn- materialize-millstrand-source!
   [origin target]
   (run-command! ["git" "clone" "--shared" "--no-checkout" origin target]
                 {:cwd origin :env {}})
-  (run-command! ["git" "-C" target "checkout" "--detach" m0-sha]
+  (run-command! ["git" "-C" target "checkout" "--detach" millstrand-sha]
                 {:cwd origin :env {}})
   (run-command! ["make" "build"] {:cwd target :env {}})
   target)
@@ -172,17 +172,17 @@
                       {:failures failures}))))
   nil)
 
-(defn- resolve-m0-tools!
+(defn- resolve-millstrand-tools!
   [project-root root env]
-  (let [source-override (when (contains? env "MILLSTRAND_M0_SOURCE")
-                          (explicit-path! "MILLSTRAND_M0_SOURCE"
-                                          (get env "MILLSTRAND_M0_SOURCE")
+  (let [source-override (when (contains? env "AGENT_HARNESS_MILLSTRAND_SOURCE")
+                          (explicit-path! "AGENT_HARNESS_MILLSTRAND_SOURCE"
+                                          (get env "AGENT_HARNESS_MILLSTRAND_SOURCE")
                                           #(.isDirectory (io/file %))
                                           "an existing directory"))
         source (or source-override
-                   (materialize-m0-source!
+                   (materialize-millstrand-source!
                     (.getCanonicalPath (io/file project-root "../skein-src"))
-                    (.getCanonicalPath (io/file root "m0"))))
+                    (.getCanonicalPath (io/file root "millstrand"))))
         source (.getCanonicalPath (io/file source))
         mill-bin (if (contains? env "MILLSTRAND_MILL_BIN")
                    (explicit-path! "MILLSTRAND_MILL_BIN" (get env "MILLSTRAND_MILL_BIN")
@@ -268,7 +268,7 @@
         (str "(ns integration-harnesses\n"
              "  (:require [ct.spools.agent-run :as shuttle]))\n"
              "(shuttle/defharnesses! integration-harnesses\n"
-             "  \"Disposable harnesses for custody replacement acceptance.\"\n"
+             "  \"Disposable harnesses for custody acceptance.\"\n"
              "  {:a {:argv [\"sh\" \"-c\" \"sleep 30; printf A\"]\n"
              "       :parse :raw :preamble? false}\n"
              "   :b {:argv [\"sh\" \"-c\" \"sleep 30; printf B\"]\n"
@@ -318,7 +318,7 @@
 (defn run-acceptance!
   "Run the external Mill + Weaver Agent Harness acceptance world.
 
-  The world uses a short-lived M0 source overlay, exact process handles, and no
+  The world uses a short-lived Millstrand source overlay, exact process handles, and no
   shared or canonical Weaver state."
   []
   (let [project-root (.getCanonicalPath (io/file (System/getProperty "user.dir")))
@@ -327,11 +327,11 @@
                        "ah-"
                        (make-array java.nio.file.attribute.FileAttribute 0)))]
     (try
-      (let [source-tools (resolve-m0-tools! project-root root (into {} (System/getenv)))
-            m0-source (:source source-tools)
+      (let [source-tools (resolve-millstrand-tools! project-root root (into {} (System/getenv)))
+            millstrand-source (:source source-tools)
             mill-bin (:mill-bin source-tools)
             strand-bin (:strand-bin source-tools)
-            _ (source-revision! m0-source project-root)
+            _ (source-revision! millstrand-source project-root)
             state-root (io/file root "s")
             workspace-root (io/file root "w")
             workspace (io/file workspace-root ".millstrand")
@@ -339,7 +339,7 @@
             _ (.mkdirs state-root)
             _ (.mkdirs workspace-root)
             _ (.mkdirs overlay)
-            _ (write-source-overlay! overlay m0-source project-root workspace)
+            _ (write-source-overlay! overlay millstrand-source project-root workspace)
             env {"XDG_STATE_HOME" (.getCanonicalPath state-root)
                  "MILLSTRAND_SOURCE" (.getCanonicalPath overlay)}
             mill-env {:cwd project-root :env env :mill-bin mill-bin :strand-bin strand-bin}
@@ -349,7 +349,7 @@
           (test-support/poll-until #(zero? (:exit (command-result [mill-bin "status"] mill-env)))
                                    {:timeout-ms 30000
                                     :interval-ms 100
-                                    :on-timeout #(throw (ex-info "M0 Mill did not become ready" {:pid (:pid mill)}))})
+                                    :on-timeout #(throw (ex-info "Mill did not become ready" {:pid (:pid mill)}))})
           (command! [mill-bin "init" "--workspace" (.getCanonicalPath workspace)] mill-env)
           (write-workspace! workspace project-root)
           (command! [mill-bin "weaver" "start" "--workspace" (.getCanonicalPath workspace)] mill-env)
@@ -407,7 +407,7 @@
                   (throw (ex-info "B-to-C delegation did not have exactly one run" {:task c-task})))
                 (poll-show! strand-env workspace c-run
                             #(= "done" (get-in % [:attributes :agent-run/phase]))))))
-          {:m0-sha m0-sha :replacement false :custody-reconciled true :delegated-once true}
+          {:millstrand-sha millstrand-sha :custody-reconciled true :delegated-once true}
           (finally
             (cleanup! #(command-result [mill-bin "weaver" "stop" "--workspace"
                                         (.getCanonicalPath workspace)] mill-env)
@@ -415,36 +415,36 @@
       (finally
         (delete-tree! root)))))
 
-(deftest default-m0-tools-materialize-from-the-sibling-repository
-  (testing "the default uses a disposable exact-M0 source and builds its tools there"
+(deftest default-millstrand-tools-materialize-from-the-sibling-repository
+  (testing "the default uses a disposable source at the pinned Millstrand revision"
     (let [root (.toFile (java.nio.file.Files/createTempDirectory
                          (.toPath (io/file "/tmp"))
                          "ah-tools-test-"
                          (make-array java.nio.file.attribute.FileAttribute 0)))
           project-root (.getCanonicalPath (io/file "/tmp/agent-harness"))
-          expected-source (.getCanonicalPath (io/file root "m0"))
+          expected-source (.getCanonicalPath (io/file root "millstrand"))
           calls (atom [])]
       (try
-        (with-redefs [materialize-m0-source!
+        (with-redefs [materialize-millstrand-source!
                       (fn [origin target]
                         (swap! calls conj [origin target])
                         target)]
           (is (= {:source expected-source
                   :mill-bin (str (io/file expected-source "bin/mill"))
                   :strand-bin (str (io/file expected-source "bin/strand"))}
-                 (resolve-m0-tools! project-root root {})))
+                 (resolve-millstrand-tools! project-root root {})))
           (is (= [[(.getCanonicalPath (io/file project-root "../skein-src")) expected-source]]
                  @calls)))
         (finally
           (delete-tree! root))))))
 
-(deftest explicit-m0-source-and-tool-overrides-remain-authoritative
+(deftest explicit-millstrand-source-and-tool-overrides-remain-authoritative
   (testing "explicit source and binaries bypass default materialization"
     (let [root (.toFile (java.nio.file.Files/createTempDirectory
                          (.toPath (io/file "/tmp"))
                          "ah-tools-override-test-"
                          (make-array java.nio.file.attribute.FileAttribute 0)))
-          source (io/file root "explicit-m0")
+          source (io/file root "explicit-millstrand")
           mill-bin (io/file root "bin/mill")
           strand-bin (io/file root "bin/strand")]
       (try
@@ -454,32 +454,32 @@
         (spit strand-bin "#!/bin/sh\n")
         (.setExecutable mill-bin true)
         (.setExecutable strand-bin true)
-        (with-redefs [materialize-m0-source!
+        (with-redefs [materialize-millstrand-source!
                       (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
           (is (= {:source (.getCanonicalPath source)
                   :mill-bin (.getPath mill-bin)
                   :strand-bin (.getPath strand-bin)}
-                 (resolve-m0-tools! "/project" root
-                                    {"MILLSTRAND_M0_SOURCE" (.getPath source)
-                                     "MILLSTRAND_MILL_BIN" (.getPath mill-bin)
-                                     "MILLSTRAND_STRAND_BIN" (.getPath strand-bin)}))))
+                 (resolve-millstrand-tools! "/project" root
+                                            {"AGENT_HARNESS_MILLSTRAND_SOURCE" (.getPath source)
+                                             "MILLSTRAND_MILL_BIN" (.getPath mill-bin)
+                                             "MILLSTRAND_STRAND_BIN" (.getPath strand-bin)}))))
         (finally
           (delete-tree! root))))))
 
-(deftest explicit-m0-source-validates-derived-tool-paths
+(deftest explicit-millstrand-source-validates-derived-tool-paths
   (let [root (.toFile (java.nio.file.Files/createTempDirectory
                        (.toPath (io/file "/tmp"))
                        "ah-source-derived-tools-test-"
                        (make-array java.nio.file.attribute.FileAttribute 0)))
-        source (io/file root "explicit-m0")
+        source (io/file root "explicit-millstrand")
         expected (.getCanonicalPath (io/file source "bin/mill"))]
     (try
       (.mkdirs source)
-      (with-redefs [materialize-m0-source!
+      (with-redefs [materialize-millstrand-source!
                     (fn [_ _] (throw (ex-info "default materialization should not run" {})))]
         (let [error (try
-                      (resolve-m0-tools! "/project" root
-                                         {"MILLSTRAND_M0_SOURCE" (.getPath source)})
+                      (resolve-millstrand-tools! "/project" root
+                                                 {"AGENT_HARNESS_MILLSTRAND_SOURCE" (.getPath source)})
                       nil
                       (catch clojure.lang.ExceptionInfo error error))]
           (is error "a missing derived executable must fail at the boundary")
@@ -489,12 +489,12 @@
       (finally
         (delete-tree! root)))))
 
-(deftest explicit-m0-tool-overrides-fail-at-the-boundary
+(deftest explicit-millstrand-tool-overrides-fail-at-the-boundary
   (let [root (.toFile (java.nio.file.Files/createTempDirectory
                        (.toPath (io/file "/tmp"))
                        "ah-tools-boundary-test-"
                        (make-array java.nio.file.attribute.FileAttribute 0)))
-        source (io/file root "explicit-m0")
+        source (io/file root "explicit-millstrand")
         valid-mill (io/file root "bin/valid-mill")
         valid-strand (io/file root "bin/valid-strand")]
     (try
@@ -505,18 +505,18 @@
       (.setExecutable valid-mill true)
       (.setExecutable valid-strand true)
       (doseq [[setting value expected]
-              [["MILLSTRAND_M0_SOURCE" (str (io/file root "missing"))
+              [["AGENT_HARNESS_MILLSTRAND_SOURCE" (str (io/file root "missing"))
                 "an existing directory"]
                ["MILLSTRAND_MILL_BIN" (str (io/file root "missing-mill"))
                 "an existing executable file"]
                ["MILLSTRAND_STRAND_BIN" (str (io/file root "missing-strand"))
                 "an existing executable file"]]]
-        (let [env {"MILLSTRAND_M0_SOURCE" (.getPath source)
+        (let [env {"AGENT_HARNESS_MILLSTRAND_SOURCE" (.getPath source)
                    "MILLSTRAND_MILL_BIN" (.getPath valid-mill)
                    "MILLSTRAND_STRAND_BIN" (.getPath valid-strand)}
               env (assoc env setting value)
               error (try
-                      (resolve-m0-tools! "/project" root env)
+                      (resolve-millstrand-tools! "/project" root env)
                       nil
                       (catch clojure.lang.ExceptionInfo error error))]
           (is error (str setting " must fail at the boundary"))

@@ -15,7 +15,7 @@ Division of labor with the [agent-run engine](../agent-run/README.md):
 
 ## 2. Loading
 
-Deps-native spool. Agent-run must be available first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
+Agent-run must be available first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
 
 ```clojure
 ;; .millstrand/deps.edn

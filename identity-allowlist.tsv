@@ -5,4 +5,4 @@ AGENTS.md	.*skein-src.*	Contributor instructions name the canonical sibling chec
 README.md	.*skein-src.*	The local test-suite instructions name the canonical sibling checkout.
 bin/compat-alarm	.*skein-src.*	The local compatibility alarm tests against the canonical sibling checkout.
 test/ct/spools/kondo_export_test.clj	.*skein-src.*	The local consumer Kondo export proof resolves Millstrand from the canonical sibling checkout.
-test/ct/spools/real_agent_harness_test.clj	.*skein-src.*	The disposable replacement acceptance resolves Millstrand from the canonical sibling checkout when no explicit M0 source is provided.
+test/ct/spools/real_agent_harness_test.clj	.*skein-src.*	The disposable replacement acceptance resolves Millstrand from the canonical sibling checkout unless an explicit source is provided.

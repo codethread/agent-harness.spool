@@ -34,10 +34,9 @@
                                     :after [:agent-run])
       (f rt))))
 
-(deftest guarded-real-mill-agent-harness-cutover-acceptance
+(deftest guarded-real-mill-agent-harness-acceptance
   (testing "the external acceptance keeps one disposable Weaver lifetime"
-    (is (= {:m0-sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
-            :replacement false
+    (is (= {:millstrand-sha "8312ad49d02f0f9f20fa167a8305e86a36f3fcae"
             :custody-reconciled true
             :delegated-once true}
            (real-agent-harness/run-acceptance!)))))
