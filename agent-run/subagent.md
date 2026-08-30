@@ -12,14 +12,12 @@
 `subagent`. It watches ready workflow gates, spawns agent-run runs, and completes the gate with the
 run result when the run succeeds.
 
-The workflow engine remains forge/tool agnostic: workflow authors declare an ordinary
-`(workflow/gate ... :subagent ...)` with attributes. Agent-run remains a run engine with no workflow
-concepts. The subagent executor is the small bridge that knows both contracts.
+The workflow engine remains forge/tool agnostic: workflow authors declare an ordinary `(workflow/gate ... :subagent ...)` with attributes. Agent-run remains a run engine with no workflow concepts. The subagent executor is the small bridge that knows both contracts.
 
 ## Loading
 
-Load workflow and agent-run before the subagent executor, approving workflow's
-source coordinate as well as the agent-run root:
+Make Workflow and agent-run available to the workspace before activating the
+subagent executor:
 
 ```clojure
 (require '[millstrand.api.current.alpha :as current]
@@ -28,15 +26,12 @@ source coordinate as well as the agent-run root:
 (def runtime (current/runtime))
 (runtime/module! runtime :workflow
   {:ns 'millhouse.spools.workflow
-   :spools ['millhouse.spools/workflow]
    :required? true})
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
-   :spools ['ct.spools/agent-run]
    :required? true})
 (runtime/module! runtime :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools ['ct.spools/agent-run millhouse.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 ```
@@ -162,6 +157,6 @@ runs parked on `gate/delivery-blocked`.
 
 ## See also
 
-- [`millhouse.spools.workflow`](https://github.com/codethread/millhouse.spool/blob/f1cdda3b46706b186f547251d285791be650d232/spools/workflow/README.md) — workflow gates and runtime API.
+- [`millhouse.spools.workflow`](https://github.com/codethread/millhouse.spool/blob/f487eb42ea9523e8bd405e64a7c319013217d988/spools/workflow/README.md) — workflow gates and runtime API.
 - [`ct.spools.agent-run`](../agent-run/README.md) — agent-run run lifecycle and harness registry.
 - ``test/ct/spools/subagent_test.clj`` — executable contract tests.

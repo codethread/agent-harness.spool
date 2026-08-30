@@ -10,7 +10,7 @@
   and registered by `.millstrand/config/workflows.clj`.
 - Root `deps.edn` pins Millstrand and Millhouse dependencies to immutable Git
   coordinates; keep those coordinates aligned across every alias and the
-  checked-in `.millstrand/spools.edn` workspace config.
+  checked-in `.millstrand/deps.edn` workspace config.
 - Never run `make install` while developing or testing this repository.
 - Kill spawned processes by exact PID only; never use pattern kills.
 - Shared-spool publishing, activation, override, and test conventions live in

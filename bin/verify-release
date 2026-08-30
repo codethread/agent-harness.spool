@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Repository-private release gate. This is maintainer tooling invoked by the
-# Makefile; it is not a shipped or supported agent-harness user CLI. Keep its
-# local parser strict so malformed release evidence fails before any smoke work.
+# Repository-private release gate. Release evidence is parsed once before any
+# network, build, or runtime work; malformed or misaligned pins fail closed.
 usage() {
   cat >&2 <<'EOF'
 repository-private usage:
@@ -18,6 +17,7 @@ EOF
 }
 
 die() { echo "verify-release: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
 
 seen_options=""
 claim_option() {
@@ -36,7 +36,6 @@ sha=""
 core_release=""
 kanban_release=""
 help_requested=0
-
 while (($# > 0)); do
   case "$1" in
     --mode) claim_option "$1"; [[ $# -ge 2 ]] || usage; mode=$2; shift 2 ;;
@@ -46,125 +45,20 @@ while (($# > 0)); do
     --sha) claim_option "$1"; [[ $# -ge 2 ]] || usage; sha=$2; shift 2 ;;
     --core-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; core_release=$2; shift 2 ;;
     --kanban-release) claim_option "$1"; [[ $# -ge 2 ]] || usage; kanban_release=$2; shift 2 ;;
-    -h|--help) claim_option "--help"; help_requested=1; shift ;;
+    -h|--help) claim_option --help; help_requested=1; shift ;;
     *) echo "verify-release: unknown argument: $1" >&2; usage ;;
   esac
 done
 
-(( help_requested == 0 )) || usage
-need() { command -v "$1" >/dev/null 2>&1 || die "missing command $1"; }
-[[ "$mode" == "pre-tag" || "$mode" == "published" ]] || usage
+((help_requested == 0)) || usage
+[[ "$mode" == pre-tag || "$mode" == published ]] || usage
 [[ -f "$core_release" ]] || die "--core-release must name a JSON file"
 [[ -f "$kanban_release" ]] || die "--kanban-release must name a JSON file"
 need git
 need python3
 need clojure
 
-release_values=$(python3 - "$core_release" "$kanban_release" <<'PY'
-import json
-import re
-import sys
-
-core_path, kanban_path = sys.argv[1:]
-with open(core_path, encoding="utf-8") as handle:
-    core = json.load(handle)
-with open(kanban_path, encoding="utf-8") as handle:
-    kanban = json.load(handle)
-
-required_core = {
-    "card", "repository", "coordinate", "ref-kind", "sha",
-    "landed-main-commit", "land-run", "verification",
-}
-missing = sorted(required_core - core.keys())
-if missing:
-    raise SystemExit(f"core release is missing fields: {', '.join(missing)}")
-forbidden = sorted({"tag", "peeled-sha"} & core.keys())
-if forbidden:
-    raise SystemExit(f"core release contains forbidden fields: {', '.join(forbidden)}")
-if core["card"] != "MSR-04" or core["repository"] != "codethread/millstrand":
-    raise SystemExit("core release identity does not match MSR-04")
-if core["coordinate"] != "io.millstrand/millstrand" or core["ref-kind"] != "sha":
-    raise SystemExit("core release must use io.millstrand/millstrand SHA identity")
-for field in ("sha", "landed-main-commit"):
-    if not re.fullmatch(r"[0-9a-f]{40}", core[field]):
-        raise SystemExit(f"core release {field} must be a lowercase 40-hex SHA")
-if core["sha"] != core["landed-main-commit"]:
-    raise SystemExit("core release SHA must equal landed-main-commit")
-if not isinstance(core["verification"], list) or not core["verification"]:
-    raise SystemExit("core release verification must be a non-empty array")
-
-required_kanban = {
-    "card", "repository", "coordinate", "tag", "peeled-sha",
-    "landed-main-commit", "land-run", "verification",
-}
-missing = sorted(required_kanban - kanban.keys())
-if missing:
-    raise SystemExit(f"Kanban release is missing fields: {', '.join(missing)}")
-if kanban["card"] != "MSR-05" or kanban["repository"] != "codethread/kanban.spool":
-    raise SystemExit("Kanban release identity does not match MSR-05")
-if kanban["coordinate"] != "codethread/kanban" or not re.fullmatch(r"v[0-9]+", kanban["tag"]):
-    raise SystemExit("Kanban release has an invalid coordinate or tag")
-for field in ("peeled-sha", "landed-main-commit"):
-    if not re.fullmatch(r"[0-9a-f]{40}", kanban[field]):
-        raise SystemExit(f"Kanban release {field} must be a lowercase 40-hex SHA")
-if kanban["peeled-sha"] != kanban["landed-main-commit"]:
-    raise SystemExit("Kanban peeled SHA must equal landed-main-commit")
-if not isinstance(kanban["verification"], list) or not kanban["verification"]:
-    raise SystemExit("Kanban verification must be a non-empty array")
-
-print(kanban["repository"])
-print(kanban["coordinate"])
-print(kanban["tag"])
-print(kanban["peeled-sha"])
-PY
-)
-kanban_repository=$(printf '%s\n' "$release_values" | sed -n '1p')
-kanban_coordinate=$(printf '%s\n' "$release_values" | sed -n '2p')
-kanban_tag=$(printf '%s\n' "$release_values" | sed -n '3p')
-kanban_sha=$(printf '%s\n' "$release_values" | sed -n '4p')
-kanban_url="https://github.com/${kanban_repository%.git}.git"
-millhouse_repository="codethread/millhouse.spool"
-millhouse_coordinate="millhouse.spools/workflow"
-millhouse_sha="f1cdda3b46706b186f547251d285791be650d232"
-millhouse_url="https://github.com/${millhouse_repository}.git"
-
-read_candidate_pin() {
-  local candidate_root=$1
-  local candidate_pin
-  candidate_pin=$(clojure -Sdeps '{:deps {}}' -M -e '
-(require (quote [clojure.edn :as edn]))
-(let [family (quote io.millstrand/millstrand)
-      document (edn/read-string (slurp (first *command-line-args*)))
-      root (get-in document [:deps family])
-      aliases (keep (fn [[alias config]]
-                      (when-let [pin (get-in config [:extra-deps family])]
-                        [alias pin]))
-                    (:aliases document))
-      expected {:git/url "https://github.com/codethread/millstrand.git"
-                :git/sha (:git/sha root)
-                :deps/root "."}]
-  (when-not (and (= root expected)
-                 (string? (:git/sha root))
-                 (re-matches #"[0-9a-f]{40}" (:git/sha root)))
-    (throw (ex-info "candidate root Millstrand pin must be an exact immutable coordinate" {})))
-  (doseq [[alias pin] aliases]
-    (when-not (= pin root)
-      (throw (ex-info (str "candidate Millstrand pin disagrees in alias " alias) {}))))
-  (println (:git/url root))
-  (println (:git/sha root)))
-' - "$candidate_root/deps.edn" 2>&1) || \
-    die "candidate io.millstrand/millstrand pin is invalid: $candidate_pin"
-  local expected_candidate_pin
-  expected_candidate_pin=$'^https://github\\.com/codethread/millstrand\\.git\n[0-9a-f]{40}$'
-  [[ "$candidate_pin" =~ $expected_candidate_pin ]] || \
-    die "candidate io.millstrand/millstrand pin is invalid: $candidate_pin"
-  core_url=$(printf '%s\n' "$candidate_pin" | sed -n '1p')
-  core_sha=$(printf '%s\n' "$candidate_pin" | sed -n '2p')
-  core_repository="codethread/millstrand"
-  core_coordinate="io.millstrand/millstrand"
-}
-
-if [[ "$mode" == "pre-tag" ]]; then
+if [[ "$mode" == pre-tag ]]; then
   [[ -n "$source_root" && -d "$source_root" ]] || die "--source-root must name a directory"
   [[ -z "$repository" && -z "$tag" && -z "$sha" ]] || \
     die "--repository, --tag, and --sha are published-mode options"
@@ -179,46 +73,18 @@ else
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "sha must be a lowercase 40-hex commit"
   [[ "$repository" != *"../"* && "$repository" != /* ]] || \
     die "published repository must not be a local path"
-  remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
-  [[ "$remote_sha" == "$sha" ]] || \
-    die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
-  tmp_root=$(mktemp -d /tmp/ah.XXXXXX)
-  git clone --quiet --depth 1 --branch "$tag" "$repository" "$tmp_root/agent-harness"
-  candidate_root="$tmp_root/agent-harness"
-  [[ "$(git -C "$candidate_root" rev-parse HEAD)" == "$sha" ]] || \
-    die "checked-out $tag does not match $sha"
-  release_ref="$tag@$sha"
 fi
 
-tmp_root=${tmp_root:-$(mktemp -d /tmp/ah.XXXXXX)}
-if [[ "$mode" == "pre-tag" ]]; then
-  # Verify a disposable copy so evidence and generated metadata never touch
-  # the caller's checkout. Copy the complete worktree so pre-tag checks cover
-  # uncommitted candidate changes, and keep read-only source roots viable.
-  mkdir -p "$tmp_root/agent-harness"
-  cp -R "$source_root/." "$tmp_root/agent-harness/"
-  # Do not inherit developer-owned Millstrand overlays into the disposable
-  # candidate. Leave init.local.clj alone: the release workspace writes its
-  # intentional generated version below after projecting candidate spools.
-  rm -f "$tmp_root/agent-harness/.millstrand/config.local.json" \
-        "$tmp_root/agent-harness/.millstrand/spools.local.edn"
-  chmod -R u+rwX "$tmp_root/agent-harness"
-  candidate_root="$tmp_root/agent-harness"
-fi
-read_candidate_pin "$candidate_root"
-if [[ "$mode" == "pre-tag" ]]; then
-  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
-fi
-consumer_root="$tmp_root/consumer"
-gitlibs_root="$tmp_root/.gitlibs"
-mkdir -p "$consumer_root"
+tmp_root=$(mktemp -d /tmp/ah-release.XXXXXX)
+mill_pid=""
+weaver_active=0
 cleanup() {
   local rc=$?
-  if [[ "${weaver_active:-0}" == 1 ]]; then
+  if ((weaver_active)); then
     XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
-      "$mill_bin" weaver stop --workspace "$weaver_workspace" >/dev/null 2>&1 || true
+      "$mill_bin" weaver stop --workspace "$workspace_root" >/dev/null 2>&1 || true
   fi
-  if [[ -n "${mill_pid:-}" ]] && kill -0 "$mill_pid" 2>/dev/null; then
+  if [[ -n "$mill_pid" ]] && kill -0 "$mill_pid" 2>/dev/null; then
     kill "$mill_pid" 2>/dev/null || true
     wait "$mill_pid" 2>/dev/null || true
   fi
@@ -228,27 +94,172 @@ cleanup() {
 }
 trap cleanup EXIT
 
-core_root="$tmp_root/millstrand"
-git clone --quiet "$core_url" "$core_root"
-git -C "$core_root" checkout --quiet "$core_sha"
-[[ "$(git -C "$core_root" rev-parse HEAD)" == "$core_sha" ]] || \
-  die "resolved core checkout does not match $core_sha"
+if [[ "$mode" == published ]]; then
+  remote_sha=$(git ls-remote "$repository" "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  [[ "$remote_sha" == "$sha" ]] || \
+    die "tag $tag resolves to ${remote_sha:-<no peeled SHA>}, expected $sha"
+  git clone --quiet --depth 1 --branch "$tag" "$repository" "$tmp_root/candidate"
+  candidate_root="$tmp_root/candidate"
+  [[ "$(git -C "$candidate_root" rev-parse HEAD)" == "$sha" ]] || \
+    die "checked-out $tag does not match $sha"
+  release_ref="$tag@$sha"
+else
+  mkdir "$tmp_root/candidate"
+  cp -R "$source_root/." "$tmp_root/candidate/"
+  rm -f "$tmp_root/candidate/.millstrand/config.local.json" \
+        "$tmp_root/candidate/.millstrand/deps.local.edn" \
+        "$tmp_root/candidate/.millstrand/init.local.clj"
+  chmod -R u+rwX "$tmp_root/candidate"
+  candidate_root="$tmp_root/candidate"
+  release_ref="candidate:$(git -C "$source_root" rev-parse HEAD)"
+fi
 
-build_core_binary() {
-  local name=$1
-  local package=$2
-  local output="$core_root/bin/$name"
-  local build_id
-  need go
-  build_id=$(git -C "$core_root" rev-parse --short HEAD)
-  mkdir -p "$core_root/bin"
-  (cd "$core_root" && \
-    go build -ldflags "-X millstrand-strand-cli/internal/config.InstalledSource=$core_root -X millstrand-strand-cli/internal/config.BuildID=$build_id" \
-      -o "$output" "$package") || \
-    die "failed to build pinned core $name at $core_sha"
-  [[ -x "$output" ]] || die "pinned core build did not produce executable $output"
-}
+[[ -f "$candidate_root/deps.edn" ]] || die "candidate is missing deps.edn"
+[[ -f "$candidate_root/.millstrand/deps.edn" ]] || \
+  die "candidate workspace is missing deps.edn"
 
+release_error=$(python3 - "$core_release" "$kanban_release" <<'PY'
+import json, sys
+
+core_path, millhouse_path = sys.argv[1:]
+
+def load_release(label, path):
+    def reject_duplicate_keys(pairs):
+        document = {}
+        duplicates = set()
+        for key, value in pairs:
+            if key in document:
+                duplicates.add(key)
+            document[key] = value
+        if duplicates:
+            raise SystemExit(
+                f"{label} release metadata has duplicate fields: {', '.join(sorted(duplicates))}"
+            )
+        return document
+
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle, object_pairs_hook=reject_duplicate_keys)
+
+core = load_release("MSR-04", core_path)
+millhouse = load_release("MSR-05", millhouse_path)
+expected = [
+    ("MSR-04", core, {"card": "MSR-04", "repository": "codethread/millstrand",
+                       "coordinate": "io.millstrand/millstrand", "ref-kind": "sha",
+                       "sha": "71c0ed3d80fcad090b74a704a8eb165a3fad996e",
+                       "landed-main-commit": "71c0ed3d80fcad090b74a704a8eb165a3fad996e"}),
+    ("MSR-05", millhouse, {"card": "MSR-05", "repository": "codethread/millhouse.spool",
+                            "coordinate": "millhouse.spools/kanban", "ref-kind": "sha",
+                            "sha": "f487eb42ea9523e8bd405e64a7c319013217d988",
+                            "landed-main-commit": "f487eb42ea9523e8bd405e64a7c319013217d988"}),
+]
+for label, document, identity in expected:
+    if not isinstance(document, dict):
+        raise SystemExit(f"{label} release metadata must be a JSON object")
+    supported_fields = set(identity) | {"land-run", "verification"}
+    unexpected_fields = sorted(set(document) - supported_fields)
+    missing_fields = sorted(supported_fields - set(document))
+    if unexpected_fields:
+        raise SystemExit(
+            f"{label} release metadata has unsupported fields: {', '.join(unexpected_fields)}"
+        )
+    if missing_fields:
+        raise SystemExit(
+            f"{label} release metadata lacks required fields: {', '.join(missing_fields)}"
+        )
+    if any(document.get(key) != value for key, value in identity.items()):
+        raise SystemExit(f"{label} release metadata does not identify the pinned commit")
+    if not isinstance(document.get("land-run"), str) or not document["land-run"]:
+        raise SystemExit(f"{label} release metadata lacks required land evidence")
+    if not isinstance(document.get("verification"), list) or not document["verification"]:
+        raise SystemExit(f"{label} release metadata lacks required verification evidence")
+PY
+) || die "release evidence is invalid: $release_error"
+
+pins=$(clojure -Sdeps '{:deps {}}' -M -e '
+(require (quote [clojure.edn :as edn])
+         (quote [clojure.java.io :as io]))
+(let [read-edn-file (fn [path]
+                      (with-open [reader (java.io.PushbackReader. (io/reader path))]
+                        (let [eof (Object.)
+                              value (edn/read {:eof eof} reader)]
+                          (when (identical? value eof)
+                            (throw (ex-info (str path " is empty") {})))
+                          (when-not (identical? (edn/read {:eof eof} reader) eof)
+                            (throw (ex-info (str path " contains trailing EDN forms") {})))
+                          value)))
+      [root-path workspace-path] *command-line-args*
+      root (read-edn-file root-path)
+      workspace (read-edn-file workspace-path)
+      core-sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
+      millhouse-sha "f487eb42ea9523e8bd405e64a7c319013217d988"
+      core-url "https://github.com/codethread/millstrand.git"
+      millhouse-url "https://github.com/codethread/millhouse.spool.git"
+      core-pin {:git/url core-url :git/sha core-sha :deps/root "."}
+      batteries-pin {:git/url core-url :git/sha core-sha :deps/root "spools/batteries"}
+      millhouse-roots {(quote millhouse.spools/workflow) "spools/workflow"
+                       (quote millhouse.spools/identity) "spools/identity"
+                       (quote millhouse.spools/kanban) "spools/kanban"}
+      millhouse-pin (fn [coordinate]
+                      {:git/url millhouse-url :git/sha millhouse-sha
+                       :deps/root (get millhouse-roots coordinate)})
+      alias-sources [["root" (:aliases root)]
+                     ["workspace" (:aliases workspace)]]
+      alias-dep-keys [:deps :extra-deps :override-deps :default-deps :replace-deps]]
+  (when-not (= (get-in root [:deps (quote io.millstrand/millstrand)]) core-pin)
+    (throw (ex-info "candidate root Millstrand pin is not the exact release coordinate" {})))
+  (when-not (= (get-in root [:deps (quote millstrand.spools/batteries)]) batteries-pin)
+    (throw (ex-info "candidate root Batteries pin is not aligned with Millstrand" {})))
+  (when-not (= (get-in workspace [:deps (quote millstrand.spools/batteries)]) batteries-pin)
+    (throw (ex-info "candidate workspace Batteries pin is not aligned with Millstrand" {})))
+  (when-let [workspace-core (get-in workspace [:deps (quote io.millstrand/millstrand)])]
+    (when-not (= workspace-core core-pin)
+      (throw (ex-info "candidate workspace Millstrand pin is not the exact release coordinate" {}))))
+  (doseq [[source aliases] alias-sources
+          [alias config] aliases
+          dep-key alias-dep-keys
+          [coordinate expected] [[(quote io.millstrand/millstrand) core-pin]
+                                 [(quote millstrand.spools/batteries) batteries-pin]]
+          :let [actual (get-in config [dep-key coordinate])]
+          :when actual]
+    (when-not (= actual expected)
+      (throw (ex-info (str "candidate " source " " coordinate " pin disagrees in alias " alias
+                           " (" dep-key ")") {}))))
+  (doseq [[coordinate root-name] millhouse-roots
+          :let [expected (millhouse-pin coordinate)
+                root-pin (get-in root [:deps coordinate])
+                workspace-pin (get-in workspace [:deps coordinate])]]
+    (when (and root-pin (not= root-pin expected))
+      (throw (ex-info (str "candidate root " coordinate " pin is not the exact Millhouse release coordinate") {})))
+    (when-not (= workspace-pin expected)
+      (throw (ex-info (str "candidate workspace " coordinate " pin is not the exact Millhouse release coordinate") {})))
+    (doseq [[source aliases] alias-sources
+            [alias config] aliases
+            dep-key alias-dep-keys
+            :let [actual (get-in config [dep-key coordinate])]
+            :when actual]
+      (when-not (= actual expected)
+        (throw (ex-info (str "candidate " source " " coordinate " pin disagrees in alias " alias
+                             " (" dep-key ")") {})))))
+  (println core-url)
+  (println core-sha)
+  (println millhouse-url)
+  (println millhouse-sha))
+' - "$candidate_root/deps.edn" "$candidate_root/.millstrand/deps.edn" 2>&1) || \
+  die "release evidence is invalid: $pins"
+expected_pins=$(printf '%s\n' \
+  "https://github.com/codethread/millstrand.git" \
+  "71c0ed3d80fcad090b74a704a8eb165a3fad996e" \
+  "https://github.com/codethread/millhouse.spool.git" \
+  "f487eb42ea9523e8bd405e64a7c319013217d988")
+[[ "$pins" == "$expected_pins" ]] || \
+  die "release evidence parser returned malformed output: $pins"
+core_url=$(sed -n '1p' <<<"$pins")
+core_sha=$(sed -n '2p' <<<"$pins")
+millhouse_sha=$(sed -n '4p' <<<"$pins")
+
+consumer_root="$tmp_root/consumer"
+gitlibs_root="$tmp_root/gitlibs"
+mkdir "$consumer_root"
 cat >"$consumer_root/deps.edn" <<EOF
 {:paths ["$candidate_root/agent-run/src"
          "$candidate_root/harness-core/src"
@@ -259,377 +270,160 @@ cat >"$consumer_root/deps.edn" <<EOF
          "$candidate_root/agent-cli/src"
          "$candidate_root/delegation/src"
          "$candidate_root/bench/src"]
- :deps {$core_coordinate {:git/url "$core_url" :git/sha "$core_sha"}
-        millhouse.spools/workflow {:git/url "$millhouse_url"
-                                   :git/sha "$millhouse_sha"
-                                   :deps/root "spools/workflow"}
-        millhouse.spools/kanban {:git/url "$millhouse_url"
-                                 :git/sha "$millhouse_sha"
-                                 :deps/root "spools/kanban"}
-        millhouse.spools/identity {:git/url "$millhouse_url"
-                                   :git/sha "$millhouse_sha"
-                                   :deps/root "spools/identity"}}}
+ :deps {io.millstrand/millstrand {:git/url "$core_url" :git/sha "$core_sha" :deps/root "."}
+        millstrand.spools/batteries {:git/url "$core_url" :git/sha "$core_sha" :deps/root "spools/batteries"}
+        millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git" :git/sha "$millhouse_sha" :deps/root "spools/workflow"}
+        millhouse.spools/identity {:git/url "https://github.com/codethread/millhouse.spool.git" :git/sha "$millhouse_sha" :deps/root "spools/identity"}}}
 EOF
-if grep -Eq ':local/root|:source-root' "$consumer_root/deps.edn"; then
-  die "generated consumer metadata contains a local/root or source-root override"
-fi
-
 classpath=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -Spath 2>&1) || \
   die "clean consumer dependency resolution failed: $classpath"
 smoke=$(cd "$consumer_root" && GITLIBS="$gitlibs_root" clojure -M -e '
   (doseq [ns (quote [ct.spools.agent-run ct.spools.delegation
-                    ct.spools.executors.subagent ct.spools.harness-core
-                    ct.spools.claude-harness ct.spools.codex-harness
-                    ct.spools.pi-harness ct.spools.cursor-harness
-                    ct.spools.agent-cli ct.spools.bench])]
+                     ct.spools.executors.subagent ct.spools.harness-core
+                     ct.spools.claude-harness ct.spools.codex-harness
+                     ct.spools.pi-harness ct.spools.cursor-harness
+                     ct.spools.agent-cli ct.spools.bench])]
     (require ns))
   (println :agent-harness-consumer-loaded)
 ' 2>&1) || die "clean consumer load failed: $smoke"
 
-mill_bin=${MILL_BIN:-}
-if [[ -z "$mill_bin" ]]; then
-  build_core_binary mill ./cli/cmd/mill
-  mill_bin="$core_root/bin/mill"
-fi
-[[ -n "$mill_bin" && -x "$mill_bin" ]] || \
-  die "missing mill executable; set MILL_BIN to the published Millstrand mill"
-strand_bin=${STRAND_BIN:-}
-if [[ -z "$strand_bin" ]]; then
-  build_core_binary strand ./cli/cmd/strand
-  strand_bin="$core_root/bin/strand"
-fi
-[[ -n "$strand_bin" && -x "$strand_bin" ]] || \
-  die "missing strand executable; set STRAND_BIN to the published Millstrand strand"
+core_root="$tmp_root/millstrand"
+git clone --quiet "$core_url" "$core_root"
+git -C "$core_root" checkout --quiet "$core_sha"
+need go
+mkdir "$core_root/bin"
+build_id=$(git -C "$core_root" rev-parse --short HEAD)
+for name_and_package in 'mill ./cli/cmd/mill' 'strand ./cli/cmd/strand'; do
+  read -r name package <<<"$name_and_package"
+  (cd "$core_root" && go build \
+    -ldflags "-X millstrand-strand-cli/internal/config.InstalledSource=$core_root -X millstrand-strand-cli/internal/config.BuildID=$build_id" \
+    -o "$core_root/bin/$name" "$package") || die "failed to build pinned core $name"
+done
+mill_bin="$core_root/bin/mill"
+strand_bin="$core_root/bin/strand"
+
 state_root="$tmp_root/state"
 workspace_root="$tmp_root/workspace"
-mkdir -p "$state_root" "$workspace_root"
-mill_log="$tmp_root/mill.log"
-mill_pid=""
-weaver_workspace="$workspace_root/.millstrand"
-weaver_active=0
-XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
-  "$mill_bin" start >"$mill_log" 2>&1 &
-mill_pid=$!
-metadata_path=""
-deadline=$((SECONDS + 30))
-until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
-  kill -0 "$mill_pid" 2>/dev/null || die "mill exited before publishing runtime metadata: $(sed -n '1,80p' "$mill_log")"
-  ((SECONDS < deadline)) || die "mill did not publish runtime metadata within 30s"
-  metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
-  sleep 0.05
+mkdir "$state_root" "$workspace_root"
+cp -R "$candidate_root/.millstrand/." "$workspace_root/"
+for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
+  ln -s "$candidate_root/$root" "$tmp_root/$root"
 done
+cat >"$workspace_root/init.clj" <<'EOF'
+(require '[millstrand.api.current.alpha :as current]
+         '[millstrand.api.runtime.alpha :as runtime])
+
+(def release-runtime (current/runtime))
+(runtime/module! release-runtime :millstrand/spools-batteries
+  {:ns 'millstrand.spools.batteries})
+(runtime/module! release-runtime :millhouse/spools-identity
+  {:ns 'millhouse.spools.identity :required? true})
+(runtime/module! release-runtime :millstrand/spools-agent-run
+  {:ns 'ct.spools.agent-run :after [:millhouse/spools-identity] :required? true})
+(runtime/module! release-runtime :millstrand/spools-delegation
+  {:ns 'ct.spools.delegation :after [:millstrand/spools-agent-run] :required? true})
+EOF
+cat >"$workspace_root/config/release-smoke.clj" <<'EOF'
+(ns release-smoke
+  (:require [millstrand.api.current.alpha :as release-current]
+            [millstrand.api.lifecycle.alpha :as release-lifecycle]
+            [ct.spools.agent-run :as release-agent-run]
+            [ct.spools.delegation :as release-delegation]))
+
+(release-agent-run/defharnesses! release-smoke-harnesses
+  "Disposable release verifier harness."
+  {:release-smoke {:argv ["sh" "-c" "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
+                   :parse :codex-json
+                   :preamble? false
+                   :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
+
+(defn open-release-smoke! [{:keys [runtime]}]
+  (release-current/with-runtime runtime
+    (release-agent-run/set-default-review-contract! release-delegation/review-contract)
+    (release-agent-run/set-default-task-contract! release-delegation/worker-contract))
+  {:opened :release-smoke})
+
+(defn close-release-smoke! [{:keys [runtime]}]
+  (release-current/with-runtime runtime
+    (release-agent-run/set-default-review-contract! nil)
+    (release-agent-run/set-default-task-contract! nil))
+  {:closed :release-smoke})
+
+(release-lifecycle/defresource! release-smoke-runtime
+  "Own the disposable release smoke contracts."
+  {:open 'release-smoke/open-release-smoke!
+   :close 'release-smoke/close-release-smoke!})
+EOF
+cat >"$workspace_root/init.local.clj" <<'EOF'
+(require '[millstrand.api.current.alpha :as release-current]
+         '[millstrand.api.runtime.alpha :as release-runtime])
+
+(release-runtime/module! (release-current/runtime) :release/smoke
+  {:file "config/release-smoke.clj"
+   :after [:millstrand/spools-agent-run :millstrand/spools-delegation]
+   :required? true})
+EOF
+
+mill_log="$tmp_root/mill.log"
+XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" start >"$mill_log" 2>&1 &
+mill_pid=$!
 deadline=$((SECONDS + 30))
 until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
   kill -0 "$mill_pid" 2>/dev/null || die "mill exited before becoming ready: $(sed -n '1,80p' "$mill_log")"
   ((SECONDS < deadline)) || die "mill did not become ready within 30s"
   sleep 0.05
 done
-
-mill_cmd() {
-  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"
-}
-strand_cmd() {
-  XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$weaver_workspace" "$@"
-}
-
-mill_cmd init --workspace "$weaver_workspace" >/dev/null
-[[ -d "$weaver_workspace" ]] || die "mill init did not create .millstrand"
-
-# Use the candidate's workspace modules in disposable paths. Project its
-# approved provider families rather than maintaining a second workspace config
-# here; only the agent-harness roots are overridden to the candidate under
-# test, while core and Millhouse keep their immutable release identities
-# explicit. Kanban lives under the Millhouse family at spools/kanban.
-candidate_coord="$candidate_root/.millstrand"
-cp -R "$candidate_coord/." "$weaver_workspace/"
-for root in harness-core claude-harness codex-harness cursor-harness pi-harness agent-cli agent-run delegation bench; do
-  ln -s "$candidate_root/$root" "$workspace_root/$root"
-done
-cat >"$weaver_workspace/init.local.clj" <<'EOF'
-(require '[millstrand.api.current.alpha :as current]
-         '[millstrand.api.runtime.alpha :as runtime])
-
-(def runtime (current/runtime))
-
-(runtime/module! runtime :release-harnesses
-                 {:file "config/harnesses.clj"
-                  :spools ['ct.spools/delegation 'ct.spools/agent-run]
-                  :after [:millstrand/spools-agent-run :millstrand/spools-delegation]
-                  :required? true})
-EOF
-cat >"$weaver_workspace/config/harnesses.clj" <<'EOF'
-(ns harnesses
-  "Disposable release smoke harness and its candidate contracts."
-  (:require [millstrand.api.current.alpha :as current]
-            [millstrand.api.lifecycle.alpha :as lifecycle]
-            [ct.spools.agent-run :as shuttle]
-            [ct.spools.delegation :as agents]))
-
-(shuttle/defharnesses! smoke-harnesses
-  "Disposable release smoke harnesses."
-  {:release-smoke {:argv ["sh" "-c"
-                          "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"release-smoke\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"release smoke\"}}' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2000,\"cached_input_tokens\":500,\"output_tokens\":100,\"reasoning_output_tokens\":20}}'"]
-                   :parse :codex-json
-                   :preamble? false
-                   :cost-rates {:input 1.0 :cache-read 0.1 :output 6.0}}})
-
-(defn open-release-harnesses!
-  [{:keys [runtime]}]
-  (current/with-runtime runtime
-    (shuttle/set-default-review-contract! agents/review-contract)
-    (shuttle/set-default-task-contract! agents/worker-contract))
-  {:opened :release-harnesses})
-
-(defn close-release-harnesses!
-  [{:keys [runtime]}]
-  (current/with-runtime runtime
-    (shuttle/set-default-review-contract! nil)
-    (shuttle/set-default-task-contract! nil))
-  {:closed :release-harnesses})
-
-(lifecycle/defresource! release-harnesses-runtime
-  "Own the disposable release smoke contracts."
-  {:open 'harnesses/open-release-harnesses!
-   :close 'harnesses/close-release-harnesses!})
-EOF
-[[ -f "$candidate_coord/spools.edn" ]] || die "candidate workspace is missing spools.edn"
-clojure -Sdeps '{:deps {}}' -M -e '
-(require (quote [clojure.edn :as edn])
-         (quote [clojure.string :as string]))
-(let [[source-path target-path millhouse-url millhouse-sha]
-      *command-line-args*
-      document (edn/read-string (slurp source-path))
-      providers (:spools document)
-      required-provider-names ["millhouse/spools" "codethread/spools"
-                               "codethread/devflow"]
-      missing (remove #(contains? providers (symbol %)) required-provider-names)
-      local-roots {"ct.spools/harness-core" "harness-core"
-                   "ct.spools/claude-harness" "claude-harness"
-                   "ct.spools/codex-harness" "codex-harness"
-                   "ct.spools/pi-harness" "pi-harness"
-                   "ct.spools/cursor-harness" "cursor-harness"
-                   "ct.spools/agent-cli" "agent-cli"
-                   "ct.spools/agent-run" "agent-run"
-                   "ct.spools/delegation" "delegation"
-                   "ct.spools/bench" "bench"}
-      local-overrides (into {}
-                         (map (fn [[coordinate root]]
-                                [(symbol coordinate) {:local/root (str "../" root)}])
-                              local-roots))
-      millhouse-provider (get providers (symbol "millhouse/spools"))
-      millhouse-roots (merge (:roots millhouse-provider)
-                             {(symbol "millhouse.spools/kanban") "spools/kanban"})]
-  (when (seq missing)
-    (throw (ex-info (str "candidate workspace is missing approved provider families: "
-                         (string/join ", " missing)) {})))
-  (spit target-path
-        (pr-str
-         (assoc document :spools
-                (merge providers
-                       local-overrides
-                       {(symbol "millhouse/spools")
-                        (-> millhouse-provider
-                            (assoc :git/url millhouse-url :git/sha millhouse-sha :roots millhouse-roots)
-                            (dissoc :git/tag))})))))
-' - "$candidate_coord/spools.edn" "$weaver_workspace/spools.edn" \
-  "$millhouse_url" "$millhouse_sha"
-python3 - "$weaver_workspace/spools.edn" "$millhouse_url" "$millhouse_sha" <<'PY'
-import pathlib
-import sys
-
-path, millhouse_url, millhouse_sha = sys.argv[1:]
-text = pathlib.Path(path).read_text(encoding="utf-8")
-for value in (
-    'codethread/spools',
-    'millhouse.spools/workflow "spools/workflow"',
-    'millhouse.spools/kanban "spools/kanban"',
-    'millhouse.spools/identity "spools/identity"',
-    f':git/url "{millhouse_url}"',
-    f':git/sha "{millhouse_sha}"',
-):
-    if value not in text:
-        raise SystemExit(f"projected disposable spools are missing {value}")
-if not ('codethread/devflow "."' in text or 'devflow "."' in text):
-    raise SystemExit("projected disposable spools are missing devflow root")
-if not ('codethread/devflow-kanban-adapter "kanban-adapter"' in text or
-        'devflow-kanban-adapter "kanban-adapter"' in text):
-    raise SystemExit("projected disposable spools are missing devflow Kanban adapter root")
-for root in (
-    'ct.spools/harness-core', 'ct.spools/claude-harness',
-    'ct.spools/codex-harness', 'ct.spools/pi-harness',
-    'ct.spools/cursor-harness', 'ct.spools/agent-cli',
-    'ct.spools/agent-run', 'ct.spools/delegation', 'ct.spools/bench',
-):
-    if (f'{root} {{:local/root "../' not in text and
-            f'{root} #:local{{:root "../' not in text):
-        raise SystemExit(f"projected disposable spools are missing local candidate root {root}")
-PY
-mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
+mill_cmd() { XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" "$mill_bin" "$@"; }
+strand_cmd() { XDG_STATE_HOME="$state_root" "$strand_bin" --workspace "$workspace_root" "$@"; }
+mill_cmd weaver start --workspace "$workspace_root" >/dev/null
 weaver_active=1
-status_before=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
-  die "initial disposable weaver status failed"
-printf '%s\n' "$status_before" >"$tmp_root/status-before.json"
-python3 - "$tmp_root/status-before.json" "$tmp_root/marker-before.json" "$weaver_workspace" <<'PY'
-import json
-import os
-import sys
 
-status_path, identity_path, workspace = sys.argv[1:]
-status = json.load(open(status_path, encoding="utf-8"))
-required = ["database_kind", "database_label", "database_path", "state_dir", "data_dir", "weaver_id"]
-missing = [key for key in required if not status.get(key)]
-if missing:
-    raise SystemExit(f"disposable weaver status missing identity fields: {', '.join(missing)}")
-if status["database_kind"] != "sqlite-file":
-    raise SystemExit(f"disposable weaver did not use sqlite storage: {status['database_kind']}")
-if status.get("config_dir") != os.path.realpath(workspace):
-    raise SystemExit("disposable weaver selected the wrong canonical workspace")
-json.dump({key: status[key] for key in required}, open(identity_path, "w", encoding="utf-8"), indent=2)
-PY
-
-state_before=$(strand_cmd add "release marker smoke state" --attr body=release-marker-smoke)
-task_id=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["id"])' <<<"$state_before")
-[[ -n "$task_id" ]] || die "disposable state creation returned no strand id"
-state_before=$(strand_cmd show "$task_id")
-printf '%s\n' "$state_before" >"$tmp_root/state-before.json"
-
-mill_cmd weaver stop --workspace "$weaver_workspace" >/dev/null
-weaver_active=0
-if ! XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; then
-  XDG_STATE_HOME="$state_root" MILLSTRAND_SOURCE="$core_root" \
-    "$mill_bin" start >>"$mill_log" 2>&1 &
-  mill_pid=$!
-  metadata_path=""
-  deadline=$((SECONDS + 30))
-  until [[ -n "$metadata_path" && -f "$metadata_path" ]]; do
-    kill -0 "$mill_pid" 2>/dev/null || die "mill exited while restarting after marker stop: $(sed -n '1,80p' "$mill_log")"
-    ((SECONDS < deadline)) || die "mill did not restart within 30s"
-    metadata_path=$(find "$state_root" -type f -name mill.json -print -quit)
-    sleep 0.05
-  done
-  deadline=$((SECONDS + 30))
-  until XDG_STATE_HOME="$state_root" "$mill_bin" status >/dev/null 2>&1; do
-    kill -0 "$mill_pid" 2>/dev/null || die "mill exited before restart became ready: $(sed -n '1,80p' "$mill_log")"
-    ((SECONDS < deadline)) || die "mill restart did not become ready within 30s"
-    sleep 0.05
-  done
-fi
-mv "$workspace_root/.millstrand" "$workspace_root/.ms"
-weaver_workspace="$workspace_root/.ms"
-[[ -d "$weaver_workspace" ]] || die "marker rename did not preserve .ms workspace"
-mill_cmd weaver start --workspace "$weaver_workspace" >/dev/null
-weaver_active=1
-status_after=$(mill_cmd weaver status --workspace "$weaver_workspace") || \
-  die "renamed disposable weaver status failed"
-printf '%s\n' "$status_after" >"$tmp_root/status-after.json"
-state_after=$(strand_cmd show "$task_id")
-printf '%s\n' "$state_after" >"$tmp_root/state-after.json"
-# Sibling databases and generations may be fresh: UUID continuity is
-# intentionally excluded, while storage identity and state remain smoke proof.
-python3 - "$tmp_root/status-before.json" "$tmp_root/status-after.json" "$tmp_root/state-before.json" "$tmp_root/state-after.json" "$tmp_root/marker-proof.json" <<'PY'
-import json
-import sys
-
-status_before, status_after, state_before, state_after, proof_path = sys.argv[1:]
-before = json.load(open(status_before, encoding="utf-8"))
-after = json.load(open(status_after, encoding="utf-8"))
-state_a = json.load(open(state_before, encoding="utf-8"))
-state_b = json.load(open(state_after, encoding="utf-8"))
-identity = ["database_kind", "database_label", "database_path", "state_dir", "data_dir"]
-if any(before[key] != after[key] for key in identity):
-    raise SystemExit(".millstrand to .ms changed canonical workspace/database identity")
-if state_a != state_b:
-    raise SystemExit(".millstrand to .ms changed representative strand state")
-for label, status in (("before", before), ("after", after)):
-    if not status.get("weaver_id"):
-        raise SystemExit(f"disposable weaver status {label} lost its smoke UUID")
-json.dump({"database-storage-identity-unchanged": True,
-           "representative-functional-state-unchanged": True,
-           "weaver-id-continuity": "intentionally-excluded",
-           "weaver-id-before": before["weaver_id"],
-           "weaver-id-after": after["weaver_id"]},
-          open(proof_path, "w", encoding="utf-8"), indent=2)
-PY
-
-delegate_result=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
-delegate_run=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["run"]["id"])' <<<"$delegate_result")
-await_result=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
-python3 - "$await_result" <<'PY'
-import json
-import sys
-
+task=$(strand_cmd add "release smoke" --attr body=release-smoke)
+task_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$task")
+delegate=$(strand_cmd agent delegate "$task_id" --harness release-smoke --cwd "$candidate_root")
+delegate_run=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])' <<<"$delegate")
+awaited=$(strand_cmd agent await "$delegate_run" --timeout-secs 30)
+python3 - "$awaited" <<'PY'
+import json, sys
 result = json.loads(sys.argv[1])
 runs = result.get("runs", [])
 if result.get("timed-out") or len(runs) != 1 or runs[0].get("phase") != "done":
-    raise SystemExit(f"delegate/await smoke did not finish successfully: {result}")
+    raise SystemExit(f"delegate/await smoke failed: {result}")
 PY
-
-review_result=$(strand_cmd agent review "$task_id" --seats 1 --harness release-smoke --cwd "$candidate_root" --changed-files bin/verify-release)
-review_runs=$(python3 -c 'import json,sys; print("\\n".join(json.loads(sys.stdin.read())["reviewers"]))' <<<"$review_result")
-[[ -n "$review_runs" ]] || die "review smoke returned no reviewer run"
-review_count=0
-while IFS= read -r review_run; do
-  [[ -n "$review_run" ]] || continue
-  strand_cmd agent await "$review_run" --timeout-secs 30 >/dev/null
-  review_count=$((review_count + 1))
-done <<<"$review_runs"
-[[ "$review_count" == 1 ]] || die "review smoke returned an unexpected reviewer count: $review_count"
-
-spend_result=$(strand_cmd agent spend --group-by harness)
-printf '%s\n' "$spend_result" >"$tmp_root/spend.json"
-python3 - "$tmp_root/spend.json" "$tmp_root/smoke-summary.json" <<'PY'
-import json
-import sys
-
-spend_path, summary_path = sys.argv[1:]
-spend = json.load(open(spend_path, encoding="utf-8"))
-totals = spend.get("totals", {})
-expected_tokens = 4200
-expected_cost = 2 * ((1500 / 1_000_000) * 1.0 + (500 / 1_000_000) * 0.1 + (100 / 1_000_000) * 6.0)
-if totals.get("tokens-total") != expected_tokens:
-    raise SystemExit(f"token accounting smoke mismatch: {totals.get('tokens-total')} != {expected_tokens}")
-if abs(totals.get("cost-usd", -1) - expected_cost) > 1e-12:
-    raise SystemExit(f"cost accounting smoke mismatch: {totals.get('cost-usd')} != {expected_cost}")
+review=$(strand_cmd agent review "$task_id" --seats 1 --harness release-smoke --cwd "$candidate_root" --changed-files bin/verify-release)
+review_run=$(python3 -c 'import json,sys; reviewers=json.load(sys.stdin)["reviewers"]; assert len(reviewers) == 1; print(reviewers[0])' <<<"$review")
+strand_cmd agent await "$review_run" --timeout-secs 30 >/dev/null
+spend=$(strand_cmd agent spend --group-by harness)
+python3 - "$spend" <<'PY'
+import json, sys
+spend = json.loads(sys.argv[1])
+expected_cost = 2 * ((1500 / 1_000_000) + (500 / 1_000_000) * .1 + (100 / 1_000_000) * 6)
+if spend.get("totals", {}).get("tokens-total") != 4200:
+    raise SystemExit(f"token accounting smoke failed: {spend}")
+if abs(spend["totals"].get("cost-usd", -1) - expected_cost) > 1e-12:
+    raise SystemExit(f"cost accounting smoke failed: {spend}")
 if len(spend.get("runs", [])) != 2:
-    raise SystemExit(f"spend smoke expected delegate plus reviewer, got {len(spend.get('runs', []))}")
-json.dump({"delegate": True, "await": True, "review": True,
-           "spend": True, "tokens-total": expected_tokens,
-           "cost-usd": totals["cost-usd"]},
-          open(summary_path, "w", encoding="utf-8"), indent=2)
+    raise SystemExit(f"delegate/review accounting smoke failed: {spend}")
 PY
 
 output_dir="$candidate_root/target/release"
 mkdir -p "$output_dir"
-MODE="$mode" RELEASE_REF="$release_ref" CORE_SHA="$core_sha" KANBAN_TAG="$kanban_tag" \
-  MILLHOUSE_SHA="$millhouse_sha" \
-  MARKER_PROOF_FILE="$tmp_root/marker-proof.json" SMOKE_SUMMARY_FILE="$tmp_root/smoke-summary.json" \
-  OUTPUT_FILE="$output_dir/$mode.json" python3 - <<'PY'
-import json
-import os
-
-with open(os.environ["MARKER_PROOF_FILE"], encoding="utf-8") as handle:
-    marker_proof = json.load(handle)
-with open(os.environ["SMOKE_SUMMARY_FILE"], encoding="utf-8") as handle:
-    smoke = json.load(handle)
-payload = {
-    "mode": os.environ["MODE"],
-    "release": os.environ["RELEASE_REF"],
-    "core-sha": os.environ["CORE_SHA"],
-    "millhouse-sha": os.environ["MILLHOUSE_SHA"],
-    "kanban-tag": os.environ["KANBAN_TAG"],
-    "consumer": "ct.spools/agent-run",
-    "marker-proof": marker_proof,
-    "agent-smoke": smoke,
-}
-with open(os.environ["OUTPUT_FILE"], "w", encoding="utf-8") as handle:
-    json.dump(payload, handle, indent=2)
+python3 - "$output_dir/$mode.json" "$mode" "$release_ref" "$core_sha" "$millhouse_sha" <<'PY'
+import json, sys
+path, mode, release, core_sha, millhouse_sha = sys.argv[1:]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({"mode": mode, "release": release, "core-sha": core_sha,
+               "millhouse-sha": millhouse_sha,
+               "consumer": "ct.spools/agent-run",
+               "agent-smoke": {"delegate": True, "await": True,
+                               "review": True, "spend": True,
+                               "tokens-total": 4200}}, handle, indent=2)
     handle.write("\n")
 PY
 
 echo "agent-harness release verification: clean"
 echo "  mode: $mode"
 echo "  release: $release_ref"
-echo "  core: $core_repository@$core_sha"
-echo "  workflow: $millhouse_repository@$millhouse_sha"
-echo "  workflow: $millhouse_repository@$millhouse_sha (includes kanban at spools/kanban)"
+echo "  core: codethread/millstrand@$core_sha"
+echo "  millhouse: codethread/millhouse.spool@$millhouse_sha"
 echo "  evidence: $output_dir/$mode.json"

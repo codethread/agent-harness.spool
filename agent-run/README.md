@@ -22,11 +22,11 @@ Agent-run is intentionally not core scheduler infrastructure. It composes existi
 
 ## 2. Loading
 
-Agent-run is shipped as an approved-local-root spool example under `spools/agent-run`. A workspace opts in with `spools.edn` and trusted startup or REPL code:
+Agent-run is published from `agent-run` and composed into this repository's deps-native workspace from `../agent-run/src`. A workspace opts in with `.millstrand/deps.edn` and trusted startup or REPL code:
 
 ```clojure
-;; .millstrand/spools.edn
-{:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}}}
+;; .millstrand/deps.edn
+{:paths ["../agent-run/src"]}
 ```
 
 ```clojure
@@ -36,7 +36,6 @@ Agent-run is shipped as an approved-local-root spool example under `spools/agent
 (def runtime (current/runtime))
 (runtime/module! runtime :agent-run
   {:ns 'ct.spools.agent-run
-   :spools ['ct.spools/agent-run]
    :required? true})
 ```
 
@@ -341,5 +340,5 @@ Notes use the declared `notes` relation.
 - [delegation/README.md](../delegation/README.md) — the `strand agent` verb surface, delegation, and coordinator/worker guidance layered over this engine.
 - [executors/subagent.md](../executors/subagent.md) — shipped adapter that bridges workflow `:subagent` gates to agent-run runs.
 - `test/ct/spools/agent_run_test.clj` — executable coverage for harnesses, readiness, failures, notes, and reconciliation.
-- [Runtime spool workspace helpers](../../devflow/specs/repl-api.md#spec-003p5-runtime-spool-workspace-helpers) — approved local-root loading contract.
+- [Runtime spool workspace helpers](../../devflow/specs/repl-api.md#spec-003p5-runtime-spool-workspace-helpers) — approved deps-native workspace composition contract.
 - [Weaver Runtime](../../devflow/specs/daemon-runtime.md) — event handlers, CLI operation registry, JSON socket transport, and runtime reload behavior.

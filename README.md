@@ -7,16 +7,14 @@ This monorepo contains four related Millstrand surfaces:
 - `delegation`: the cross-harness `strand agent` delegation surface.
 - `bench`: deterministic harness benchmarking and metrics extraction.
 
-Each top-level spool root has its own `deps.edn`. Source roots are approved and
-activated explicitly; this repository does not ship composition metadata.
+Each published spool root has its own `deps.edn`. The checked-in `.millstrand/deps.edn` composes the repository's harness source paths and external pins; source roots are activated explicitly.
 
 ## Dependency information
 
-Use a real 40-character commit SHA in shared `spools.edn`. Git coordinates for
-all three roots:
+Use a real 40-character commit SHA in the workspace's `deps.edn`. Git coordinates for all three roots:
 
 ```clojure
-{:spools
+{:deps
  {ct.spools/agent-run
   {:git/url "https://github.com/codethread/agent-harness.spool.git"
    :git/sha "<40-hex-sha-for-the-approved-commit>"
@@ -34,35 +32,30 @@ all three roots:
 Equivalent local coordinates:
 
 ```clojure
-{:spools
+{:deps
  {ct.spools/agent-run {:local/root "/path/to/agent-harness.spool/agent-run"}
   ct.spools/delegation {:local/root "/path/to/agent-harness.spool/delegation"}
   ct.spools/bench {:local/root "/path/to/agent-harness.spool/bench"}}}
 ```
 
-The subagent executor also requires Millhouse's Workflow spool. Approve either
-its root in a local Millhouse checkout:
+The subagent executor also requires Millhouse's Workflow spool. Add either its root in a local Millhouse checkout:
 
 ```clojure
-{:spools
+{:deps
  {millhouse.spools/workflow {:local/root "/path/to/millhouse.spool/spools/workflow"}}}
 ```
 
 or a pinned nested root:
 
 ```clojure
-{:spools
+{:deps
  {millhouse.spools/workflow
   {:git/url "https://github.com/codethread/millhouse.spool.git"
-   :git/sha "f1cdda3b46706b186f547251d285791be650d232"
+   :git/sha "f487eb42ea9523e8bd405e64a7c319013217d988"
    :deps/root "spools/workflow"}}}
 ```
 
-No prerequisite is fetched transitively. A runtime loads one version of each
-namespace, so a pinned agent-harness commit runs against the consumer's single
-chosen Workflow version. Compatibility across version skew follows the
-accretion convention: the engine adds; it does not break. This is a convention,
-not a version contract the dependent spool can enforce.
+Dependencies make source available; each workspace still activates only the modules it needs from trusted `init.clj`. A runtime loads one version of each namespace, so a pinned agent-harness commit runs against the consumer's chosen Workflow version.
 
 ## Compatibility: v7 → v8 (discovery-tier factoring)
 
@@ -112,29 +105,24 @@ trusted `init.clj`. `ct.spools.agent-run`, `ct.spools.delegation`, and `ct.spool
 (def rt (current/runtime))
 (runtime/module! rt :workflow
   {:ns 'millhouse.spools.workflow
-   :spools '[millhouse.spools/workflow]
    :required? true})
 
 (runtime/module! rt :agent-run
   {:ns 'ct.spools.agent-run
-   :spools '[ct.spools/agent-run]
    :required? true})
 
 (runtime/module! rt :delegation
   {:ns 'ct.spools.delegation
-   :spools '[ct.spools/delegation ct.spools/agent-run]
    :after [:agent-run]
    :required? true})
 
 (runtime/module! rt :subagent
   {:ns 'ct.spools.executors.subagent
-   :spools '[ct.spools/agent-run millhouse.spools/workflow]
    :after [:workflow :agent-run]
    :required? true})
 
 (runtime/module! rt :bench
   {:ns 'ct.spools.bench
-   :spools '[ct.spools/bench ct.spools/agent-run]
    :after [:agent-run]
    :required? true})
 ```
@@ -143,19 +131,17 @@ Remove activation blocks and approvals for surfaces the workspace does not use.
 
 ## Local development overrides
 
-Keep shared `spools.edn` SHA-pinned. In gitignored `spools.local.edn`, overlay
-the same coordinate symbols with direct roots:
+Keep shared `deps.edn` SHA-pinned. In gitignored `.millstrand/deps.local.edn`, override the same coordinate symbols with direct roots:
 
 ```clojure
-{:spools
+{:deps
  {ct.spools/agent-run {:local/root "/Users/you/dev/agent-harness.spool/agent-run"}
   ct.spools/delegation {:local/root "/Users/you/dev/agent-harness.spool/delegation"}
   ct.spools/bench {:local/root "/Users/you/dev/agent-harness.spool/bench"}
   millhouse.spools/workflow {:local/root "/Users/you/dev/millhouse.spool/spools/workflow"}}}
 ```
 
-Local entries replace shared entries by coordinate. `:deps/root` is git-only;
-a local root points directly at the selected spool directory.
+Local entries replace shared entries by coordinate. `:deps/root` is git-only; a local root points directly at the selected spool directory. A changed dependency basis requires a replacement Weaver generation.
 
 ## Development
 

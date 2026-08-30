@@ -141,35 +141,30 @@
                          "ct/spools/delegation.clj")]
     (test-alpha/with-weaver-world
       [ctx {:storage :sqlite-memory
-            :spools-edn
-            {:spools
-             {'ct.spools/harness-core {:local/root (.getCanonicalPath harness-core-root)}
-              'ct.spools/agent-cli {:local/root (.getCanonicalPath agent-cli-root)}
-              'ct.spools/agent-run {:local/root (.getCanonicalPath agent-run-root)}
-              'ct.spools/delegation {:local/root (.getCanonicalPath delegation-root)}}}
-            :init
+            :deps-edn
+            (pr-str {:deps {'ct.spools/harness-core {:local/root (.getCanonicalPath harness-core-root)}
+                            'ct.spools/agent-cli {:local/root (.getCanonicalPath agent-cli-root)}
+                            'ct.spools/agent-run {:local/root (.getCanonicalPath agent-run-root)}
+                            'ct.spools/delegation {:local/root (.getCanonicalPath delegation-root)}}})
+            :init-clj
             "(require '[millstrand.api.current.alpha :as current]
                        '[millstrand.api.runtime.alpha :as runtime])
              (def rt (current/runtime))
              (runtime/module! rt :harness-core
                {:ns 'ct.spools.harness-core
-                :spools ['ct.spools/harness-core]
                 :required? true})
              (runtime/module! rt :agent-cli
                {:ns 'ct.spools.agent-cli
-                :spools ['ct.spools/agent-cli 'ct.spools/harness-core]
                 :after [:harness-core]
                 :required? true})
              (runtime/module! rt :agent-run
                {:ns 'ct.spools.agent-run
-                :spools ['ct.spools/agent-run]
                 :required? true})
              (runtime/module! rt :delegation
                {:ns 'ct.spools.delegation
-                :spools ['ct.spools/delegation 'ct.spools/agent-run]
                 :after [:agent-run]
                 :required? true})"}]
-      (let [{:keys [ops queries patterns bins harness-subcommands lifecycles]}
+      (let [{:keys [ops queries patterns bins harness-subcommands outcomes]}
             (test-alpha/repl!
              ctx
              '(do
@@ -185,7 +180,7 @@
                    :bins (set (map :name (:bins (weaver/op! rt 'bins ["list"]))))
                    :harness-subcommands (set (keys (get-in (weaver/resolve-op rt 'harness)
                                                            [:arg-spec :subcommands])))
-                   :lifecycles (:lifecycle/outcomes (runtime/status rt))})))]
+                   :outcomes (get-in (runtime/status rt) [:last-refresh :modules])})))]
         (is (contains? (set ops) "harness"))
         (is (contains? harness-subcommands "resumable"))
         (is (contains? (set ops) "agent"))
@@ -197,8 +192,8 @@
                  [:agent-cli :agent-cli-runtime]
                  [:agent-run :agent-run-engine]
                  [:delegation :delegation-runtime]]]
-          (is (= {:status :applied :kind :resource}
-                 (get-in lifecycles [module effect]))))))))
+          (is (= :applied
+                 (get-in outcomes [module :lifecycle/outcomes effect :status]))))))))
 
 (defn- activate-delegation!
   "Activate the delegation module on `rt` so its `agent` op is registered."

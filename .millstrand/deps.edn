@@ -1,0 +1,30 @@
+{:paths ["../harness-core/src"
+         "../claude-harness/src"
+         "../codex-harness/src"
+         "../pi-harness/src"
+         "../cursor-harness/src"
+         "../agent-run/src"
+         "../agent-cli/src"
+         "../delegation/src"
+         "../bench/src"]
+ :deps {millstrand.spools/batteries {:git/url "https://github.com/codethread/millstrand.git"
+                                     :git/sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
+                                     :deps/root "spools/batteries"}
+        codethread/config {:git/url "https://github.com/codethread/codethread.spool.git"
+                            :git/sha "cdded90bba0009377c2d9e58021735d5baa5cf88"
+                            :deps/root "spools/config"}
+        codethread/ralph {:git/url "https://github.com/codethread/codethread.spool.git"
+                           :git/sha "cdded90bba0009377c2d9e58021735d5baa5cf88"
+                           :deps/root "spools/ralph"}
+        codethread/devflow {:git/url "https://github.com/codethread/devflow.spool.git"
+                             :git/sha "3a96415df0429c245191a22e66cc0bfc91524199"
+                             :deps/root "."}
+        millhouse.spools/workflow {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                   :git/sha "f487eb42ea9523e8bd405e64a7c319013217d988"
+                                   :deps/root "spools/workflow"}
+        millhouse.spools/identity {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                   :git/sha "f487eb42ea9523e8bd405e64a7c319013217d988"
+                                   :deps/root "spools/identity"}
+        millhouse.spools/kanban {:git/url "https://github.com/codethread/millhouse.spool.git"
+                                 :git/sha "f487eb42ea9523e8bd405e64a7c319013217d988"
+                                 :deps/root "spools/kanban"}}}

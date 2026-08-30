@@ -7,17 +7,18 @@ The core is consumed by immutable commit SHA, not a core tag:
 ```clojure
 {io.millstrand/millstrand
  {:git/url "https://github.com/codethread/millstrand.git"
-  :git/sha "6f265f45f894859c74dfd7c6bf32a94c48cb32d0"}}
+  :git/sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
+  :deps/root "."}}
 ```
 
-The released Kanban dependency is pinned to `v24` and peeled SHA `87f61bc2750e7026f3650235907db25f19b1536e`. Local sibling development may use `{:local/root "../millstrand"}` only in a private override; it is not release proof. The release verifier rejects local roots and exercises delegation, await/review, and accounting entry points in a fresh disposable workspace.
+Workflow, identity, and Kanban are ordinary tools.deps roots from the landed Millhouse commit `f487eb42ea9523e8bd405e64a7c319013217d988`. Local sibling development may use private `deps.local.edn` overlays, but those overlays are removed from release proof. The verifier exercises delegation, await/review, and accounting entry points in a fresh disposable workspace.
 
 ## Release verifier contract
 
-The release verifier treats Millhouse H1 as one immutable dependency closure. Workflow, Kanban, and identity all use the same exact H1 SHA, and release proof has no local override. The verifier checks that shared SHA in the clean consumer dependencies and in the projected disposable workspace.
+The release verifier treats the candidate root `deps.edn`, workspace `.millstrand/deps.edn`, and the two release JSON records as one strict boundary. It parses them once, requires exact immutable Millstrand `71c0ed3d80fcad090b74a704a8eb165a3fad996e` and Millhouse `f487eb42ea9523e8bd405e64a7c319013217d988` coordinates, and rejects disagreement in any declared root or alias pin before doing network or runtime work.
 
-Both pre-tag and published verification derive the exact Millstrand pin from the candidate `deps.edn`; published mode does so only from the checked-out candidate after annotated-tag/peeled-SHA verification, with the root and every alias agreeing on the same exact immutable URL/SHA; historical MSR-04 evidence is not a fallback.
+Pre-tag mode verifies a disposable copy of the current worktree. Published mode first proves the annotated tag's peeled SHA and then verifies the checked-out candidate through the same boundary. Neither mode has a historical-coordinate fallback or a manifest compatibility path.
 
-The marker-rename smoke intentionally excludes sibling weaver UUID continuity. A fresh sibling weaver generation is allowed; storage identity and representative functional state must remain unchanged.
+The runtime smoke uses one disposable deps-native workspace and one Weaver lifetime. It never renames a marker or restarts a Weaver.
 
 Rollback is to the prior published v25 Agent Harness release. This release does not migrate or activate any existing `.skein` world and does not recreate the forbidden core `v1` marker.

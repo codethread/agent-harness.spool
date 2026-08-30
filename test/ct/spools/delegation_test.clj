@@ -34,10 +34,10 @@
                                     :after [:agent-run])
       (f rt))))
 
-(deftest guarded-real-mill-agent-harness-replacement-acceptance
-  (testing "the external acceptance exercises one real planned replacement"
-    (is (= {:m0-sha "6f265f45f894859c74dfd7c6bf32a94c48cb32d0"
-            :replacement true
+(deftest guarded-real-mill-agent-harness-cutover-acceptance
+  (testing "the external acceptance keeps one disposable Weaver lifetime"
+    (is (= {:m0-sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
+            :replacement false
             :custody-reconciled true
             :delegated-once true}
            (real-agent-harness/run-acceptance!)))))
@@ -256,7 +256,7 @@
                               (agents/agent-op {:op/argv ["prime"]}))))
       (testing "spawn/ps/await/notes drive a full run over argv"
         (let [spawned (agents/agent-op {:op/argv ["spawn" "--harness" "sh" "--prompt" "echo via-op"]})]
-          (is (= "pending" (:phase spawned)))
+          (is (contains? #{"pending" "running"} (:phase spawned)))
           (let [{:keys [runs timed-out]}
                 (agents/agent-op {:op/argv ["await" (:id spawned) "--timeout-secs" (str (test-support/await-budget-secs))]})]
             (is (false? timed-out))

@@ -1253,7 +1253,7 @@
          "- Spawn subagents (async, returns a run id): " cmd " agent spawn --harness <name> --prompt \"...\" --spawned-by " run-id "\n"
          "- Wait for children: " cmd " agent await <child-run-id>\n"
          "- Never start or stop mills or weavers, and never create or edit workspace config"
-         " (init.clj, spools.edn, config.json, libs.edn): if strand commands fail, report the"
+         " (init.clj, deps.edn, deps.local.edn, config.json, libs.edn): if strand commands fail, report the"
          " exact error as your result instead of repairing the environment.\n"
          "- Your final message is captured automatically as this run's result; end with a clear, self-contained report for your caller.\n"
          generic-worker-contract "\n"
@@ -1296,7 +1296,7 @@
                 " leave notes as needed, say goodbye, then as your LITERAL LAST action run: "
                 cmd " update " id " --state closed\n"))
          "- Never start or stop mills or weavers, and never create or edit workspace config"
-         " (init.clj, spools.edn, config.json, libs.edn): if strand commands fail, report the"
+         " (init.clj, deps.edn, deps.local.edn, config.json, libs.edn): if strand commands fail, report the"
          " exact error to the user instead of repairing the environment.\n"
          "[task]\n")))
 

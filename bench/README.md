@@ -15,18 +15,17 @@ Division of labor with the [agent-run engine](../agent-run/README.md):
 
 ## 2. Loading
 
-Approved local-root spool. Agent-run must be installed first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
+Deps-native spool. Agent-run must be available first (the default `:harness` judge is an agent run; `:external` judges need no agent-run).
 
 ```clojure
-;; .millstrand/spools.edn
-{:spools {ct.spools/agent-run {:local/root "../spools/agent-run"}
-          ct.spools/bench   {:local/root "../spools/bench"}}}
+;; .millstrand/deps.edn
+{:deps {ct.spools/agent-run {:local/root "/path/to/agent-harness.spool/agent-run"}
+        ct.spools/bench {:local/root "/path/to/agent-harness.spool/bench"}}}
 ```
 
 ```clojure
 (runtime/module! runtime :bench
   {:ns 'ct.spools.bench
-   :spools ['ct.spools/bench]
    :required? true
    :after [:agent-run]})
 ```
@@ -142,10 +141,10 @@ Per entry, the engine executes (conceptually):
 
 ### Host-engine smoke helper
 
-`spools/bench/examples/host-engine` is a development helper that speaks the small docker/podman CLI subset bench emits, but runs the command directly on the host after rewriting mounted container paths. Use it when you want a quick bench smoke run without building images:
+`bench/examples/host-engine` is a development helper that speaks the small docker/podman CLI subset bench emits, but runs the command directly on the host after rewriting mounted container paths. Use it when you want a quick bench smoke run without building images:
 
 ```clojure
-(bench/set-engine! runtime ["/path/to/spools/bench/examples/host-engine"])
+(bench/set-engine! runtime ["/path/to/agent-harness.spool/bench/examples/host-engine"])
 ```
 
 It keeps the pinned clone, per-entry `HOME`, metrics extraction, timeout handling, and kill path. It is not hermetic: the host `PATH`, installed tools, and platform leak into the run. Use it for local smoke tests and harness comparisons, not for archival benchmark results.

@@ -5,6 +5,7 @@
   wait-until/await-eventually/await-* helper across the suite wraps instead
   of reinventing its own deadline/sleep/recur loop."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :as t]
             [millstrand.api.runtime.alpha :as runtime]
             [millstrand.api.weaver.alpha :as weaver]
@@ -176,6 +177,18 @@
   (t/is (= (set expected-keys) (set (keys (new-state-fn))))
         "spool-state key set drifted — bump the spool's state-version and this expected key set together"))
 
+(defn- generation-basis
+  "Build the minimal explicit generation basis for a disposable test runtime."
+  [config-dir]
+  {:sources [{:kind :project
+              :path (.getCanonicalPath (io/file config-dir "deps.edn"))
+              :deps {}}]
+   :aliases []
+   :reserved-deps {'io.millstrand/millstrand {:local/root "."}}
+   :basis {:libs {} :classpath-roots [] :argmap {}}
+   :fingerprint (str "sha256:" (str/join (repeat 64 "0")))
+   :classloader (.getContextClassLoader (Thread/currentThread))})
+
 (defn with-runtime
   "Run `f` (a `(fn [rt config-dir] ...)`) against a fresh, disposable weaver
   runtime.
@@ -194,7 +207,8 @@
          config-dir (temp-config-dir (select-keys opts [:prefix :nest-millstrand?]))]
      (try
        (let [rt (weaver-runtime/start! db-file {:world (test-world (.getCanonicalPath config-dir))
-                                                :publish? publish?})
+                                                :publish? publish?
+                                                :generation-basis (generation-basis config-dir)})
              control (test-process-control config-dir)
              original-call! (deref #'process-protocol/call!)]
          (try
