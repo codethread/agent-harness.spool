@@ -71,8 +71,8 @@ Move work onto this surface whenever the result should be **durable, awaitable b
 
 ```clojure
 ;; .millstrand/deps.edn
-{:deps {ct.spools/agent-run {:local/root "../spools/agent-run"}
-        ct.spools/delegation {:local/root "../spools/delegation"}}}
+{:deps {ct.spools/agent-run {:local/root "/path/to/agent-harness.spool/agent-run"}
+        ct.spools/delegation {:local/root "/path/to/agent-harness.spool/delegation"}}}
 ```
 
 ```clojure

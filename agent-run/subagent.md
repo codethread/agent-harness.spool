@@ -12,9 +12,7 @@
 `subagent`. It watches ready workflow gates, spawns agent-run runs, and completes the gate with the
 run result when the run succeeds.
 
-The workflow engine remains forge/tool agnostic: workflow authors declare an ordinary
-`(workflow/gate ... :subagent ...)` with attributes. Agent-run remains a run engine with no workflow
-concepts. The subagent executor is the small bridge that knows both contracts.
+The workflow engine remains forge/tool agnostic: workflow authors declare an ordinary `(workflow/gate ... :subagent ...)` with attributes. Agent-run remains a run engine with no workflow concepts. The subagent executor is the small bridge that knows both contracts.
 
 ## Loading
 
