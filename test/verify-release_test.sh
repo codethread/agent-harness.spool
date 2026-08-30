@@ -101,6 +101,26 @@ expect_release_field_failure() {
 expect_release_field_failure MSR-04 msr04 unexpected-evidence stale
 expect_release_field_failure MSR-05 msr05 peeled-sha f487eb42ea9523e8bd405e64a7c319013217d988
 
+cp "$repo_root/release/msr04-release.json" "$fixture/msr04-release.json"
+cp "$repo_root/release/msr05-release.json" "$fixture/msr05-release.json"
+python3 - "$fixture/msr04-release.json" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+text = text.replace('"card": "MSR-04",', '"card": "MSR-04",\n  "card": "MSR-05",', 1)
+path.write_text(text, encoding="utf-8")
+PY
+set +e
+output=$("$verify_release" --mode pre-tag --source-root "$fixture/candidate" \
+  --core-release "$fixture/msr04-release.json" \
+  --kanban-release "$fixture/msr05-release.json" 2>&1)
+status=$?
+set -e
+[[ "$status" -ne 0 && "$output" == *'MSR-04 release metadata has duplicate fields: card'* ]] || {
+  printf 'duplicate release-field probe failed (status %s):\n%s\n' "$status" "$output" >&2
+  exit 1
+}
+
 cp "$repo_root/deps.edn" "$fixture/candidate/deps.edn"
 cp "$repo_root/.millstrand/deps.edn" "$fixture/candidate/.millstrand/deps.edn"
 printf '' >"$fixture/candidate/deps.edn"

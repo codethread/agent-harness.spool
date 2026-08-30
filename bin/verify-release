@@ -122,10 +122,26 @@ release_error=$(python3 - "$core_release" "$kanban_release" <<'PY'
 import json, sys
 
 core_path, millhouse_path = sys.argv[1:]
-with open(core_path, encoding="utf-8") as handle:
-    core = json.load(handle)
-with open(millhouse_path, encoding="utf-8") as handle:
-    millhouse = json.load(handle)
+
+def load_release(label, path):
+    def reject_duplicate_keys(pairs):
+        document = {}
+        duplicates = set()
+        for key, value in pairs:
+            if key in document:
+                duplicates.add(key)
+            document[key] = value
+        if duplicates:
+            raise SystemExit(
+                f"{label} release metadata has duplicate fields: {', '.join(sorted(duplicates))}"
+            )
+        return document
+
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle, object_pairs_hook=reject_duplicate_keys)
+
+core = load_release("MSR-04", core_path)
+millhouse = load_release("MSR-05", millhouse_path)
 expected = [
     ("MSR-04", core, {"card": "MSR-04", "repository": "codethread/millstrand",
                        "coordinate": "io.millstrand/millstrand", "ref-kind": "sha",
