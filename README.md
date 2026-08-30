@@ -7,9 +7,7 @@ This monorepo contains four related Millstrand surfaces:
 - `delegation`: the cross-harness `strand agent` delegation surface.
 - `bench`: deterministic harness benchmarking and metrics extraction.
 
-Each published spool root has its own `deps.edn`. The checked-in
-`.millstrand/deps.edn` composes the repository's local libraries with its
-external pins; modules are activated explicitly.
+Each published spool root has its own `deps.edn`. The checked-in `.millstrand/deps.edn` composes the repository's local libraries with its external pins; modules are activated explicitly.
 
 ## Dependency information
 
