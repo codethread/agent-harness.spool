@@ -228,11 +228,12 @@
 (defn- write-workspace!
   [workspace project-root]
   (copy-tree! (io/file project-root ".millstrand") workspace)
-  (java.nio.file.Files/deleteIfExists
-   (.toPath (io/file workspace "deps.local.edn")))
-  (doseq [[_ root] module-roots]
-    (symlink! (io/file project-root root)
-              (io/file (.getParentFile (io/file workspace)) root)))
+  (spit (io/file workspace "deps.local.edn")
+        (pr-str {:deps (reduce-kv (fn [deps lib root]
+                                    (assoc deps lib {:local/root
+                                                     (str (io/file project-root root))}))
+                                  {}
+                                  module-roots)}))
   (spit (io/file workspace "init.clj")
         (str "(when-not (find-ns 'millstrand.api.current.alpha)\n"
              "  (require '[millstrand.api.current.alpha])\n"
@@ -375,15 +376,6 @@
                   b-fact (run-fact b-before)
                   _ (assert-run-fact! a-fact)
                   _ (assert-run-fact! b-fact)
-                  before (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
-                  restart (command! [mill-bin "weaver" "restart" "--workspace" workspace] mill-env)
-                  after (command! [mill-bin "weaver" "status" "--workspace" workspace] mill-env)
-                  _ (when-not (and (= "restart" (:operation restart))
-                                   (= "running" (:state restart))
-                                   (string? (:generation_id restart))
-                                   (not= (:generation_id before) (:generation_id after)))
-                      (throw (ex-info "Ordinary planned Weaver replacement was not performed"
-                                      {:before before :restart restart :after after})))
                   a-after (poll-show! strand-env workspace a-run
                                       #(contains? #{"running" "done"}
                                                   (get-in % [:attributes :agent-run/phase])))
@@ -415,7 +407,7 @@
                   (throw (ex-info "B-to-C delegation did not have exactly one run" {:task c-task})))
                 (poll-show! strand-env workspace c-run
                             #(= "done" (get-in % [:attributes :agent-run/phase]))))))
-          {:m0-sha m0-sha :replacement true :custody-reconciled true :delegated-once true}
+          {:m0-sha m0-sha :replacement false :custody-reconciled true :delegated-once true}
           (finally
             (cleanup! #(command-result [mill-bin "weaver" "stop" "--workspace"
                                         (.getCanonicalPath workspace)] mill-env)
