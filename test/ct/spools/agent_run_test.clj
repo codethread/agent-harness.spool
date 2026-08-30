@@ -164,7 +164,7 @@
                {:ns 'ct.spools.delegation
                 :after [:agent-run]
                 :required? true})"}]
-      (let [{:keys [ops queries patterns bins harness-subcommands lifecycles]}
+      (let [{:keys [ops queries patterns bins harness-subcommands outcomes]}
             (test-alpha/repl!
              ctx
              '(do
@@ -180,7 +180,7 @@
                    :bins (set (map :name (:bins (weaver/op! rt 'bins ["list"]))))
                    :harness-subcommands (set (keys (get-in (weaver/resolve-op rt 'harness)
                                                            [:arg-spec :subcommands])))
-                   :lifecycles (:lifecycle/outcomes (runtime/status rt))})))]
+                   :outcomes (get-in (runtime/status rt) [:last-refresh :modules])})))]
         (is (contains? (set ops) "harness"))
         (is (contains? harness-subcommands "resumable"))
         (is (contains? (set ops) "agent"))
@@ -192,8 +192,8 @@
                  [:agent-cli :agent-cli-runtime]
                  [:agent-run :agent-run-engine]
                  [:delegation :delegation-runtime]]]
-          (is (= {:status :applied :kind :resource}
-                 (get-in lifecycles [module effect]))))))))
+          (is (= :applied
+                 (get-in outcomes [module :lifecycle/outcomes effect :status]))))))))
 
 (defn- activate-delegation!
   "Activate the delegation module on `rt` so its `agent` op is registered."
