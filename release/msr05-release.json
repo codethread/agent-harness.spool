@@ -9,6 +9,6 @@
   "verification": [
     "make quality: 379 tests, 2873 assertions",
     "hosted quality run 33301524486",
-    "full-range land review: no actionable P1/P2 findings"
+    "full-range land review identified release-boundary follow-up bfzeg"
   ]
 }

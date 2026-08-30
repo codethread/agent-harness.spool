@@ -137,6 +137,19 @@ expected = [
                             "landed-main-commit": "f487eb42ea9523e8bd405e64a7c319013217d988"}),
 ]
 for label, document, identity in expected:
+    if not isinstance(document, dict):
+        raise SystemExit(f"{label} release metadata must be a JSON object")
+    supported_fields = set(identity) | {"land-run", "verification"}
+    unexpected_fields = sorted(set(document) - supported_fields)
+    missing_fields = sorted(supported_fields - set(document))
+    if unexpected_fields:
+        raise SystemExit(
+            f"{label} release metadata has unsupported fields: {', '.join(unexpected_fields)}"
+        )
+    if missing_fields:
+        raise SystemExit(
+            f"{label} release metadata lacks required fields: {', '.join(missing_fields)}"
+        )
     if any(document.get(key) != value for key, value in identity.items()):
         raise SystemExit(f"{label} release metadata does not identify the pinned commit")
     if not isinstance(document.get("land-run"), str) or not document["land-run"]:

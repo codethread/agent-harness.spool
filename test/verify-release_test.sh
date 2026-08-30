@@ -76,6 +76,31 @@ PY
 expect_failure root-pin 'candidate root Millstrand pin is not the exact release coordinate' deps.edn
 expect_failure workspace-pin 'candidate workspace Batteries pin is not aligned with Millstrand' .millstrand/deps.edn
 
+expect_release_field_failure() {
+  local label=$1
+  local release=$2
+  local field=$3
+  local value=$4
+  cp "$repo_root/release/msr04-release.json" "$fixture/msr04-release.json"
+  cp "$repo_root/release/msr05-release.json" "$fixture/msr05-release.json"
+  jq --arg field "$field" --arg value "$value" '.[$field] = $value' \
+    "$fixture/$release-release.json" >"$fixture/$release-release.tmp"
+  mv "$fixture/$release-release.tmp" "$fixture/$release-release.json"
+  set +e
+  output=$("$verify_release" --mode pre-tag --source-root "$fixture/candidate" \
+    --core-release "$fixture/msr04-release.json" \
+    --kanban-release "$fixture/msr05-release.json" 2>&1)
+  status=$?
+  set -e
+  [[ "$status" -ne 0 && "$output" == *"$label release metadata has unsupported fields: $field"* ]] || {
+    printf '%s unsupported-field probe failed (status %s):\n%s\n' "$label" "$status" "$output" >&2
+    exit 1
+  }
+}
+
+expect_release_field_failure MSR-04 msr04 unexpected-evidence stale
+expect_release_field_failure MSR-05 msr05 peeled-sha f487eb42ea9523e8bd405e64a7c319013217d988
+
 cp "$repo_root/deps.edn" "$fixture/candidate/deps.edn"
 cp "$repo_root/.millstrand/deps.edn" "$fixture/candidate/.millstrand/deps.edn"
 printf '' >"$fixture/candidate/deps.edn"
