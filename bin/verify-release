@@ -147,10 +147,20 @@ PY
 ) || die "release evidence is invalid: $release_error"
 
 pins=$(clojure -Sdeps '{:deps {}}' -M -e '
-(require (quote [clojure.edn :as edn]))
-(let [[root-path workspace-path] *command-line-args*
-      root (edn/read-string (slurp root-path))
-      workspace (edn/read-string (slurp workspace-path))
+(require (quote [clojure.edn :as edn])
+         (quote [clojure.java.io :as io]))
+(let [read-edn-file (fn [path]
+                      (with-open [reader (java.io.PushbackReader. (io/reader path))]
+                        (let [eof (Object.)
+                              value (edn/read {:eof eof} reader)]
+                          (when (identical? value eof)
+                            (throw (ex-info (str path " is empty") {})))
+                          (when-not (identical? (edn/read {:eof eof} reader) eof)
+                            (throw (ex-info (str path " contains trailing EDN forms") {})))
+                          value)))
+      [root-path workspace-path] *command-line-args*
+      root (read-edn-file root-path)
+      workspace (read-edn-file workspace-path)
       core-sha "71c0ed3d80fcad090b74a704a8eb165a3fad996e"
       millhouse-sha "f487eb42ea9523e8bd405e64a7c319013217d988"
       core-url "https://github.com/codethread/millstrand.git"
@@ -163,20 +173,28 @@ pins=$(clojure -Sdeps '{:deps {}}' -M -e '
       millhouse-pin (fn [coordinate]
                       {:git/url millhouse-url :git/sha millhouse-sha
                        :deps/root (get millhouse-roots coordinate)})
-      aliases (:aliases root)]
+      alias-sources [["root" (:aliases root)]
+                     ["workspace" (:aliases workspace)]]
+      alias-dep-keys [:deps :extra-deps :override-deps :default-deps :replace-deps]]
   (when-not (= (get-in root [:deps (quote io.millstrand/millstrand)]) core-pin)
     (throw (ex-info "candidate root Millstrand pin is not the exact release coordinate" {})))
   (when-not (= (get-in root [:deps (quote millstrand.spools/batteries)]) batteries-pin)
     (throw (ex-info "candidate root Batteries pin is not aligned with Millstrand" {})))
   (when-not (= (get-in workspace [:deps (quote millstrand.spools/batteries)]) batteries-pin)
     (throw (ex-info "candidate workspace Batteries pin is not aligned with Millstrand" {})))
-  (doseq [[alias config] aliases
+  (when-let [workspace-core (get-in workspace [:deps (quote io.millstrand/millstrand)])]
+    (when-not (= workspace-core core-pin)
+      (throw (ex-info "candidate workspace Millstrand pin is not the exact release coordinate" {}))))
+  (doseq [[source aliases] alias-sources
+          [alias config] aliases
+          dep-key alias-dep-keys
           [coordinate expected] [[(quote io.millstrand/millstrand) core-pin]
                                  [(quote millstrand.spools/batteries) batteries-pin]]
-          :let [actual (get-in config [:extra-deps coordinate])]
+          :let [actual (get-in config [dep-key coordinate])]
           :when actual]
     (when-not (= actual expected)
-      (throw (ex-info (str "candidate " coordinate " pin disagrees in alias " alias) {}))))
+      (throw (ex-info (str "candidate " source " " coordinate " pin disagrees in alias " alias
+                           " (" dep-key ")") {}))))
   (doseq [[coordinate root-name] millhouse-roots
           :let [expected (millhouse-pin coordinate)
                 root-pin (get-in root [:deps coordinate])
@@ -185,11 +203,14 @@ pins=$(clojure -Sdeps '{:deps {}}' -M -e '
       (throw (ex-info (str "candidate root " coordinate " pin is not the exact Millhouse release coordinate") {})))
     (when-not (= workspace-pin expected)
       (throw (ex-info (str "candidate workspace " coordinate " pin is not the exact Millhouse release coordinate") {})))
-    (doseq [[alias config] aliases
-            :let [actual (get-in config [:extra-deps coordinate])]
+    (doseq [[source aliases] alias-sources
+            [alias config] aliases
+            dep-key alias-dep-keys
+            :let [actual (get-in config [dep-key coordinate])]
             :when actual]
       (when-not (= actual expected)
-        (throw (ex-info (str "candidate " coordinate " pin disagrees in alias " alias) {})))))
+        (throw (ex-info (str "candidate " source " " coordinate " pin disagrees in alias " alias
+                             " (" dep-key ")") {})))))
   (println core-url)
   (println core-sha)
   (println millhouse-url)

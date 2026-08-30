@@ -76,4 +76,59 @@ PY
 expect_failure root-pin 'candidate root Millstrand pin is not the exact release coordinate' deps.edn
 expect_failure workspace-pin 'candidate workspace Batteries pin is not aligned with Millstrand' .millstrand/deps.edn
 
+cp "$repo_root/deps.edn" "$fixture/candidate/deps.edn"
+cp "$repo_root/.millstrand/deps.edn" "$fixture/candidate/.millstrand/deps.edn"
+printf '\n{}\n' >>"$fixture/candidate/deps.edn"
+set +e
+output=$("$verify_release" --mode pre-tag --source-root "$fixture/candidate" \
+  --core-release "$repo_root/release/msr04-release.json" \
+  --kanban-release "$repo_root/release/msr05-release.json" 2>&1)
+status=$?
+set -e
+[[ "$status" -ne 0 && "$output" == *'contains trailing EDN forms'* ]] || {
+  printf 'trailing-EDN probe failed (status %s):\n%s\n' "$status" "$output" >&2
+  exit 1
+}
+
+expect_alias_failure() {
+  local source=$1
+  local mutation=$2
+  local dep_key=$3
+  cp "$repo_root/deps.edn" "$fixture/candidate/deps.edn"
+  cp "$repo_root/.millstrand/deps.edn" "$fixture/candidate/.millstrand/deps.edn"
+  python3 - "$fixture/candidate/$mutation" "$dep_key" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+dep_key = sys.argv[2]
+text = path.read_text(encoding="utf-8").rstrip()
+config = ''':conflict
+           {%s
+            {io.millstrand/millstrand
+             {:git/url "https://github.com/codethread/millstrand.git"
+              :git/sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              :deps/root "."}}}
+''' % dep_key
+if re.search(r":aliases\s*{", text):
+    text = re.sub(r"(:aliases\s*{)", r"\1" + config, text, count=1)
+else:
+    text = text[:-1] + "\n :aliases {" + config + "}}"
+path.write_text(text + "\n", encoding="utf-8")
+PY
+  set +e
+  output=$("$verify_release" --mode pre-tag --source-root "$fixture/candidate" \
+    --core-release "$repo_root/release/msr04-release.json" \
+    --kanban-release "$repo_root/release/msr05-release.json" 2>&1)
+  status=$?
+  set -e
+  [[ "$status" -ne 0 && "$output" == *"candidate $source io.millstrand/millstrand pin disagrees in alias :conflict ($dep_key)"* ]] || {
+    printf '%s %s alias probe failed (status %s):\n%s\n' "$source" "$dep_key" "$status" "$output" >&2
+    exit 1
+  }
+}
+
+for dep_key in :deps :extra-deps :override-deps :default-deps :replace-deps; do
+  expect_alias_failure root deps.edn "$dep_key"
+  expect_alias_failure workspace .millstrand/deps.edn "$dep_key"
+done
+
 echo 'verify-release boundary probes: OK'
