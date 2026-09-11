@@ -2181,6 +2181,91 @@
         (is (= 1 @scans)
             "only terminal discovery scans pending work for admission")))))
 
+(deftest scheduled-custody-graph-read-failure-persists-and-cleans-up
+  (with-shuttle
+    (fn [rt]
+      (let [run (weaver/add! rt {:title "graph-read failure"
+                                 :attributes {"agent-run/run" "true"
+                                              "agent-run/harness" "sh"
+                                              "agent-run/prompt" "echo never"
+                                              "agent-run/phase" "running"
+                                              "agent-run/attempt" 1
+                                              "agent-run/process-handle" "run-a-handle"
+                                              "agent-run/process-key" "run-a/attempt-1"
+                                              "agent-run/process-owner" "agent-harness/run"}})
+            id (:id run)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)]
+        (try
+          (reset! in-flight {id {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _]
+                             (throw (ex-info "controlled graph read failed"
+                                             {:source :test})))
+             #'shuttle/scan! (fn [] [])}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt id)
+               (run-next-custody-callback! scheduler)))
+          (let [failed (weaver/show rt id)]
+            (is (= "failed" (get-in failed [:attributes :agent-run/phase])))
+            (is (str/includes? (get-in failed [:attributes :agent-run/error])
+                               "controlled graph read failed")))
+          (is (empty? @in-flight) "a failed graph observation releases its token")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a failed graph observation does not rearm")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest scheduled-custody-persistence-failure-is-observable
+  (with-shuttle
+    (fn [rt]
+      (let [run (weaver/add! rt {:title "unwritable graph-read failure"
+                                 :attributes {"agent-run/run" "true"
+                                              "agent-run/harness" "sh"
+                                              "agent-run/prompt" "echo never"
+                                              "agent-run/phase" "running"
+                                              "agent-run/attempt" 1
+                                              "agent-run/process-handle" "run-a-handle"
+                                              "agent-run/process-key" "run-a/attempt-1"
+                                              "agent-run/process-owner" "agent-harness/run"}})
+            id (:id run)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            warnings (atom [])
+            transition-error (ex-info "controlled durable write failed"
+                                      {:operation :mark-failed})]
+        (try
+          (reset! in-flight {id {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _]
+                             (throw (ex-info "controlled graph read failed"
+                                             {:source :test})))
+             #'weaver/update! (fn [_ _ _] (throw transition-error))
+             #'shuttle/warn! (fn [message data] (swap! warnings conj [message data]))}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt id)
+               ;; ScheduledFuture#run records the callback exception instead of
+               ;; throwing it to this caller; the warning is the observable
+               ;; scheduling boundary for that retained failure.
+               (run-next-custody-callback! scheduler)))
+          (is (= 1 (count @warnings)))
+          (let [[message data] (first @warnings)]
+            (is (= "Scheduled custody inspection failed" message))
+            (is (= id (:run-id data)))
+            (is (= "Unable to persist process custody failure"
+                   (get-in data [:exception :message])))
+            (is (= {:operation :mark-failed}
+                   (get-in data [:exception :data :failure-transition-error :data]))))
+          (is (empty? @in-flight) "a persistence failure releases its token")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a persistence failure does not rearm")
+          (finally
+            (.shutdownNow scheduler)))))))
+
 (deftest missing-executor-fails-loudly
   ;; The morning incident: a preserved state lacking :worker-executor turned
   ;; scan!'s launch into (.execute nil ..), silently parking runs. The getter

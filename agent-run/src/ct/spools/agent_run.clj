@@ -1618,6 +1618,11 @@
                                      (schedule-custody-inspection! runtime id))))
                                (catch Throwable error
                                  (clear-custody-inspection! id token)
+                                 (warn! "Scheduled custody inspection failed"
+                                        {:run-id id
+                                         :exception {:class (str (class error))
+                                                     :message (ex-message error)
+                                                     :data (ex-data error)}})
                                  (throw error)))))
                (long custody-inspection-ms)
                TimeUnit/MILLISECONDS)
@@ -2450,33 +2455,34 @@
   ([runtime id]
    (run-custody-inspection! runtime id nil))
   ([runtime id inspection-token]
-   (let [run (weaver/show runtime id)]
-     (if-not (headless-running? run)
-      ;; A terminal graph observation can race the durable custody result. The
-      ;; run no longer belongs to this supervisor, so release its runtime slot
-      ;; even when the terminal path did not get there first.
-       (do (if inspection-token
-             (release-custody-inspection! id inspection-token)
-             (swap! (in-flight) dissoc id))
-           nil)
-       (let [result (try
+   (let [result (try
+                  (let [run (weaver/show runtime id)]
+                    (if-not (headless-running? run)
+                     ;; A terminal graph observation can race the durable
+                     ;; custody result. The run no longer belongs to this
+                     ;; supervisor, so release its runtime slot even when the
+                     ;; terminal path did not get there first.
+                      (do (if inspection-token
+                            (release-custody-inspection! id inspection-token)
+                            (swap! (in-flight) dissoc id))
+                          nil)
                       (reconcile-headless-run!
                        run
                        [(custody-record-for-run runtime run)]
-                       {:adopt? false :inspection-token inspection-token})
-                      (catch Throwable error
-                        (let [transition-error (persist-reconciliation-failure!
-                                                id error)]
-                          (if inspection-token
-                            (release-custody-inspection! id inspection-token)
-                            (swap! (in-flight) dissoc id))
-                          (cond-> {:failed id}
-                            transition-error (assoc :error transition-error)))))]
-         (when (or (:terminal result) (:failed result))
-           (scan!))
-         (when-let [error (:error result)]
-           (throw error))
-         result)))))
+                       {:adopt? false :inspection-token inspection-token})))
+                  (catch Throwable error
+                    (let [transition-error (persist-reconciliation-failure!
+                                            id error)]
+                      (if inspection-token
+                        (release-custody-inspection! id inspection-token)
+                        (swap! (in-flight) dissoc id))
+                      (cond-> {:failed id}
+                        transition-error (assoc :error transition-error)))))]
+     (when (or (:terminal result) (:failed result))
+       (scan!))
+     (when-let [error (:error result)]
+       (throw error))
+     result)))
 
 (defn reconcile!
   "Reconcile Mill custody facts with active headless agent runs.
