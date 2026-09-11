@@ -19,6 +19,7 @@
             [millstrand.test.alpha :as test-alpha]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.process.alpha :as process]
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
@@ -1857,6 +1858,413 @@
           "claimed, running, and deferred-recovery runs all count as in-flight")
       (swap! (#'shuttle/in-flight) dissoc "run-b")
       (is (= #{"run-a" "run-c"} (shuttle/in-flight-run-ids))))))
+
+(deftest custody-inspections-coalesce-one-callback-per-running-run
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}
+                             "run-b" {:phase :running}
+                             "run-c" {:phase :running}
+                             "run-d" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000}
+            #(doseq [id (concat (repeat 20 "run-a")
+                                (repeat 20 "run-b")
+                                (repeat 20 "run-c")
+                                (repeat 20 "run-d"))]
+               (#'shuttle/schedule-custody-inspection! rt id)))
+          (is (= 4 (.size (.getQueue scheduler)))
+              "repeated due observations leave one queued callback per run")
+          (is (= #{"run-a" "run-b" "run-c" "run-d"}
+                 (set (keys @in-flight))))
+          (is (every? #(some? (:custody-inspection (get @in-flight %)))
+                      ["run-a" "run-b" "run-c" "run-d"]))
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(defn- run-next-custody-callback!
+  "Execute the next delayed custody callback from a deterministic test scheduler."
+  [scheduler]
+  (let [queue (.getQueue scheduler)
+        callback (.peek queue)]
+    (is (some? callback) "expected one queued custody callback")
+    ;; DelayQueue#poll only returns expired entries. Remove the delayed task
+    ;; explicitly, then invoke its real scheduled Runnable without wall-clock
+    ;; waiting or allowing the executor worker to race the test.
+    (.remove queue callback)
+    (.run ^Runnable callback)))
+
+(defn- running-custody-run
+  "Return a minimal active headless run with an exact retained custody handle."
+  [id]
+  {:id id
+   :state "active"
+   :attributes {:agent-run/run "true"
+                :agent-run/phase "running"
+                :agent-run/attempt 1
+                :agent-run/process-owner "agent-harness/run"
+                :agent-run/process-key (str id "/attempt-1")
+                :agent-run/process-handle (str id "-handle")}})
+
+(defn- running-custody-record
+  "Return the matching running process fact for a test run."
+  [id]
+  {:handle (str id "-handle")
+   :owner custody/owner
+   :key (str id "/attempt-1")
+   :phase :running
+   :output {:stdout-ref "/tmp/out" :stderr-ref "/tmp/err"}})
+
+(deftest custody-inspections-rearm-with-a-fixed-per-run-bound
+  (with-shuttle
+    (fn [rt]
+      (doseq [ids [["run-a" "run-b"]
+                   ["run-a" "run-b" "run-c" "run-d"]]]
+        (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+              in-flight (#'shuttle/in-flight)
+              runs (into {} (map (juxt identity running-custody-run) ids))
+              records (into {} (map (juxt #(str % "-handle") running-custody-record) ids))
+              observed (atom [])
+              global-lists (atom 0)
+              scans (atom 0)
+              running-query @#'shuttle/running-query]
+          (try
+            (reset! in-flight (into {} (for [id ids] [id {:phase :running}])))
+            (with-redefs-fn
+              {#'shuttle/recovery-scheduler (constantly scheduler)
+               #'shuttle/custody-inspection-ms 60000
+               #'weaver/show (fn [_ id] (get runs id))
+               #'process/get (fn [_ handle]
+                               (swap! observed conj handle)
+                               (get records handle))
+               #'weaver/list (fn [_ query _]
+                               (swap! global-lists inc)
+                               (if (= running-query query) (vals runs) []))
+               #'shuttle/scan! (fn [] (swap! scans inc))}
+              #(do
+                 (doseq [id ids]
+                   (#'shuttle/schedule-custody-inspection! rt id))
+                 (dotimes [_ 4]
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "one callback is queued per running run")
+                   (dotimes [_ (count ids)]
+                     (run-next-custody-callback! scheduler))
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "each completed callback rearms only its own run")
+                   (shuttle/reconcile!)
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "an explicit global reconcile does not duplicate callbacks"))))
+            (is (= (frequencies @observed)
+                   (zipmap (map #(str % "-handle") ids) (repeat 4)))
+                "every run is observed in every deterministic generation")
+            (is (= 12 @global-lists)
+                "only explicit reconciliation performs global listings")
+            (is (= 4 @scans)
+                "only explicit reconciliation performs the pending scan")
+            (finally
+              (.shutdownNow scheduler))))))))
+
+(deftest stale-custody-observation-cannot-resurrect-released-capacity
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] run)
+             #'process/get (fn [_ _] record)
+             #'shuttle/reconcile-headless-run!
+             (fn [_ _ _]
+               ;; Model a terminal/failure owner winning while this callback
+               ;; still holds its stale running observation.
+               (swap! in-flight dissoc "run-a")
+               {:running "run-a"})}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (run-next-custody-callback! scheduler)))
+          (is (empty? @in-flight)
+              "a stale callback cannot recreate released runtime capacity")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a stale callback cannot strand another inspection")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest actual-custody-reconciler-cannot-mutate-after-token-loss
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")
+            observed (promise)
+            release (promise)]
+        (try
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] run)
+             #'process/get (fn [_ _] record)
+             #'custody/durable-attributes (fn [& _]
+                                            (deliver observed true)
+                                            @release)}
+            #(do
+               (reset! in-flight {"run-a" {:phase :running}})
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (let [callback (future (run-next-custody-callback! scheduler))]
+                 @observed
+                 (reset! in-flight {})
+                 (deliver release {})
+                 @callback
+                 (is (empty? @in-flight)
+                     "removing an owned entry wins over a blocked running observation")
+                 (is (zero? (.size (.getQueue scheduler)))
+                     "a stale running observation does not rearm"))
+               (let [newer-token (Object.)
+                     observed (promise)
+                     release (promise)]
+                 (with-redefs-fn
+                   {#'custody/durable-attributes (fn [& _]
+                                                   (deliver observed true)
+                                                   @release)}
+                   (fn []
+                     (reset! in-flight {"run-a" {:phase :running}})
+                     (#'shuttle/schedule-custody-inspection! rt "run-a")
+                     (let [callback (future (run-next-custody-callback! scheduler))]
+                       @observed
+                       (reset! in-flight {"run-a" {:phase :running
+                                                   :custody-inspection newer-token
+                                                   :attempt 2}})
+                       (deliver release {})
+                       @callback
+                       (is (= {"run-a" {:phase :running
+                                        :custody-inspection newer-token
+                                        :attempt 2}}
+                              @in-flight)
+                           "a newer attempt survives a stale running observation")
+                       (is (zero? (.size (.getQueue scheduler)))
+                           "a stale observation does not queue a callback for a newer attempt")))))))
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest actual-global-reconciler-eager-reservations-survive-list-owned-race
+  (with-shuttle
+    (fn [_rt]
+      (let [ids (mapv #(str "run-" %) (range 40))
+            runs (mapv running-custody-run ids)
+            records (mapv running-custody-record ids)
+            removed-id (last ids)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            observed (promise)
+            release (promise)
+            running-query @#'shuttle/running-query]
+        (try
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/list (fn [_ query _]
+                             (if (= running-query query) runs []))
+             #'custody/list-owned (fn [_]
+                                    (deliver observed true)
+                                    @release)
+             #'shuttle/scan! (fn [] [])
+             #'shuttle/supervise! (fn [] {:reaped [] :failed []})}
+            #(do
+               (reset! in-flight {})
+               (let [reconcile (future (#'shuttle/reconcile!))]
+                 @observed
+                 (is (= (set ids) (set (keys @in-flight)))
+                     "every startup reservation exists before list-owned returns")
+                 (is (every? (fn [id] (some? (get-in @in-flight [id :custody-inspection]))) ids)
+                     "every startup reservation owns a custody token before the read")
+                 (swap! in-flight dissoc removed-id)
+                 (deliver release records)
+                 @reconcile
+                 (is (= (set (butlast ids)) (set (keys @in-flight)))
+                     "a reservation removed during list-owned is not resurrected")
+                 (is (= (dec (count ids)) (.size (.getQueue scheduler)))
+                     "a reservation removed during list-owned is not queued"))))
+          (finally
+            (deliver release records)
+            (.shutdownNow scheduler)))))))
+
+(deftest terminal-custody-observation-releases-a-zombie-slot
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            terminal-run {:id "run-a"
+                          :state "closed"
+                          :attributes {:agent-run/run "true"
+                                       :agent-run/phase "done"}}]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] terminal-run)}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (run-next-custody-callback! scheduler)))
+          (is (empty? @in-flight)
+              "a terminal observation releases capacity left by a raced owner")
+          (is (zero? (.size (.getQueue scheduler)))
+              "terminal observation does not rearm custody polling")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest targeted-running-reconcile-does-not-adopt-after-release
+  (with-shuttle
+    (fn [_rt]
+      (let [in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")]
+        (reset! in-flight {})
+        (is (= {:stale "run-a"}
+               (#'shuttle/reconcile-headless-run!
+                run [record] {:adopt? false})))
+        (is (empty? @in-flight)
+            "targeted stale observations preserve the released capacity")))))
+
+(deftest custody-poll-uses-targeted-process-and-stops-scanning-after-terminal
+  (with-shuttle
+    (fn [rt]
+      (let [runs (into {}
+                       (for [id ["run-a" "run-b"]]
+                         [id {:id id
+                              :state "active"
+                              :attributes {:agent-run/run "true"
+                                           :agent-run/phase "running"
+                                           :agent-run/attempt 1
+                                           :agent-run/process-owner "agent-harness/run"
+                                           :agent-run/process-key (str id "/attempt-1")
+                                           :agent-run/process-handle (str id "-handle")}}]))
+            records (into {}
+                          (for [[id run] runs]
+                            [(:agent-run/process-handle (:attributes run))
+                             {:handle (str id "-handle")
+                              :owner custody/owner
+                              :key (str id "/attempt-1")
+                              :phase :running
+                              :output {:stdout-ref "/tmp/out" :stderr-ref "/tmp/err"}}]))
+            observed (atom [])
+            scans (atom 0)]
+        (reset! (#'shuttle/in-flight)
+                {"run-a" {:phase :running}
+                 "run-b" {:phase :running}})
+        (with-redefs-fn
+          {#'weaver/show (fn [_ id] (get runs id))
+           #'process/get (fn [_ handle] (get records handle))
+           #'shuttle/reconcile-headless-run!
+           (fn [run _records _opts]
+             (swap! observed conj (:id run))
+             (if (= "run-b" (:id run))
+               {:terminal (:id run)}
+               {:running (:id run)}))
+           #'shuttle/scan! (fn [] (swap! scans inc))
+           #'weaver/list (fn [& _]
+                           (throw (ex-info "unexpected full-store list" {})))}
+          #(do
+             (#'shuttle/run-custody-inspection! rt "run-a")
+             (#'shuttle/run-custody-inspection! rt "run-b")))
+        (is (= ["run-a" "run-b"] @observed)
+            "each targeted custody poll observes its requested run")
+        (is (= 1 @scans)
+            "only terminal discovery scans pending work for admission")))))
+
+(deftest scheduled-custody-graph-read-failure-persists-and-cleans-up
+  (with-shuttle
+    (fn [rt]
+      (let [run (weaver/add! rt {:title "graph-read failure"
+                                 :attributes {"agent-run/run" "true"
+                                              "agent-run/harness" "sh"
+                                              "agent-run/prompt" "echo never"
+                                              "agent-run/phase" "running"
+                                              "agent-run/attempt" 1
+                                              "agent-run/process-handle" "run-a-handle"
+                                              "agent-run/process-key" "run-a/attempt-1"
+                                              "agent-run/process-owner" "agent-harness/run"}})
+            id (:id run)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)]
+        (try
+          (reset! in-flight {id {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _]
+                             (throw (ex-info "controlled graph read failed"
+                                             {:source :test})))
+             #'shuttle/scan! (fn [] [])}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt id)
+               (run-next-custody-callback! scheduler)))
+          (let [failed (weaver/show rt id)]
+            (is (= "failed" (get-in failed [:attributes :agent-run/phase])))
+            (is (str/includes? (get-in failed [:attributes :agent-run/error])
+                               "controlled graph read failed")))
+          (is (empty? @in-flight) "a failed graph observation releases its token")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a failed graph observation does not rearm")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest scheduled-custody-persistence-failure-is-observable
+  (with-shuttle
+    (fn [rt]
+      (let [run (weaver/add! rt {:title "unwritable graph-read failure"
+                                 :attributes {"agent-run/run" "true"
+                                              "agent-run/harness" "sh"
+                                              "agent-run/prompt" "echo never"
+                                              "agent-run/phase" "running"
+                                              "agent-run/attempt" 1
+                                              "agent-run/process-handle" "run-a-handle"
+                                              "agent-run/process-key" "run-a/attempt-1"
+                                              "agent-run/process-owner" "agent-harness/run"}})
+            id (:id run)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            warnings (atom [])
+            transition-error (ex-info "controlled durable write failed"
+                                      {:operation :mark-failed})]
+        (try
+          (reset! in-flight {id {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _]
+                             (throw (ex-info "controlled graph read failed"
+                                             {:source :test})))
+             #'weaver/update! (fn [_ _ _] (throw transition-error))
+             #'shuttle/warn! (fn [message data] (swap! warnings conj [message data]))}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt id)
+               ;; ScheduledFuture#run records the callback exception instead of
+               ;; throwing it to this caller; the warning is the observable
+               ;; scheduling boundary for that retained failure.
+               (run-next-custody-callback! scheduler)))
+          (is (= 1 (count @warnings)))
+          (let [[message data] (first @warnings)]
+            (is (= "Scheduled custody inspection failed" message))
+            (is (= id (:run-id data)))
+            (is (= "Unable to persist process custody failure"
+                   (get-in data [:exception :message])))
+            (is (= {:operation :mark-failed}
+                   (get-in data [:exception :data :failure-transition-error :data]))))
+          (is (empty? @in-flight) "a persistence failure releases its token")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a persistence failure does not rearm")
+          (finally
+            (.shutdownNow scheduler)))))))
 
 (deftest missing-executor-fails-loudly
   ;; The morning incident: a preserved state lacking :worker-executor turned
