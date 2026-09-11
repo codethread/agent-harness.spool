@@ -1555,7 +1555,8 @@
 
 (def ^:private custody-inspection-ms 100)
 
-(declare reconcile! run-custody-inspection! headless-running?)
+(declare reconcile! run-custody-inspection! headless-running!
+         schedule-custody-inspection!)
 
 (defn- reserve-custody-inspection! [id]
   (let [token (Object.)
@@ -1576,10 +1577,54 @@
 (defn- clear-custody-inspection! [id token]
   (let [[before _after] (swap-vals! (in-flight)
                                     (fn [entries]
-                                      (if (= token (get-in entries [id :custody-inspection]))
+                                      (if (identical? token (get-in entries [id :custody-inspection]))
                                         (update entries id dissoc :custody-inspection)
                                         entries)))]
-    (= token (get-in before [id :custody-inspection]))))
+    (identical? token (get-in before [id :custody-inspection]))))
+
+(defn- reserve-global-custody-inspection! [id]
+  (let [token (Object.)
+        [before after] (swap-vals! (in-flight)
+                                   (fn [entries]
+                                     (if-let [entry (get entries id)]
+                                       (if (nil? (:custody-inspection entry))
+                                         (assoc-in entries [id :custody-inspection] token)
+                                         entries)
+                                       (assoc entries id {:phase :running
+                                                          :headless? true
+                                                          :custody-inspection token}))))]
+    (when (identical? token (get-in after [id :custody-inspection]))
+      {:token token
+       :adopted? (not (contains? before id))})))
+
+(defn- release-custody-inspection! [id token]
+  (let [[before _after] (swap-vals! (in-flight)
+                                    (fn [entries]
+                                      (if (identical? token (get-in entries [id :custody-inspection]))
+                                        (dissoc entries id)
+                                        entries)))]
+    (identical? token (get-in before [id :custody-inspection]))))
+
+(defn- enqueue-custody-inspection!
+  "Queue one already-owned custody inspection token for `runtime` and `id`."
+  [runtime id token]
+  (try
+    (.schedule (recovery-scheduler)
+               ^Runnable (fn []
+                           (binding [*runtime* runtime]
+                             (try
+                               (let [result (run-custody-inspection! runtime id token)]
+                                 (when (clear-custody-inspection! id token)
+                                   (when (:running result)
+                                     (schedule-custody-inspection! runtime id))))
+                               (catch Throwable error
+                                 (clear-custody-inspection! id token)
+                                 (throw error)))))
+               (long custody-inspection-ms)
+               TimeUnit/MILLISECONDS)
+    (catch Throwable error
+      (clear-custody-inspection! id token)
+      (throw error))))
 
 (defn- schedule-custody-inspection!
   "Inspect one Mill-retained process fact after a starting/running observation.
@@ -1589,23 +1634,7 @@
   while a prior inspection is queued or executing."
   [runtime id]
   (when-let [token (reserve-custody-inspection! id)]
-    (try
-      (.schedule (recovery-scheduler)
-                 ^Runnable (fn []
-                             (binding [*runtime* runtime]
-                               (try
-                                 (let [result (run-custody-inspection! runtime id)]
-                                   (when (clear-custody-inspection! id token)
-                                     (when (:running result)
-                                       (schedule-custody-inspection! runtime id))))
-                                 (catch Throwable error
-                                   (clear-custody-inspection! id token)
-                                   (throw error)))))
-                 (long custody-inspection-ms)
-                 TimeUnit/MILLISECONDS)
-      (catch Throwable error
-        (clear-custody-inspection! id token)
-        (throw error)))))
+    (enqueue-custody-inspection! runtime id token)))
 
 (declare claim! claim-ready! launch-run! note! run-for-target scan! reconcile!)
 
@@ -2306,7 +2335,7 @@
 (defn- reconcile-headless-run!
   ([run records]
    (reconcile-headless-run! run records {:adopt? true}))
-  ([run records {:keys [adopt?]}]
+  ([run records {:keys [adopt? inspection-token]}]
    (let [id (:id run)
          attempt (sattr run "attempt")
          record (custody/record-for "agent-run" run records)
@@ -2324,15 +2353,26 @@
                       (custody/terminal-observed record))
          (custody/acknowledge! (rt) record)
          {:terminal id})
-       (if (or adopt? (contains? @(in-flight) id))
-         (do
-           (swap! (in-flight) update id merge {:phase :running :headless? true})
-           (schedule-custody-inspection! (rt) id)
-           {:running id})
-         ;; A targeted callback may finish after another path has released this
-         ;; run. It must not recreate runtime-owned capacity from its stale
-         ;; running observation; the durable terminal/failure path wins.
-         {:stale id})))))
+       (let [token (or inspection-token
+                       (when adopt?
+                         (:token (reserve-global-custody-inspection! id))))
+             [before _after] (swap-vals! (in-flight)
+                                         (fn [entries]
+                                           (if (if token
+                                                 (identical? token
+                                                             (get-in entries [id :custody-inspection]))
+                                                 (and (not adopt?) (contains? entries id)))
+                                             (update entries id merge {:phase :running
+                                                                       :headless? true})
+                                             entries)))]
+         (if (if token
+               (identical? token (get-in before [id :custody-inspection]))
+               (and (not adopt?) (contains? before id)))
+           {:running id}
+           ;; A targeted callback may finish after another path has released this
+           ;; run. It must not recreate runtime-owned capacity from its stale
+           ;; running observation; the durable terminal/failure path wins.
+           {:stale id}))))))
 
 (defn- persist-reconciliation-failure!
   "Persist one custody reconciliation failure and return a write error.
@@ -2408,30 +2448,36 @@
   custody after a Weaver replacement. Recurring callbacks use the run's
   durable process handle instead; only a terminal or failed observation scans
   pending work so the fan-out window can admit its next run."
-  [runtime id]
-  (let [run (weaver/show runtime id)]
-    (if-not (headless-running? run)
+  ([runtime id]
+   (run-custody-inspection! runtime id nil))
+  ([runtime id inspection-token]
+   (let [run (weaver/show runtime id)]
+     (if-not (headless-running? run)
       ;; A terminal graph observation can race the durable custody result. The
       ;; run no longer belongs to this supervisor, so release its runtime slot
       ;; even when the terminal path did not get there first.
-      (do (swap! (in-flight) dissoc id)
-          nil)
-      (let [result (try
-                     (reconcile-headless-run!
-                      run
-                      [(custody-record-for-run runtime run)]
-                      {:adopt? false})
-                     (catch Throwable error
-                       (let [transition-error (persist-reconciliation-failure!
-                                               id error)]
-                         (swap! (in-flight) dissoc id)
-                         (cond-> {:failed id}
-                           transition-error (assoc :error transition-error)))))]
-        (when (or (:terminal result) (:failed result))
-          (scan!))
-        (when-let [error (:error result)]
-          (throw error))
-        result))))
+       (do (if inspection-token
+             (release-custody-inspection! id inspection-token)
+             (swap! (in-flight) dissoc id))
+           nil)
+       (let [result (try
+                      (reconcile-headless-run!
+                       run
+                       [(custody-record-for-run runtime run)]
+                       {:adopt? false :inspection-token inspection-token})
+                      (catch Throwable error
+                        (let [transition-error (persist-reconciliation-failure!
+                                                id error)]
+                          (if inspection-token
+                            (release-custody-inspection! id inspection-token)
+                            (swap! (in-flight) dissoc id))
+                          (cond-> {:failed id}
+                            transition-error (assoc :error transition-error)))))]
+         (when (or (:terminal result) (:failed result))
+           (scan!))
+         (when-let [error (:error result)]
+           (throw error))
+         result)))))
 
 (defn reconcile!
   "Reconcile Mill custody facts with active headless agent runs.
@@ -2444,34 +2490,44 @@
   []
   (let [runtime (rt)
         runs (filter headless-running? (weaver/list runtime running-query {}))
-        records (when (seq runs) (custody/list-owned runtime))
+        reservations (keep (fn [run]
+                             (when-let [reservation (reserve-global-custody-inspection!
+                                                     (:id run))]
+                               [run reservation]))
+                           runs)
+        records (when (seq reservations) (custody/list-owned runtime))
         summary (reduce
-                 (fn [acc run]
+                 (fn [acc [run {:keys [token adopted?]}]]
                    (let [id (:id run)
                          expected-key (sattr run "process-key")
                          present? (some #(and (= custody/owner (:owner %))
                                               (= expected-key (:key %)))
                                         records)]
-                     (if (and (contains? @(in-flight) id) (not present?))
+                     (if (and (not adopted?) (not present?))
                        (do
                          ;; The local launch owns this run while Mill's owner
                          ;; listing catches up. Keep the targeted callback alive;
                          ;; it will fail the run if the fact truly stays absent.
-                         (schedule-custody-inspection! runtime id)
+                         (enqueue-custody-inspection! runtime id token)
                          (update acc :running conj id))
                        (try
-                         (let [result (reconcile-headless-run! run records)]
-                           (if (:terminal result)
-                             (update acc :terminal conj (:terminal result))
-                             (update acc :running conj (:running result))))
+                         (let [result (reconcile-headless-run!
+                                       run records
+                                       {:adopt? adopted? :inspection-token token})]
+                           (cond
+                             (:terminal result) (update acc :terminal conj (:terminal result))
+                             (:running result) (do
+                                                 (enqueue-custody-inspection! runtime id token)
+                                                 (update acc :running conj (:running result)))
+                             :else acc))
                          (catch Throwable error
                            (let [transition-error (persist-reconciliation-failure! id error)]
-                             (swap! (in-flight) dissoc id)
+                             (release-custody-inspection! id token)
                              (cond-> (update acc :failed conj id)
                                transition-error
                                (update :errors conj transition-error))))))))
                  {:running [] :terminal [] :failed [] :errors []}
-                 runs)
+                 reservations)
         interactive-orphans (remove #(contains? @(in-flight) (:id %))
                                     (weaver/list runtime interactive-running-query {}))
         adopted (reduce (fn [ids run]

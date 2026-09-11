@@ -1992,6 +1992,104 @@
           (finally
             (.shutdownNow scheduler)))))))
 
+(deftest actual-custody-reconciler-cannot-mutate-after-token-loss
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")
+            observed (promise)
+            release (promise)]
+        (try
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] run)
+             #'process/get (fn [_ _] record)
+             #'custody/durable-attributes (fn [& _]
+                                            (deliver observed true)
+                                            @release)}
+            #(do
+               (reset! in-flight {"run-a" {:phase :running}})
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (let [callback (future (run-next-custody-callback! scheduler))]
+                 @observed
+                 (reset! in-flight {})
+                 (deliver release {})
+                 @callback
+                 (is (empty? @in-flight)
+                     "removing an owned entry wins over a blocked running observation")
+                 (is (zero? (.size (.getQueue scheduler)))
+                     "a stale running observation does not rearm"))
+               (let [newer-token (Object.)
+                     observed (promise)
+                     release (promise)]
+                 (with-redefs-fn
+                   {#'custody/durable-attributes (fn [& _]
+                                                   (deliver observed true)
+                                                   @release)}
+                   (fn []
+                     (reset! in-flight {"run-a" {:phase :running}})
+                     (#'shuttle/schedule-custody-inspection! rt "run-a")
+                     (let [callback (future (run-next-custody-callback! scheduler))]
+                       @observed
+                       (reset! in-flight {"run-a" {:phase :running
+                                                   :custody-inspection newer-token
+                                                   :attempt 2}})
+                       (deliver release {})
+                       @callback
+                       (is (= {"run-a" {:phase :running
+                                        :custody-inspection newer-token
+                                        :attempt 2}}
+                              @in-flight)
+                           "a newer attempt survives a stale running observation")
+                       (is (zero? (.size (.getQueue scheduler)))
+                           "a stale observation does not queue a callback for a newer attempt")))))))
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest actual-global-reconciler-cannot-adopt-after-reservation-loss
+  (with-shuttle
+    (fn [_rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")
+            newer-token (Object.)
+            observed (promise)
+            release (promise)
+            running-query @#'shuttle/running-query]
+        (try
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/list (fn [_ query _]
+                             (if (= running-query query) [run] []))
+             #'custody/list-owned (fn [_]
+                                    (deliver observed true)
+                                    @release)
+             #'shuttle/scan! (fn [] [])
+             #'shuttle/supervise! (fn [] {:reaped [] :failed []})}
+            #(do
+               (reset! in-flight {})
+               (let [reconcile (future (#'shuttle/reconcile!))]
+                 @observed
+                 (reset! in-flight {"run-a" {:phase :running
+                                             :headless? true
+                                             :custody-inspection newer-token}})
+                 (deliver release [record])
+                 @reconcile
+                 (is (= {"run-a" {:phase :running
+                                  :headless? true
+                                  :custody-inspection newer-token}}
+                        @in-flight)
+                     "a replacement token survives a stale global observation")
+                 (is (zero? (.size (.getQueue scheduler)))
+                     "a stale global observation does not queue a callback"))))
+          (finally
+            (.shutdownNow scheduler)))))))
+
 (deftest terminal-custody-observation-releases-a-zombie-slot
   (with-shuttle
     (fn [rt]
