@@ -1881,10 +1881,154 @@
               "repeated due observations leave one queued callback per run")
           (is (= #{"run-a" "run-b" "run-c" "run-d"}
                  (set (keys @in-flight))))
-          (is (every? #(= :scheduled (:custody-inspection (get @in-flight %)))
+          (is (every? #(some? (:custody-inspection (get @in-flight %)))
                       ["run-a" "run-b" "run-c" "run-d"]))
           (finally
             (.shutdownNow scheduler)))))))
+
+(defn- run-next-custody-callback!
+  "Execute the next delayed custody callback from a deterministic test scheduler."
+  [scheduler]
+  (let [queue (.getQueue scheduler)
+        callback (.peek queue)]
+    (is (some? callback) "expected one queued custody callback")
+    ;; DelayQueue#poll only returns expired entries. Remove the delayed task
+    ;; explicitly, then invoke its real scheduled Runnable without wall-clock
+    ;; waiting or allowing the executor worker to race the test.
+    (.remove queue callback)
+    (.run ^Runnable callback)))
+
+(defn- running-custody-run
+  "Return a minimal active headless run with an exact retained custody handle."
+  [id]
+  {:id id
+   :state "active"
+   :attributes {:agent-run/run "true"
+                :agent-run/phase "running"
+                :agent-run/attempt 1
+                :agent-run/process-owner "agent-harness/run"
+                :agent-run/process-key (str id "/attempt-1")
+                :agent-run/process-handle (str id "-handle")}})
+
+(defn- running-custody-record
+  "Return the matching running process fact for a test run."
+  [id]
+  {:handle (str id "-handle")
+   :owner custody/owner
+   :key (str id "/attempt-1")
+   :phase :running
+   :output {:stdout-ref "/tmp/out" :stderr-ref "/tmp/err"}})
+
+(deftest custody-inspections-rearm-with-a-fixed-per-run-bound
+  (with-shuttle
+    (fn [rt]
+      (doseq [ids [["run-a" "run-b"]
+                   ["run-a" "run-b" "run-c" "run-d"]]]
+        (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+              in-flight (#'shuttle/in-flight)
+              runs (into {} (map (juxt identity running-custody-run) ids))
+              records (into {} (map (juxt identity running-custody-record) ids))
+              observed (atom [])
+              scans (atom 0)]
+          (try
+            (reset! in-flight (into {} (for [id ids] [id {:phase :running}])))
+            (with-redefs-fn
+              {#'shuttle/recovery-scheduler (constantly scheduler)
+               #'shuttle/custody-inspection-ms 60000
+               #'weaver/show (fn [_ id] (get runs id))
+               #'process/get (fn [_ handle]
+                               (get records (subs handle 0 (- (count handle) 7))))
+               #'shuttle/reconcile-headless-run!
+               (fn [run _records _opts]
+                 (swap! observed conj (:id run))
+                 {:running (:id run)})
+               #'shuttle/scan! (fn [] (swap! scans inc))
+               #'weaver/list (fn [& _]
+                               (throw (ex-info "unexpected global custody poll" {})))}
+              #(do
+                 (doseq [id ids]
+                   (#'shuttle/schedule-custody-inspection! rt id))
+                 (dotimes [_ 4]
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "one callback is queued per running run")
+                   (dotimes [_ (count ids)]
+                     (run-next-custody-callback! scheduler))
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "each completed callback rearms only its own run"))))
+            (is (= (frequencies @observed)
+                   (zipmap ids (repeat 4)))
+                "every run is observed in every deterministic generation")
+            (is (zero? @scans) "running observations do not scan the full store")
+            (finally
+              (.shutdownNow scheduler))))))))
+
+(deftest stale-custody-observation-cannot-resurrect-released-capacity
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] run)
+             #'process/get (fn [_ _] record)
+             #'shuttle/reconcile-headless-run!
+             (fn [_ _ _]
+               ;; Model a terminal/failure owner winning while this callback
+               ;; still holds its stale running observation.
+               (swap! in-flight dissoc "run-a")
+               {:running "run-a"})}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (run-next-custody-callback! scheduler)))
+          (is (empty? @in-flight)
+              "a stale callback cannot recreate released runtime capacity")
+          (is (zero? (.size (.getQueue scheduler)))
+              "a stale callback cannot strand another inspection")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest terminal-custody-observation-releases-a-zombie-slot
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)
+            terminal-run {:id "run-a"
+                          :state "closed"
+                          :attributes {:agent-run/run "true"
+                                       :agent-run/phase "done"}}]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000
+             #'weaver/show (fn [_ _] terminal-run)}
+            #(do
+               (#'shuttle/schedule-custody-inspection! rt "run-a")
+               (run-next-custody-callback! scheduler)))
+          (is (empty? @in-flight)
+              "a terminal observation releases capacity left by a raced owner")
+          (is (zero? (.size (.getQueue scheduler)))
+              "terminal observation does not rearm custody polling")
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest targeted-running-reconcile-does-not-adopt-after-release
+  (with-shuttle
+    (fn [_rt]
+      (let [in-flight (#'shuttle/in-flight)
+            run (running-custody-run "run-a")
+            record (running-custody-record "run-a")]
+        (reset! in-flight {})
+        (is (= {:stale "run-a"}
+               (#'shuttle/reconcile-headless-run!
+                run [record] {:adopt? false})))
+        (is (empty? @in-flight)
+            "targeted stale observations preserve the released capacity")))))
 
 (deftest custody-poll-uses-targeted-process-and-stops-scanning-after-terminal
   (with-shuttle
@@ -1916,7 +2060,7 @@
           {#'weaver/show (fn [_ id] (get runs id))
            #'process/get (fn [_ handle] (get records handle))
            #'shuttle/reconcile-headless-run!
-           (fn [run _records]
+           (fn [run _records _opts]
              (swap! observed conj (:id run))
              (if (= "run-b" (:id run))
                {:terminal (:id run)}
