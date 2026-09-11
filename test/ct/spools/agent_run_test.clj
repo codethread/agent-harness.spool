@@ -1927,9 +1927,11 @@
         (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
               in-flight (#'shuttle/in-flight)
               runs (into {} (map (juxt identity running-custody-run) ids))
-              records (into {} (map (juxt identity running-custody-record) ids))
+              records (into {} (map (juxt #(str % "-handle") running-custody-record) ids))
               observed (atom [])
-              scans (atom 0)]
+              global-lists (atom 0)
+              scans (atom 0)
+              running-query @#'shuttle/running-query]
           (try
             (reset! in-flight (into {} (for [id ids] [id {:phase :running}])))
             (with-redefs-fn
@@ -1937,14 +1939,12 @@
                #'shuttle/custody-inspection-ms 60000
                #'weaver/show (fn [_ id] (get runs id))
                #'process/get (fn [_ handle]
-                               (get records (subs handle 0 (- (count handle) 7))))
-               #'shuttle/reconcile-headless-run!
-               (fn [run _records _opts]
-                 (swap! observed conj (:id run))
-                 {:running (:id run)})
-               #'shuttle/scan! (fn [] (swap! scans inc))
-               #'weaver/list (fn [& _]
-                               (throw (ex-info "unexpected global custody poll" {})))}
+                               (swap! observed conj handle)
+                               (get records handle))
+               #'weaver/list (fn [_ query _]
+                               (swap! global-lists inc)
+                               (if (= running-query query) (vals runs) []))
+               #'shuttle/scan! (fn [] (swap! scans inc))}
               #(do
                  (doseq [id ids]
                    (#'shuttle/schedule-custody-inspection! rt id))
@@ -1954,11 +1954,17 @@
                    (dotimes [_ (count ids)]
                      (run-next-custody-callback! scheduler))
                    (is (= (count ids) (.size (.getQueue scheduler)))
-                       "each completed callback rearms only its own run"))))
+                       "each completed callback rearms only its own run")
+                   (shuttle/reconcile!)
+                   (is (= (count ids) (.size (.getQueue scheduler)))
+                       "an explicit global reconcile does not duplicate callbacks"))))
             (is (= (frequencies @observed)
-                   (zipmap ids (repeat 4)))
+                   (zipmap (map #(str % "-handle") ids) (repeat 4)))
                 "every run is observed in every deterministic generation")
-            (is (zero? @scans) "running observations do not scan the full store")
+            (is (= 12 @global-lists)
+                "only explicit reconciliation performs global listings")
+            (is (= 4 @scans)
+                "only explicit reconciliation performs the pending scan")
             (finally
               (.shutdownNow scheduler))))))))
 
@@ -2049,14 +2055,15 @@
           (finally
             (.shutdownNow scheduler)))))))
 
-(deftest actual-global-reconciler-cannot-adopt-after-reservation-loss
+(deftest actual-global-reconciler-eager-reservations-survive-list-owned-race
   (with-shuttle
     (fn [_rt]
-      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+      (let [ids (mapv #(str "run-" %) (range 40))
+            runs (mapv running-custody-run ids)
+            records (mapv running-custody-record ids)
+            removed-id (last ids)
+            scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
             in-flight (#'shuttle/in-flight)
-            run (running-custody-run "run-a")
-            record (running-custody-record "run-a")
-            newer-token (Object.)
             observed (promise)
             release (promise)
             running-query @#'shuttle/running-query]
@@ -2065,7 +2072,7 @@
             {#'shuttle/recovery-scheduler (constantly scheduler)
              #'shuttle/custody-inspection-ms 60000
              #'weaver/list (fn [_ query _]
-                             (if (= running-query query) [run] []))
+                             (if (= running-query query) runs []))
              #'custody/list-owned (fn [_]
                                     (deliver observed true)
                                     @release)
@@ -2075,19 +2082,19 @@
                (reset! in-flight {})
                (let [reconcile (future (#'shuttle/reconcile!))]
                  @observed
-                 (reset! in-flight {"run-a" {:phase :running
-                                             :headless? true
-                                             :custody-inspection newer-token}})
-                 (deliver release [record])
+                 (is (= (set ids) (set (keys @in-flight)))
+                     "every startup reservation exists before list-owned returns")
+                 (is (every? (fn [id] (some? (get-in @in-flight [id :custody-inspection]))) ids)
+                     "every startup reservation owns a custody token before the read")
+                 (swap! in-flight dissoc removed-id)
+                 (deliver release records)
                  @reconcile
-                 (is (= {"run-a" {:phase :running
-                                  :headless? true
-                                  :custody-inspection newer-token}}
-                        @in-flight)
-                     "a replacement token survives a stale global observation")
-                 (is (zero? (.size (.getQueue scheduler)))
-                     "a stale global observation does not queue a callback"))))
+                 (is (= (set (butlast ids)) (set (keys @in-flight)))
+                     "a reservation removed during list-owned is not resurrected")
+                 (is (= (dec (count ids)) (.size (.getQueue scheduler)))
+                     "a reservation removed during list-owned is not queued"))))
           (finally
+            (deliver release records)
             (.shutdownNow scheduler)))))))
 
 (deftest terminal-custody-observation-releases-a-zombie-slot

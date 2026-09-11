@@ -1555,8 +1555,7 @@
 
 (def ^:private custody-inspection-ms 100)
 
-(declare reconcile! run-custody-inspection! headless-running!
-         schedule-custody-inspection!)
+(declare reconcile! run-custody-inspection! schedule-custody-inspection!)
 
 (defn- reserve-custody-inspection! [id]
   (let [token (Object.)
@@ -2490,11 +2489,11 @@
   []
   (let [runtime (rt)
         runs (filter headless-running? (weaver/list runtime running-query {}))
-        reservations (keep (fn [run]
-                             (when-let [reservation (reserve-global-custody-inspection!
-                                                     (:id run))]
-                               [run reservation]))
-                           runs)
+        reservations (vec (keep (fn [run]
+                                  (when-let [reservation (reserve-global-custody-inspection!
+                                                          (:id run))]
+                                    [run reservation]))
+                                runs))
         records (when (seq reservations) (custody/list-owned runtime))
         summary (reduce
                  (fn [acc [run {:keys [token adopted?]}]]
