@@ -79,6 +79,7 @@
             [millhouse.spools.identity :as identity]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.process.alpha :as process]
             [millstrand.api.weaver.alpha :as weaver]
             [millstrand.api.events.alpha :as events]
             [millstrand.api.current.alpha :as current]
@@ -1554,17 +1555,53 @@
 
 (def ^:private custody-inspection-ms 100)
 
-(declare reconcile!)
+(declare reconcile! run-custody-inspection! headless-running?)
+
+(defn- reserve-custody-inspection! [id]
+  (let [[before after] (swap-vals! (in-flight)
+                                   (fn [entries]
+                                     (if (and (contains? entries id)
+                                              (or (nil? (get-in entries [id :custody-inspection]))
+                                                  (= :launching
+                                                     (get-in entries [id :custody-inspection]))))
+                                       (assoc-in entries [id :custody-inspection] :scheduled)
+                                       entries)))]
+    (and (contains? before id)
+         (or (nil? (get-in before [id :custody-inspection]))
+             (= :launching (get-in before [id :custody-inspection])))
+         (= :scheduled (get-in after [id :custody-inspection])))))
+
+(defn- clear-custody-inspection! [id]
+  (swap! (in-flight)
+         (fn [entries]
+           (if (contains? entries id)
+             (update entries id dissoc :custody-inspection)
+             entries))))
 
 (defn- schedule-custody-inspection!
-  "Inspect Mill-retained process facts after a starting/running observation."
-  [runtime _id]
-  (.schedule (recovery-scheduler)
-             ^Runnable (fn []
-                         (binding [*runtime* runtime]
-                           (reconcile!)))
-             (long custody-inspection-ms)
-             TimeUnit/MILLISECONDS))
+  "Inspect one Mill-retained process fact after a starting/running observation.
+
+  The in-flight entry is the runtime-owned coalescing slot. Keeping one slot per
+  run prevents repeated graph or lifecycle observations from adding callbacks
+  while a prior inspection is queued or executing."
+  [runtime id]
+  (when (reserve-custody-inspection! id)
+    (try
+      (.schedule (recovery-scheduler)
+                 ^Runnable (fn []
+                             (binding [*runtime* runtime]
+                               (try
+                                 (run-custody-inspection! runtime id)
+                                 (finally
+                                   (clear-custody-inspection! id)
+                                   (when-let [run (weaver/show runtime id)]
+                                     (when (headless-running? run)
+                                       (schedule-custody-inspection! runtime id)))))))
+                 (long custody-inspection-ms)
+                 TimeUnit/MILLISECONDS)
+      (catch Throwable error
+        (clear-custody-inspection! id)
+        (throw error)))))
 
 (declare claim! claim-ready! launch-run! note! run-for-target scan! reconcile!)
 
@@ -2107,6 +2144,7 @@
       ;; The durable claim is committed before Mill is asked to launch. A
       ;; replacement therefore reports a missing fact instead of guessing that
       ;; it is safe to start a second child.
+      (swap! (in-flight) update id assoc :custody-inspection :launching)
       (update-run! id (merge {"agent-run/phase" "running"
                               "agent-run/attempt" attempt
                               "agent-run/started-at" (now)}
@@ -2317,6 +2355,66 @@
                       {:failure-transition-errors (mapv ex-data errors)}
                       (first errors))))))
 
+(defn- custody-record-for-run [runtime run]
+  (let [id (:id run)
+        handle (sattr run "process-handle")]
+    (if (or (nil? handle) (= "pending" handle))
+      ;; A pending handle is the launch-window marker. It has no opaque process
+      ;; handle yet, so owner enumeration remains the recovery seam.
+      (custody/record-for "agent-run" run (custody/list-owned runtime))
+      (let [record (process/get runtime handle)
+            attempt (sattr run "attempt")
+            expected-key (sattr run "process-key")
+            expected-owner (sattr run "process-owner")]
+        (when-not (and (integer? attempt) (pos? attempt))
+          (fail! "Process custody run has no valid attempt"
+                 {:run-id id :attempt attempt}))
+        (when-not (= expected-key (custody/process-key id attempt))
+          (fail! "Process custody run has a conflicting attempt key"
+                 {:run-id id :attempt attempt
+                  :expected (custody/process-key id attempt)
+                  :actual expected-key}))
+        (when-not (= (subs (str custody/owner) 1) expected-owner)
+          (fail! "Process custody run has a conflicting owner"
+                 {:run-id id :expected (subs (str custody/owner) 1)
+                  :actual expected-owner}))
+        (when-not (= custody/owner (:owner record))
+          (fail! "Process custody fact has a conflicting owner"
+                 {:run-id id :expected custody/owner :actual (:owner record)}))
+        (when-not (= expected-key (:key record))
+          (fail! "Process custody fact does not match the durable run key"
+                 {:run-id id :expected expected-key :actual (:key record)}))
+        (when-not (= handle (:handle record))
+          (fail! "Process custody handle does not match the durable run"
+                 {:run-id id :expected handle :actual (:handle record)}))
+        record))))
+
+(defn- run-custody-inspection!
+  "Reconcile one still-running headless run without a global store scan.
+
+  Startup reconciliation keeps the global listing needed to adopt durable
+  custody after a Weaver replacement. Recurring callbacks use the run's
+  durable process handle instead; only a terminal or failed observation scans
+  pending work so the fan-out window can admit its next run."
+  [runtime id]
+  (let [run (weaver/show runtime id)]
+    (when (headless-running? run)
+      (let [result (try
+                     (reconcile-headless-run!
+                      run
+                      [(custody-record-for-run runtime run)])
+                     (catch Throwable error
+                       (let [transition-error (persist-reconciliation-failure!
+                                               id error)]
+                         (swap! (in-flight) dissoc id)
+                         (cond-> {:failed id}
+                           transition-error (assoc :error transition-error)))))]
+        (when (or (:terminal result) (:failed result))
+          (scan!))
+        (when-let [error (:error result)]
+          (throw error))
+        result))))
+
 (defn reconcile!
   "Reconcile Mill custody facts with active headless agent runs.
 
@@ -2331,18 +2429,29 @@
         records (when (seq runs) (custody/list-owned runtime))
         summary (reduce
                  (fn [acc run]
-                   (try
-                     (let [result (reconcile-headless-run! run records)]
-                       (if (:terminal result)
-                         (update acc :terminal conj (:terminal result))
-                         (update acc :running conj (:running result))))
-                     (catch Throwable error
-                       (let [id (:id run)
-                             transition-error (persist-reconciliation-failure! id error)]
-                         (swap! (in-flight) dissoc id)
-                         (cond-> (update acc :failed conj id)
-                           transition-error
-                           (update :errors conj transition-error))))))
+                   (let [id (:id run)
+                         expected-key (sattr run "process-key")
+                         present? (some #(and (= custody/owner (:owner %))
+                                              (= expected-key (:key %)))
+                                        records)]
+                     (if (and (contains? @(in-flight) id) (not present?))
+                       (do
+                         ;; The local launch owns this run while Mill's owner
+                         ;; listing catches up. Keep the targeted callback alive;
+                         ;; it will fail the run if the fact truly stays absent.
+                         (schedule-custody-inspection! runtime id)
+                         (update acc :running conj id))
+                       (try
+                         (let [result (reconcile-headless-run! run records)]
+                           (if (:terminal result)
+                             (update acc :terminal conj (:terminal result))
+                             (update acc :running conj (:running result))))
+                         (catch Throwable error
+                           (let [transition-error (persist-reconciliation-failure! id error)]
+                             (swap! (in-flight) dissoc id)
+                             (cond-> (update acc :failed conj id)
+                               transition-error
+                               (update :errors conj transition-error))))))))
                  {:running [] :terminal [] :failed [] :errors []}
                  runs)
         interactive-orphans (remove #(contains? @(in-flight) (:id %))

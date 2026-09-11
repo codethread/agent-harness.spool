@@ -19,6 +19,7 @@
             [millstrand.test.alpha :as test-alpha]
             [millstrand.api.graph.alpha :as graph]
             [millstrand.api.notes.alpha :as notes]
+            [millstrand.api.process.alpha :as process]
             [millstrand.api.registry.alpha :as registry]
             [millstrand.api.weaver.alpha :as weaver]
             [ct.spools.test-support :as test-support :refer [await-phase]]))
@@ -1857,6 +1858,79 @@
           "claimed, running, and deferred-recovery runs all count as in-flight")
       (swap! (#'shuttle/in-flight) dissoc "run-b")
       (is (= #{"run-a" "run-c"} (shuttle/in-flight-run-ids))))))
+
+(deftest custody-inspections-coalesce-one-callback-per-running-run
+  (with-shuttle
+    (fn [rt]
+      (let [scheduler (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+            in-flight (#'shuttle/in-flight)]
+        (try
+          (reset! in-flight {"run-a" {:phase :running}
+                             "run-b" {:phase :running}
+                             "run-c" {:phase :running}
+                             "run-d" {:phase :running}})
+          (with-redefs-fn
+            {#'shuttle/recovery-scheduler (constantly scheduler)
+             #'shuttle/custody-inspection-ms 60000}
+            #(doseq [id (concat (repeat 20 "run-a")
+                                (repeat 20 "run-b")
+                                (repeat 20 "run-c")
+                                (repeat 20 "run-d"))]
+               (#'shuttle/schedule-custody-inspection! rt id)))
+          (is (= 4 (.size (.getQueue scheduler)))
+              "repeated due observations leave one queued callback per run")
+          (is (= #{"run-a" "run-b" "run-c" "run-d"}
+                 (set (keys @in-flight))))
+          (is (every? #(= :scheduled (:custody-inspection (get @in-flight %)))
+                      ["run-a" "run-b" "run-c" "run-d"]))
+          (finally
+            (.shutdownNow scheduler)))))))
+
+(deftest custody-poll-uses-targeted-process-and-stops-scanning-after-terminal
+  (with-shuttle
+    (fn [rt]
+      (let [runs (into {}
+                       (for [id ["run-a" "run-b"]]
+                         [id {:id id
+                              :state "active"
+                              :attributes {:agent-run/run "true"
+                                           :agent-run/phase "running"
+                                           :agent-run/attempt 1
+                                           :agent-run/process-owner "agent-harness/run"
+                                           :agent-run/process-key (str id "/attempt-1")
+                                           :agent-run/process-handle (str id "-handle")}}]))
+            records (into {}
+                          (for [[id run] runs]
+                            [(:agent-run/process-handle (:attributes run))
+                             {:handle (str id "-handle")
+                              :owner custody/owner
+                              :key (str id "/attempt-1")
+                              :phase :running
+                              :output {:stdout-ref "/tmp/out" :stderr-ref "/tmp/err"}}]))
+            observed (atom [])
+            scans (atom 0)]
+        (reset! (#'shuttle/in-flight)
+                {"run-a" {:phase :running}
+                 "run-b" {:phase :running}})
+        (with-redefs-fn
+          {#'weaver/show (fn [_ id] (get runs id))
+           #'process/get (fn [_ handle] (get records handle))
+           #'shuttle/reconcile-headless-run!
+           (fn [run _records]
+             (swap! observed conj (:id run))
+             (if (= "run-b" (:id run))
+               {:terminal (:id run)}
+               {:running (:id run)}))
+           #'shuttle/scan! (fn [] (swap! scans inc))
+           #'weaver/list (fn [& _]
+                           (throw (ex-info "unexpected full-store list" {})))}
+          #(do
+             (#'shuttle/run-custody-inspection! rt "run-a")
+             (#'shuttle/run-custody-inspection! rt "run-b")))
+        (is (= ["run-a" "run-b"] @observed)
+            "each targeted custody poll observes its requested run")
+        (is (= 1 @scans)
+            "only terminal discovery scans pending work for admission")))))
 
 (deftest missing-executor-fails-loudly
   ;; The morning incident: a preserved state lacking :worker-executor turned
