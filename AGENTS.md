@@ -12,9 +12,10 @@
 
 - Workflow definitions live in `.millstrand/config/workflows`, one file each,
   loaded and registered by `.millstrand/config/workflows.clj`.
-- Root `deps.edn` pins Millstrand and Millhouse dependencies to immutable Git
-  coordinates; keep those coordinates aligned across every alias and the
-  checked-in `.millstrand/deps.edn` workspace config.
+- Preserve the archived library/root/test/lint dependency coordinates. The
+  active `.millstrand` workspace independently pins current Harnesses and shared
+  Codethread bootstrap releases; validate it with disposable
+  published-coordinate startup.
 - Never run `make install` while developing or testing this repository.
 - Kill spawned processes by exact PID only; never use pattern kills.
 - Shared-spool publishing, activation, override, and test conventions live in
