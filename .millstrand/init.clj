@@ -8,10 +8,10 @@
                  {:ns 'millstrand.spools.batteries
                   :required? true})
 
-;; Register shared identity, Workflow, Harnesses, aliases, and reviewers before
-;; workspace-specific providers, aliases, and workflows. The shared bootstrap
-;; deliberately leaves the :agent executor inactive until those consumers have
-;; reconciled.
+;; Register shared identity, Workflow, Harnesses, aliases, reviewers, and
+;; landing before workspace-specific providers, aliases, and workflows. The
+;; bootstrap deliberately leaves the :agent executor inactive until those
+;; consumers have reconciled.
 (codethread/register! runtime)
 
 ;; Workspace-owned Workflow providers and Devflow remain explicit consumer
@@ -25,10 +25,6 @@
 (runtime/module! runtime :devflow
                  {:ns 'ct.spools.devflow
                   :after [:millhouse/spools-workflow]
-                  :required? true})
-
-(runtime/module! runtime :millhouse/spools-kanban
-                 {:ns 'millhouse.spools.kanban
                   :required? true})
 
 (runtime/module! runtime :devflow/kanban-adapter
@@ -68,7 +64,6 @@
 (codethread/register-executor!
  runtime [:millhouse/spools-workflow-providers
           :devflow
-          :millhouse/spools-kanban
           :devflow/kanban-adapter
           :workflows
           :codethread/config-help

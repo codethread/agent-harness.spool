@@ -4,32 +4,34 @@ This repository is a deprecated implementation archive. Its shipped library
 source and historical tests remain intact for release archaeology; the active
 `.millstrand` workspace no longer loads those legacy runtime spools.
 
-## Workspace migration
+## Active workspace migration
 
-The active workspace pins `ct.spools/harnesses` at
-`9548390ce621461ba0a289859fe9b0af963f5805` and shared Codethread config at
-`252eeaee216a5e4d4e82c6b2948dd9eba1dafc9d`. Millstrand Batteries is pinned at
-`310368dff9174bd889ad21d4ed8196952684eaf9`, and Millhouse Workflow, Identity,
-and Kanban at `f487eb42ea9523e8bd405e64a7c319013217d988`. Devflow and its
-Kanban adapter are pinned at `99313b48f14ab0892cb90264d100dce4ff2a25e0`.
+`.millstrand/deps.edn` is the authoritative inventory of immutable dependencies
+for the active workspace. Consult it directly rather than copying dependency
+SHAs into documentation. Local development overrides belong in the gitignored
+`.millstrand/deps.local.edn`; do not restore local roots for `agent-run`,
+`delegation`, or provider-specific legacy harness spools, and do not run
+`make install`.
 
-`.millstrand/init.clj` calls
-`ct.spools.codethread.bootstrap/register!`, which owns the Harnesses providers,
-shared aliases, and reviewers. It then registers the workspace's providers,
-adapter, configuration, and workflows before calling
-`register-executor!` last for the Workflow `:agent` executor. Workspace-specific
-workflows remain in `.millstrand/config/workflows`.
+`.millstrand/init.clj` activates the shared Codethread bootstrap, which owns the
+Kanban surface, the `land` workflow and merge queue, and the one-reviewer basic
+review. The workspace then activates only its explicit consumer modules before
+calling `register-executor!` last for the sole Workflow `:agent` executor.
+Workspace-specific workflows remain in `.millstrand/config/workflows`.
 
-Inspect the active surface with `strand agent list`, `strand agent reviewers`,
-and `strand workflow show feature-iteration`. Local development overrides
-belong in the gitignored `.millstrand/deps.local.edn`; do not restore local
-roots for `agent-run`, `delegation`, or provider-specific legacy harness
-spools, and do not run `make install`.
+Inspect the live workspace and landing surface with:
 
-The canonical legacy checkout may contain an untracked
-`.millstrand/spools.local.edn` mapping `ct.spools/agent-run` to its parent. That
-file is preserved as local state, but using that checkout's workspace would
-re-enable the deprecated stack; this migration checkout has no such override.
+```sh
+strand help
+strand workflow list
+strand workflow show land
+strand merge-queue status
+```
+
+The canonical legacy checkout may retain an untracked
+`.millstrand/spools.local.edn` as historical local state. It is not the active
+`.millstrand/deps.edn` configuration, and this migration neither changes nor
+copies it.
 
 The dependency and activation material below is retained as historical archive
 documentation for the shipped library, not as instructions for this workspace.
