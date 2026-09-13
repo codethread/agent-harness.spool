@@ -7,13 +7,16 @@
 (runtime/module! runtime :millstrand/spools-batteries
                  {:ns 'millstrand.spools.batteries
                   :required? true})
+
+;; Register shared identity, Workflow, Harnesses, aliases, and reviewers before
+;; workspace-specific providers, aliases, and workflows. The shared bootstrap
+;; deliberately leaves the :agent executor inactive until those consumers have
+;; reconciled.
 (codethread/register! runtime)
 
-(runtime/module! runtime :workflows
-                 {:file "config/workflows.clj"
-                  :after [:millhouse/spools-workflow]
-                  :required? true})
-
+;; Workspace-owned Workflow providers and Devflow remain explicit consumer
+;; choices; their published modules provide the CLI and adapter surfaces used
+;; by this repository.
 (runtime/module! runtime :millhouse/spools-workflow-providers
                  {:ns 'millhouse.spools.workflow.spool
                   :after [:millhouse/spools-workflow]
@@ -34,6 +37,13 @@
                           :millhouse/spools-workflow]
                   :required? true})
 
+;; Hand-authored workflows and the repository's configuration remain consumer
+;; modules, so the shared catalog does not absorb this workspace's policy.
+(runtime/module! runtime :workflows
+                 {:file "config/workflows.clj"
+                  :after [:millhouse/spools-workflow]
+                  :required? true})
+
 (runtime/module! runtime :codethread/config-help
                  {:ns 'ct.spools.codethread.help
                   :after [:millstrand/spools-batteries]
@@ -52,3 +62,16 @@
                  {:ns 'ct.spools.codethread.ralph
                   :after [:millhouse/spools-workflow]
                   :required? true})
+
+;; The shared bootstrap owns the sole :agent executor. Register it last and
+;; name every consumer whose resources must reconcile before its initial scan.
+(codethread/register-executor!
+ runtime [:millhouse/spools-workflow-providers
+          :devflow
+          :millhouse/spools-kanban
+          :devflow/kanban-adapter
+          :workflows
+          :codethread/config-help
+          :codethread/config-devflow
+          :codethread/config
+          :codethread/ralph])

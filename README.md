@@ -8,13 +8,16 @@ source and historical tests remain intact for release archaeology; the active
 
 The active workspace pins `ct.spools/harnesses` at
 `9548390ce621461ba0a289859fe9b0af963f5805` and shared Codethread config at
-`333d456557fe8e62e08f99a206b52d30abd876c7`. Millstrand Batteries is pinned at
+`252eeaee216a5e4d4e82c6b2948dd9eba1dafc9d`. Millstrand Batteries is pinned at
 `310368dff9174bd889ad21d4ed8196952684eaf9`, and Millhouse Workflow, Identity,
-and Kanban at `f487eb42ea9523e8bd405e64a7c319013217d988`.
+and Kanban at `f487eb42ea9523e8bd405e64a7c319013217d988`. Devflow and its
+Kanban adapter are pinned at `99313b48f14ab0892cb90264d100dce4ff2a25e0`.
 
 `.millstrand/init.clj` calls
 `ct.spools.codethread.bootstrap/register!`, which owns the Harnesses providers,
-shared aliases, reviewers, and Workflow `:agent` executor. Workspace-specific
+shared aliases, and reviewers. It then registers the workspace's providers,
+adapter, configuration, and workflows before calling
+`register-executor!` last for the Workflow `:agent` executor. Workspace-specific
 workflows remain in `.millstrand/config/workflows`.
 
 Inspect the active surface with `strand agent list`, `strand agent reviewers`,
