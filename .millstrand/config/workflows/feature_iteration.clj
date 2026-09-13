@@ -70,8 +70,8 @@
   "Return the review seat's prompt for one iteration round."
   [{:keys [brief] :as params}]
   (prose
-   "|Review one iteration of work as a cross-vendor second opinion. You are in a
-    |read-only sandbox: read and analyse, write nothing.
+   "|Review one iteration of work as a cross-vendor second opinion. You are a
+    |read-only reviewer: inspect and analyse, write nothing.
     |
     |The change under review:
     |
@@ -106,10 +106,11 @@
 
   Two of the five steps are machine gates rather than driver work. The quality
   gate is a `:shell` gate, so the run records the exit code and output of the
-  gate that actually ran instead of an agent's account of it; the review gate is
-  a `:subagent` gate on a read-only seat, so the reviewer cannot repair what it
-  is reviewing. Both close themselves, and a red one stamps `gate/error` and
-  stays put until a coordinator clears the key.
+  gate that actually ran instead of an agent's account of it; the review gate
+  is an `:agent` gate on the shared reviewer seat. The reviewer is instructed
+  to write nothing, while the Harnesses adapter records and delivers its
+  result. Both close themselves, and a red one stamps `gate/error` and stays
+  put until a coordinator clears the key.
 
   Params: `brief` (what this round should achieve — on a later round, the user's
   feedback), `cwd` (the worktree the gates run in), and optionally `diff-mode`
@@ -118,42 +119,42 @@
 
 (workflow/defworkflow feature-iteration
   contract-doc
-   {:entrypoints #{:start}
-    :param-spec ::params
-    :defaults {:diff-mode "branch"
-               :diff-base "main"
-               :revision false}}
+  {:entrypoints #{:start}
+   :param-spec ::params
+   :defaults {:diff-mode "branch"
+              :diff-base "main"
+              :revision false}}
   (workflow/workflow
-    (fn [{:keys [brief]}] (str "Feature iteration: " (first (str/split-lines brief))))
-    {:attributes {"workflow/family" "feature-iteration"}}
+   (fn [{:keys [brief]}] (str "Feature iteration: " (first (str/split-lines brief))))
+   {:attributes {"workflow/family" "feature-iteration"}}
 
-    (workflow/step :receive-brief "Take the brief and scope the round" :self
-                   :attributes
-                   {"workflow/action-ref" "feature-iteration.brief.receive"
-                    "workflow/instruction" brief-instruction})
+   (workflow/step :receive-brief "Take the brief and scope the round" :self
+                  :attributes
+                  {"workflow/action-ref" "feature-iteration.brief.receive"
+                   "workflow/instruction" brief-instruction})
 
-    (workflow/step :implement "Make the code changes" :self
-                   :depends-on [:receive-brief]
-                   :attributes
-                   {"workflow/action-ref" "feature-iteration.change.implement"
-                    "workflow/instruction"
-                    (format-alpha/reflow
-                     "|Deliver the scope agreed at the brief step — the whole of it, not the
+   (workflow/step :implement "Make the code changes" :self
+                  :depends-on [:receive-brief]
+                  :attributes
+                  {"workflow/action-ref" "feature-iteration.change.implement"
+                   "workflow/instruction"
+                   (format-alpha/reflow
+                    "|Deliver the scope agreed at the brief step — the whole of it, not the
                       |easy part of it. Match the surrounding code's idiom, naming, and comment
                       |density. If part of the scope turns out to be blocked, finish everything
                       |else and record what you left out and why on this step's attributes, so
                       |the presentation step reports it rather than discovering it.")})
 
-    (workflow/gate :quality "Run make quality" :shell
-                   :depends-on [:implement]
-                   :attributes
-                   {"workflow/action-ref" "feature-iteration.quality.gate"
-                    "shell/argv" ["make" "quality"]
-                    "shell/cwd" (fn [{:keys [cwd]}] cwd)
-                    "shell/timeout-secs" 1800
-                    "workflow/instruction"
-                    (format-alpha/reflow
-                     "|Machine gate: the shell executor runs `make quality` in the run's cwd —
+   (workflow/gate :quality "Run make quality" :shell
+                  :depends-on [:implement]
+                  :attributes
+                  {"workflow/action-ref" "feature-iteration.quality.gate"
+                   "shell/argv" ["make" "quality"]
+                   "shell/cwd" (fn [{:keys [cwd]}] cwd)
+                   "shell/timeout-secs" 1800
+                   "workflow/instruction"
+                   (format-alpha/reflow
+                    "|Machine gate: the shell executor runs `make quality` in the run's cwd —
                       |format, clj-kondo, Splint, repository conventions, reflection warnings,
                       |and the cold test suite. A zero exit closes the gate and the run moves
                       |on. A non-zero exit or a timeout stamps `gate/error` with the exit code
@@ -162,46 +163,45 @@
                       |with `strand update <gate-id> --attributes '{\"gate/error\":null}'` to
                       |re-run. Do not run the gate by hand to satisfy it.")})
 
-    (workflow/gate :review "Cross-vendor review of the diff" :subagent
-                   :depends-on [:quality]
-                   :attributes
-                   {"workflow/action-ref" "feature-iteration.review.gate"
-                    "agent-run/harness" "terra-low-ro"
-                    "agent-run/cwd" (fn [{:keys [cwd]}] cwd)
-                    "agent-run/prompt" review-prompt
-                    "workflow/instruction"
-                    (format-alpha/reflow
-                     "|Machine gate: the subagent executor spawns a :terra-low-ro run against
-                      |the diff this round's `diff-mode` selects, and closes the gate with the
-                      |reviewer's verdict and findings on `agent-run/result`. The seat is a
-                      |cheap cross-vendor read in a read-only sandbox — it can see the change
-                      |and cannot repair it, which is the point. Read the result before the
-                      |presentation step; a failed or exhausted run surfaces through `strand
-                      |list --query stalled-subagent-gates` and is recovered with `agent retry
-                      |<run-id>`, not by closing the gate yourself.")})
+   (workflow/gate :review "Cross-vendor review of the diff" :agent
+                  :depends-on [:quality]
+                  :attributes
+                  {"workflow/action-ref" "feature-iteration.review.gate"
+                   "harness/alias" "reviewer"
+                   "harness/cwd" (fn [{:keys [cwd]}] cwd)
+                   "harness/prompt" review-prompt
+                   "workflow/instruction"
+                   (format-alpha/reflow
+                    "|Machine gate: the Harnesses agent executor spawns a tracked `reviewer` run
+                      |against the diff this round's `diff-mode` selects, and closes the gate with
+                      |the reviewer's non-blank `harness/result`. The prompt is read-only policy;
+                      |the reviewer must not modify files or repository state. Read the result
+                      |before the presentation step; a failed or exhausted run surfaces through
+                      |`stalled-agent-gates` and is recovered with `strand agent retry <run-id>`,
+                      |not by closing the gate yourself.")})
 
-    (workflow/checkpoint :present "Present the round back to the user"
-                         :depends-on [:review]
-                         :kind :human
-                         :attributes
-                         {"workflow/action-ref" "feature-iteration.present"
-                          "workflow/decision-point" "iteration-accepted"
-                          "workflow/instruction"
-                          (format-alpha/reflow
-                           "|Show the user what changed, that the quality gate passed, and what
+   (workflow/checkpoint :present "Present the round back to the user"
+                        :depends-on [:review]
+                        :kind :human
+                        :attributes
+                        {"workflow/action-ref" "feature-iteration.present"
+                         "workflow/decision-point" "iteration-accepted"
+                         "workflow/instruction"
+                         (format-alpha/reflow
+                          "|Show the user what changed, that the quality gate passed, and what
                             |the review found — including a clean review, and including any
                             |finding you disagree with and why. Name anything you left out of
                             |the agreed scope. Then hold here: accepting or iterating is the
                             |user's call, not yours.")}
-                         :choices
-                         [{:key :accepted
-                           :label "Accept"
-                           :description "The user accepts this round; the run is done."}
-                          {:key :iterate
-                           :label "Iterate"
-                           :description
-                           "The user wants another round; their feedback becomes its brief."
-                           :input {:spec ::iterate-input
-                                   :doc (str "Supply `brief`: the user's feedback, stated as"
-                                             " what the next round should achieve.")}
-                           :revise {:params {:revision true}}}])))
+                        :choices
+                        [{:key :accepted
+                          :label "Accept"
+                          :description "The user accepts this round; the run is done."}
+                         {:key :iterate
+                          :label "Iterate"
+                          :description
+                          "The user wants another round; their feedback becomes its brief."
+                          :input {:spec ::iterate-input
+                                  :doc (str "Supply `brief`: the user's feedback, stated as"
+                                            " what the next round should achieve.")}
+                          :revise {:params {:revision true}}}])))

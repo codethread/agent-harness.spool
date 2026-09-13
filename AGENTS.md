@@ -16,10 +16,13 @@
 - Shared-spool publishing, activation, override, and test conventions live in
   `../skein-src/docs/spools/writing-shared-spools.md`.
 - Working with users: claim a kanban card first; run `strand prime kanban`.
-- Delegating: run `strand prime agent`; use tracked agent runs, not
-  harness-native subagents. List seats with `strand agent harnesses`; shared
-  routing policy lives in `ct.spools.codethread.agents`, with this workspace's
-  delegation contracts in `.millstrand/config/delegation_contracts.clj`.
+- Delegating: run `strand prime agent`; use tracked Harnesses agent runs, not
+  native workflow subagents. List seats with `strand agent list`; shared
+  routing policy and reviewer lenses live in the Codethread bootstrap. Workflow
+  gates use `:agent`, and stalled runs are retried with `strand agent retry`.
+- This repository is a deprecated implementation archive. Keep its shipped
+  library source and historical tests intact; the `.millstrand` workspace must
+  activate Harnesses and shared Codethread config instead of the old stack.
 - Recover runs with `strand list --query agent-failures` and
   `strand agent logs <run-id> --tail 80`.
 

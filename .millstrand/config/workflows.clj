@@ -31,7 +31,7 @@
   [id]
   (let [stem (name id)]
     (load-file (str (io/file definitions-dir
-                              (str (str/replace stem "-" "_") ".clj"))))))
+                             (str (str/replace stem "-" "_") ".clj"))))))
 
 (load-definition! :feature-iteration)
 (workflow/use-workflow! workflows.feature-iteration/feature-iteration)
